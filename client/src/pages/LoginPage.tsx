@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
+import axios from "axios";
 import { useAuth } from "../context/AuthContext";
 
 export function LoginPage() {
@@ -36,8 +37,20 @@ export function LoginPage() {
       });
 
       navigate("/dashboard", { replace: true });
-    } catch {
-      setError("Could not sign in. Please check details and retry.");
+    } catch (err) {
+      if (axios.isAxiosError(err)) {
+        if (err.response?.data?.message) {
+          setError(String(err.response.data.message));
+        } else if (err.request) {
+          setError(
+            "Unable to reach server. Check frontend VITE_API_BASE_URL and backend deployment."
+          );
+        } else {
+          setError("Could not sign in. Please check details and retry.");
+        }
+      } else {
+        setError("Could not sign in. Please check details and retry.");
+      }
     } finally {
       setSubmitting(false);
     }
