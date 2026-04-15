@@ -24,6 +24,11 @@ const orderSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
+    deliveryAddress: {
+      type: String,
+      trim: true,
+      default: "",
+    },
     note: {
       type: String,
       trim: true,
@@ -40,11 +45,27 @@ const orderSchema = new mongoose.Schema(
       min: 1,
       default: 1,
     },
+    deliveryCharge: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    // Selected variant values submitted by customer: { "Size": "M", "Color": "Red" }
+    selectedVariants: {
+      type: Map,
+      of: String,
+      default: {},
+    },
     paymentStatus: {
       type: String,
       enum: ["pending", "paid", "confirmed", "cancelled"],
       default: "pending",
       index: true,
+    },
+    paymentScreenshotUrl: {
+      type: String,
+      trim: true,
+      default: "",
     },
   },
   {

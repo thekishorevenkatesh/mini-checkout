@@ -3,6 +3,8 @@ const jwt = require("jsonwebtoken");
 const Seller = require("../models/Seller");
 const auth = require("../middleware/auth");
 const { slugify } = require("../utils/slug");
+const { generateOtp } = require("../utils/otp");
+// const { sendOtpEmail } = require("../utils/mailer"); // Email disabled for demo
 
 const router = express.Router();
 
@@ -31,61 +33,168 @@ async function createUniqueSellerSlug(businessName, ignoreSellerId = null) {
   }
 }
 
-router.post("/login", async (req, res) => {
+// ─── POST /auth/send-otp ───────────────────────────────────────────────────
+// Accepts phone or email. Generates OTP, sends via email (if email provided).
+// For phone-only accounts without email, OTP is returned in response (dev mode).
+router.post("/send-otp", async (req, res) => {
   try {
-    const { businessName, phone, upiId } = req.body;
+    const { phone, email } = req.body;
 
-    if (!phone) {
-      return res.status(400).json({ message: "Phone number is required" });
+    if (!phone && !email) {
+      return res
+        .status(400)
+        .json({ message: "Phone or email is required" });
     }
 
-    let seller = await Seller.findOne({ phone: String(phone).trim() });
+    const query = phone
+      ? { phone: String(phone).trim() }
+      : { businessEmail: String(email).trim().toLowerCase() };
 
-    if (!seller) {
-      if (!businessName) {
-        return res
-          .status(400)
-          .json({ message: "Business name is required for new seller" });
+    let seller = await Seller.findOne(query);
+    const isNew = !seller;
+
+    if (isNew) {
+      // Pre-create a placeholder so we can attach the OTP
+      if (!phone) {
+        return res.status(404).json({
+          message: "No account found with this email. Please register first.",
+        });
       }
-
-      seller = await Seller.create({
-        slug: await createUniqueSellerSlug(String(businessName).trim()),
-        businessName: String(businessName).trim(),
+      seller = new Seller({
+        slug: await createUniqueSellerSlug(String(phone).trim()),
+        businessName: String(phone).trim(), // temp — will be updated on register
         phone: String(phone).trim(),
-        upiId: upiId ? String(upiId).trim() : "",
       });
-    } else {
-      if (businessName) {
-        seller.businessName = String(businessName).trim();
-      }
-
-      if (typeof upiId === "string") {
-        seller.upiId = upiId.trim();
-      }
-
-      if (!seller.slug) {
-        seller.slug = await createUniqueSellerSlug(
-          seller.businessName,
-          seller._id.toString()
-        );
-      }
-
-      await seller.save();
     }
 
-    const token = issueToken(seller._id.toString());
+    const otp = generateOtp();
+    // Store plain OTP in DB for demo purposes (visible in MongoDB)
+    seller.otp = otp;
+    seller.otpExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 min
+    await seller.save();
+
+    // Email sending disabled for demo — OTP is returned in response & stored in DB
+    // const targetEmail = email || seller.businessEmail;
+    // if (targetEmail) {
+    //   await sendOtpEmail(targetEmail, otp, seller.businessName);
+    // }
+
     return res.json({
-      token,
-      seller,
+      message: "OTP generated (demo mode — email disabled)",
+      isNew,
+      hasEmail: false,
+      otp, // visible for demo; remove this + re-enable email in production
     });
   } catch (error) {
-    return res.status(500).json({ message: "Unable to login seller" });
+    console.error("[send-otp error]", error);
+    return res.status(500).json({
+      message: "Could not send OTP",
+      detail: error?.message || String(error), // dev-only: remove before going to prod
+      code: error?.code,
+    });
   }
 });
 
+// ─── POST /auth/verify-otp ────────────────────────────────────────────────
+router.post("/verify-otp", async (req, res) => {
+  try {
+    const { phone, email, otp } = req.body;
+
+    if (!otp) {
+      return res.status(400).json({ message: "OTP is required" });
+    }
+
+    const query = phone
+      ? { phone: String(phone).trim() }
+      : { businessEmail: String(email).trim().toLowerCase() };
+
+    const seller = await Seller.findOne(query);
+
+    if (!seller || !seller.otp || !seller.otpExpiry) {
+      return res
+        .status(400)
+        .json({ message: "No OTP requested. Please request a new OTP." });
+    }
+
+    if (seller.otpExpiry < new Date()) {
+      return res
+        .status(400)
+        .json({ message: "OTP expired. Please request a new one." });
+    }
+
+    // Plain comparison for demo (no hashing)
+    if (String(otp).trim() !== String(seller.otp).trim()) {
+      return res.status(400).json({ message: "Invalid OTP." });
+    }
+
+    // Clear OTP
+    seller.otp = null;
+    seller.otpExpiry = null;
+    await seller.save();
+
+    const isProfileComplete = Boolean(
+      seller.businessName && seller.upiId && seller.slug &&
+      seller.businessName !== seller.phone // not a placeholder
+    );
+
+    const token = issueToken(seller._id.toString());
+    return res.json({ token, seller, isProfileComplete });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: "Could not verify OTP" });
+  }
+});
+
+// ─── POST /auth/register ──────────────────────────────────────────────────
+// Called after OTP verification for new sellers to complete their profile
+router.post("/register", auth, async (req, res) => {
+  try {
+    const {
+      businessName,
+      businessEmail,
+      businessAddress,
+      businessGST,
+      upiId,
+      businessLogo,
+      whatsappNumber,
+      callNumber,
+    } = req.body;
+
+    if (!businessName) {
+      return res.status(400).json({ message: "Business name is required" });
+    }
+
+    const seller = await Seller.findById(req.sellerId);
+    if (!seller) {
+      return res.status(404).json({ message: "Seller not found" });
+    }
+
+    seller.businessName = String(businessName).trim();
+    seller.slug = await createUniqueSellerSlug(
+      seller.businessName,
+      seller._id.toString()
+    );
+
+    if (businessEmail) seller.businessEmail = String(businessEmail).trim().toLowerCase();
+    if (businessAddress) seller.businessAddress = String(businessAddress).trim();
+    if (businessGST) seller.businessGST = String(businessGST).trim();
+    if (upiId) seller.upiId = String(upiId).trim();
+    if (businessLogo) seller.businessLogo = String(businessLogo).trim();
+    if (whatsappNumber) seller.whatsappNumber = String(whatsappNumber).trim();
+    if (callNumber) seller.callNumber = String(callNumber).trim();
+
+    await seller.save();
+    return res.json({ seller });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: "Could not complete registration" });
+  }
+});
+
+// ─── GET /auth/me ─────────────────────────────────────────────────────────
 router.get("/me", auth, async (req, res) => {
   try {
-    const seller = await Seller.findById(req.sellerId);
+    const seller = await Seller.findById(req.sellerId).select("-otp -otpExpiry");
 
     if (!seller) {
       return res.status(404).json({ message: "Seller not found" });
@@ -105,26 +214,37 @@ router.get("/me", auth, async (req, res) => {
   }
 });
 
+// ─── PUT /auth/me ─────────────────────────────────────────────────────────
 router.put("/me", auth, async (req, res) => {
   try {
-    const { businessName, upiId, profileImageUrl } = req.body;
-    const seller = await Seller.findById(req.sellerId);
+    const {
+      businessName,
+      businessEmail,
+      businessAddress,
+      businessGST,
+      upiId,
+      profileImageUrl,
+      businessLogo,
+      favicon,
+      whatsappNumber,
+      callNumber,
+    } = req.body;
 
+    const seller = await Seller.findById(req.sellerId);
     if (!seller) {
       return res.status(404).json({ message: "Seller not found" });
     }
 
-    if (businessName) {
-      seller.businessName = String(businessName).trim();
-    }
-
-    if (typeof upiId === "string") {
-      seller.upiId = upiId.trim();
-    }
-
-    if (typeof profileImageUrl === "string") {
-      seller.profileImageUrl = profileImageUrl.trim();
-    }
+    if (businessName) seller.businessName = String(businessName).trim();
+    if (businessEmail) seller.businessEmail = String(businessEmail).trim().toLowerCase();
+    if (businessAddress !== undefined) seller.businessAddress = String(businessAddress).trim();
+    if (businessGST !== undefined) seller.businessGST = String(businessGST).trim();
+    if (typeof upiId === "string") seller.upiId = upiId.trim();
+    if (typeof profileImageUrl === "string") seller.profileImageUrl = profileImageUrl.trim();
+    if (typeof businessLogo === "string") seller.businessLogo = businessLogo.trim();
+    if (typeof favicon === "string") seller.favicon = favicon.trim();
+    if (typeof whatsappNumber === "string") seller.whatsappNumber = whatsappNumber.trim();
+    if (typeof callNumber === "string") seller.callNumber = callNumber.trim();
 
     if (!seller.slug) {
       seller.slug = await createUniqueSellerSlug(

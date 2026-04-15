@@ -1,5 +1,13 @@
 const mongoose = require("mongoose");
 
+const variantSchema = new mongoose.Schema(
+  {
+    label: { type: String, trim: true, required: true }, // e.g. "Size", "Color"
+    options: { type: [String], default: [] },            // e.g. ["S","M","L"]
+  },
+  { _id: false }
+);
+
 const productSchema = new mongoose.Schema(
   {
     seller: {
@@ -12,6 +20,11 @@ const productSchema = new mongoose.Schema(
       type: String,
       required: true,
       trim: true,
+    },
+    category: {
+      type: String,
+      trim: true,
+      default: "",
     },
     description: {
       type: String,
@@ -28,10 +41,20 @@ const productSchema = new mongoose.Schema(
       trim: true,
       default: "",
     },
+    mrp: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    // "price" kept for backward compat — represents the selling price
     price: {
       type: Number,
       required: true,
       min: 1,
+    },
+    variants: {
+      type: [variantSchema],
+      default: [],
     },
     isActive: {
       type: Boolean,

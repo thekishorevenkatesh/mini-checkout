@@ -9,23 +9,48 @@ import {
 import { api, setApiToken } from "../api/client";
 import type { Seller } from "../types";
 
-interface LoginInput {
+interface SendOtpInput {
+  phone?: string;
+  email?: string;
+}
+
+interface VerifyOtpInput {
+  phone?: string;
+  email?: string;
+  otp: string;
+}
+
+interface RegisterInput {
   businessName: string;
-  phone: string;
-  upiId: string;
+  businessEmail?: string;
+  businessAddress?: string;
+  businessGST?: string;
+  upiId?: string;
+  businessLogo?: string;
+  whatsappNumber?: string;
+  callNumber?: string;
 }
 
 interface UpdateProfileInput {
   businessName?: string;
+  businessEmail?: string;
+  businessAddress?: string;
+  businessGST?: string;
   upiId?: string;
   profileImageUrl?: string;
+  businessLogo?: string;
+  favicon?: string;
+  whatsappNumber?: string;
+  callNumber?: string;
 }
 
 interface AuthContextShape {
   seller: Seller | null;
   token: string | null;
   loading: boolean;
-  login: (input: LoginInput) => Promise<void>;
+  sendOtp: (input: SendOtpInput) => Promise<{ isNew: boolean; hasEmail: boolean; otp?: string }>;
+  verifyOtp: (input: VerifyOtpInput) => Promise<{ isProfileComplete: boolean }>;
+  register: (input: RegisterInput) => Promise<void>;
   logout: () => void;
   refreshProfile: () => Promise<void>;
   updateProfile: (input: UpdateProfileInput) => Promise<void>;
@@ -73,16 +98,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     void bootAuth();
   }, [token]);
 
-  async function login(input: LoginInput) {
-    const response = await api.post<{ token: string; seller: Seller }>(
-      "/auth/login",
-      input
-    );
+  async function sendOtp(input: SendOtpInput) {
+    const response = await api.post<{
+      isNew: boolean;
+      hasEmail: boolean;
+      otp?: string;
+    }>("/auth/send-otp", input);
+    return response.data;
+  }
 
-    setToken(response.data.token);
+  async function verifyOtp(input: VerifyOtpInput) {
+    const response = await api.post<{
+      token: string;
+      seller: Seller;
+      isProfileComplete: boolean;
+    }>("/auth/verify-otp", input);
+
+    const { token: newToken, seller: newSeller, isProfileComplete } = response.data;
+    setToken(newToken);
+    setSeller(newSeller);
+    setApiToken(newToken);
+    localStorage.setItem(TOKEN_KEY, newToken);
+    localStorage.setItem(SELLER_KEY, JSON.stringify(newSeller));
+    return { isProfileComplete };
+  }
+
+  async function register(input: RegisterInput) {
+    const response = await api.post<{ seller: Seller }>("/auth/register", input);
     setSeller(response.data.seller);
-    setApiToken(response.data.token);
-    localStorage.setItem(TOKEN_KEY, response.data.token);
     localStorage.setItem(SELLER_KEY, JSON.stringify(response.data.seller));
   }
 
@@ -111,11 +154,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       seller,
       token,
       loading,
-      login,
+      sendOtp,
+      verifyOtp,
+      register,
       logout,
       refreshProfile,
       updateProfile,
     }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [loading, seller, token]
   );
 
