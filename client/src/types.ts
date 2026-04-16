@@ -32,6 +32,7 @@ export interface Seller {
   socialLinks: SocialLink[];
   banners: Banner[];
   categories: string[];
+  defaultDeliveryCharge: number;
 }
 
 export interface Product {

@@ -79,6 +79,8 @@ export function PublicStorePage() {
         const r = await api.get<{ seller: Seller; products: Product[] }>(`/products/public/${sellerSlug}`);
         setSeller(r.data.seller);
         setProducts(r.data.products);
+        // Initialise delivery charge from seller's store setting
+        setDeliveryCharge(r.data.seller.defaultDeliveryCharge ?? 0);
       } catch { setError("Seller store unavailable."); }
       finally { setLoading(false); }
     }
@@ -206,15 +208,17 @@ export function PublicStorePage() {
     return (
       <main className="mx-auto flex min-h-screen w-full max-w-4xl items-center justify-center px-4 py-10">
         <div className="rounded-3xl border border-rose-200 bg-white p-8 text-center shadow-card">
+          <p className="mb-3 text-xs font-bold uppercase tracking-widest text-teal-600">🛍️ MyDukan</p>
           <h1 className="font-heading text-2xl font-bold text-slate-900">Store Not Found</h1>
           <p className="mt-2 text-sm text-slate-600">{error || "This seller link is unavailable."}</p>
-          <Link to="/login" className="mt-5 inline-flex rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white">Seller Login</Link>
+          <Link to="/login" className="mt-5 inline-flex rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white">Sign In to MyDukan</Link>
         </div>
       </main>
     );
   }
 
   return (
+    <>
     <main className="mx-auto grid min-h-screen w-full max-w-7xl gap-6 px-3 py-5 sm:px-4 sm:py-8 lg:grid-cols-3">
 
       {/* ── LEFT: Store + Products ─────────────────────────── */}
@@ -226,7 +230,7 @@ export function PublicStorePage() {
               <img src={seller.businessLogo} alt="logo" className="h-16 w-16 rounded-2xl object-contain border border-slate-200" />
             )}
             <div>
-              <p className="inline-flex rounded-full border border-teal-200 bg-teal-50 px-3 py-0.5 text-xs font-bold uppercase tracking-[0.18em] text-teal-700">Seller Store</p>
+              <p className="inline-flex rounded-full border border-teal-200 bg-teal-50 px-3 py-0.5 text-xs font-bold uppercase tracking-[0.18em] text-teal-700">🛍️ MyDukan</p>
               <h1 className="mt-1 font-heading text-2xl font-bold text-slate-900 sm:text-3xl">{seller.businessName}</h1>
               {seller.businessAddress && <p className="text-xs text-slate-500 mt-0.5">📍 {seller.businessAddress}</p>}
             </div>
@@ -374,10 +378,7 @@ export function PublicStorePage() {
               </div>
               <div className="flex items-center justify-between text-sm text-slate-600">
                 <span>Delivery charge</span>
-                <input type="number" min={0}
-                  className="w-20 rounded-lg border border-slate-200 px-2 py-1 text-right text-sm outline-none"
-                  value={deliveryCharge}
-                  onChange={e => setDeliveryCharge(Math.max(0, Number(e.target.value)))} />
+                <span className="font-semibold text-slate-800">₹{deliveryCharge}</span>
               </div>
               <div className="flex justify-between font-bold text-slate-900 pt-1 border-t border-slate-200 text-sm">
                 <span>Total Payable</span><span>₹{grandTotal}</span>
@@ -456,5 +457,9 @@ export function PublicStorePage() {
         )}
       </section>
     </main>
+    <footer className="py-4 text-center text-xs text-slate-400">
+      Powered by <span className="font-semibold text-slate-500">🛍️ MyDukan</span>
+    </footer>
+    </>
   );
 }

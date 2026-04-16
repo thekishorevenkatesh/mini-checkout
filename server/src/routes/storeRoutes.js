@@ -32,6 +32,7 @@ router.put("/options", auth, async (req, res) => {
       businessLogo,
       favicon,
       categories,
+      defaultDeliveryCharge,
     } = req.body;
 
     const seller = await Seller.findById(req.sellerId);
@@ -48,6 +49,8 @@ router.put("/options", auth, async (req, res) => {
       seller.businessLogo = businessLogo.trim();
     if (typeof favicon === "string") seller.favicon = favicon.trim();
     if (Array.isArray(categories)) seller.categories = categories;
+    if (typeof defaultDeliveryCharge === "number" && defaultDeliveryCharge >= 0)
+      seller.defaultDeliveryCharge = defaultDeliveryCharge;
 
     await seller.save();
     return res.json({ seller });

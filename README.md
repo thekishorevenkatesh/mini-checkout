@@ -1,102 +1,157 @@
-# Vendor Link Checkout MVP
+# MyDukan 🛍️
 
-Vendor-first demo app for small service providers and home businesses.
+> **Your Store. Your Link. Your Sales.**
 
-The MVP flow:
-- Seller logs in with phone number
-- Seller adds multiple products and gets one store link
-- Customer opens store link, selects product, pays via UPI, and submits order
-- Seller tracks orders and manually updates payment status
+MyDukan is a free platform for small sellers and home businesses to create their own online store in minutes — no technical knowledge needed. Share your store link on WhatsApp, accept UPI payments, and manage orders from a clean dashboard.
 
-## Stack
+---
 
-- Frontend: React + Tailwind + Vite + TypeScript
-- Backend: Node.js + Express + MongoDB (Mongoose)
+## ✨ What MyDukan Does
 
-## Project Structure
+| For Sellers | For Customers |
+|---|---|
+| Register with phone number | Browse products on a public store link |
+| Add products with images, variants, MRP & price | Add to cart, select variants, pay via UPI |
+| Get a shareable store link (e.g. `/store/my-shop`) | Submit payment screenshot as proof |
+| Manage orders — track status, view payment proof | — |
+| Customise store: banners, social links, delivery charge | — |
+| View sales reports & export CSV | — |
 
-- `client` - responsive seller dashboard and public checkout page
-- `server` - auth, products, orders API
+---
 
-## Run Locally
+## 🛠️ Stack
 
-1. Install dependencies
+| Layer | Tech |
+|---|---|
+| Frontend | React 19 + TypeScript + Tailwind CSS + Vite |
+| Backend | Node.js + Express 5 + MongoDB (Mongoose) |
+| Auth | Phone OTP (demo mode) → JWT (7-day) |
+| Payments | UPI deep-link + QR code |
+| Images | ImgBB free API (optional) |
+| Deploy | Vercel (two projects — client SPA + server serverless) |
+
+---
+
+## 📁 Project Structure
+
+```
+mydukan/
+├── client/    ← Vite + React SPA
+│   └── src/
+│       ├── pages/LoginPage.tsx         ← OTP login + registration
+│       ├── pages/DashboardPage.tsx     ← Seller dashboard (6 tabs)
+│       └── pages/PublicStorePage.tsx   ← Customer store + checkout
+└── server/    ← Express API
+    └── src/
+        ├── models/   Seller, Product, Order
+        ├── routes/   auth, products, orders, store
+        └── utils/    otp, slug, mailer
+```
+
+---
+
+## 🚀 Run Locally
+
+### 1. Install dependencies
 ```bash
 cd client && npm install
 cd ../server && npm install
 ```
 
-2. Configure backend environment
+### 2. Configure server
 ```bash
 cd server
 copy .env.example .env
+# Edit .env — set MONGO_URI and JWT_SECRET
 ```
 
-3. Start MongoDB locally
-- Example URI in `.env`: `mongodb://127.0.0.1:27017/vendor_mvp`
-
-4. Run backend
-```bash
-cd server
-npm run dev
-```
-
-5. Configure frontend environment
+### 3. Configure client
 ```bash
 cd client
 copy .env.example .env
+# Optional: add VITE_IMGBB_API_KEY for image uploads
 ```
 
-6. Run frontend
+### 4. Start
 ```bash
-cd client
-npm run dev
+# Terminal 1 — API server
+cd server && npm run dev
+
+# Terminal 2 — React app
+cd client && npm run dev
 ```
 
-## Deploy on Vercel (Frontend + Backend)
+### Demo URLs
+| Page | URL |
+|---|---|
+| Seller Login / Register | `http://localhost:5173/login` |
+| Seller Dashboard | `http://localhost:5173/dashboard` |
+| Public Store | `http://localhost:5173/store/<seller-slug>` |
 
-Deploy as two Vercel projects from the same repo:
+---
 
-### 1) Backend Project (Vercel Serverless)
+## 🔑 Environment Variables
 
-- In Vercel, create a new project and set **Root Directory** to `server`.
-- Framework preset: `Other`.
-- Build command: leave default.
-- Output directory: leave empty.
-- Add environment variables:
-  - `MONGO_URI` = your MongoDB Atlas connection string
-  - `JWT_SECRET` = strong secret string
-- Deploy.
+### `server/.env`
+```env
+PORT=5000
+MONGO_URI=mongodb://...          # MongoDB Atlas or local
+JWT_SECRET=your_strong_secret
 
-Backend uses:
-- `server/api/index.js` as the serverless entry.
-- `server/vercel.json` to route all paths to the API handler.
+# Optional — enable email OTP (currently in demo mode)
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=your@gmail.com
+SMTP_PASS=xxxx xxxx xxxx xxxx   # Gmail App Password
+```
 
-After deploy, backend base URL will be like:
-- `https://<your-backend-project>.vercel.app`
+### `client/.env`
+```env
+VITE_API_BASE_URL=/api           # Dev (uses Vite proxy)
+# VITE_API_BASE_URL=https://your-backend.vercel.app/api  ← Production
 
-API examples:
-- `https://<your-backend-project>.vercel.app/api/health`
-- `https://<your-backend-project>.vercel.app/api/auth/login`
+# Optional — free image hosting (get key at https://api.imgbb.com)
+VITE_IMGBB_API_KEY=your_key_here
+```
 
-### 2) Frontend Project (Vite SPA)
+---
 
-- Create another Vercel project and set **Root Directory** to `client`.
-- Framework preset: `Vite`.
-- Add environment variable:
-  - `VITE_API_BASE_URL` = `https://<your-backend-project>.vercel.app/api`
-- Deploy.
+## ☁️ Deploy on Vercel
 
-Frontend routing for React Router is handled by:
-- `client/vercel.json`
+MyDukan deploys as **two separate Vercel projects** from the same repo.
 
-### 3) Important
+### Backend (Node.js Serverless)
+1. New Vercel project → Root Directory: `server`
+2. Framework preset: **Other**
+3. Environment variables: `MONGO_URI`, `JWT_SECRET`
+4. Deploy → note your backend URL
 
-- If you redeploy backend with a new URL, update `VITE_API_BASE_URL` in frontend project env and redeploy frontend.
-- For production, use MongoDB Atlas (not local MongoDB URI).
+### Frontend (Vite SPA)
+1. New Vercel project → Root Directory: `client`
+2. Framework preset: **Vite**
+3. Environment variable: `VITE_API_BASE_URL=https://your-backend.vercel.app/api`
+4. Deploy
 
-## Demo URLs
+---
 
-- Seller login: `http://localhost:5173/login`
-- Dashboard: `http://localhost:5173/dashboard`
-- Public store: generated as `http://localhost:5173/store/<seller-slug>`
+## 📦 Features at a Glance
+
+- ✅ Phone OTP login & new seller registration
+- ✅ Product management — add, edit, toggle active, delete
+- ✅ Product variants (Size, Color, etc.)
+- ✅ MRP + Selling price with discount badge
+- ✅ Product categories with filter tabs on store
+- ✅ Store customisation — logo, favicon, banners (carousel), social links
+- ✅ Seller-controlled delivery charge (fixed for customers)
+- ✅ UPI QR code + deep-link payment
+- ✅ Customer submits payment screenshot URL
+- ✅ Seller updates order status (pending → paid → confirmed → cancelled)
+- ✅ Real-time order refresh (auto-polls every 30s on Orders tab)
+- ✅ Sales report — 7d / 30d, top products, revenue
+- ✅ CSV order export
+- ✅ Image upload via ImgBB (free)
+- ✅ Fully responsive (mobile + desktop)
+
+---
+
+*MyDukan — Apni Dukan, Online.* 🛍️

@@ -94,6 +94,11 @@ const sellerSchema = new mongoose.Schema(
       type: [String],
       default: [],
     },
+    defaultDeliveryCharge: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
     // OTP fields (transient — cleared after verification)
     otp: {
       type: String,

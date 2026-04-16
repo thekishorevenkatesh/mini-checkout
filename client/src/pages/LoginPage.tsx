@@ -158,22 +158,23 @@ export function LoginPage() {
   const currentStepIndex = activeSteps.findIndex((s) => s.key === step);
 
   return (
+    <>
     <main className="mx-auto grid min-h-screen w-full max-w-6xl items-center gap-8 px-4 py-8 sm:py-10 lg:grid-cols-2">
 
       {/* ── Left: Hero ─────────────────────────────────────────────── */}
       <section className="space-y-5 text-center lg:space-y-6 lg:text-left">
         <p className="inline-flex rounded-full border border-teal-200 bg-teal-50 px-3 py-1 text-xs font-bold uppercase tracking-[0.18em] text-teal-700">
-          Vendor First MVP
+          🛍️ MyDukan
         </p>
         <h1 className="font-heading text-3xl font-bold leading-tight text-slate-900 sm:text-4xl lg:text-5xl">
           {mode === "login"
-            ? "Welcome back. Sign in to your store."
-            : "Build your mini store and get selling today."}
+            ? "Welcome back to MyDukan."
+            : "Open your Dukan and start selling today."}
         </h1>
         <p className="mx-auto max-w-xl text-base text-slate-600 sm:text-lg lg:mx-0">
           {mode === "login"
-            ? "Enter your registered phone, verify with OTP, and jump straight into your dashboard."
-            : "Register your phone, fill in your business info, verify with OTP, and share your store link on WhatsApp — all in minutes."}
+            ? "Enter your registered phone, verify with OTP, and jump straight into your Dukan dashboard."
+            : "Register your phone, fill in your business details, verify with OTP, and share your MyDukan link on WhatsApp — all in under 2 minutes."}
         </p>
 
         {/* Step indicators */}
@@ -237,7 +238,7 @@ export function LoginPage() {
         {step === "contact" && (
           <>
             <h2 className="font-heading text-2xl font-bold text-slate-900">
-              {mode === "login" ? "Seller Login" : "Create Your Store"}
+              {mode === "login" ? "Sign In to Your Dukan" : "Create Your Dukan"}
             </h2>
             <p className="mt-1.5 text-sm text-slate-500">
               {mode === "login"
@@ -409,13 +410,13 @@ export function LoginPage() {
 
               {devOtp && (
                 <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 space-y-1">
-                  <p className="text-xs font-bold text-amber-800">🔑 Demo Mode — Email Disabled</p>
+                  <p className="text-xs font-bold text-amber-800">🛍️ MyDukan — Demo Mode</p>
                   <p className="text-xs text-amber-700">
                     Your OTP:{" "}
                     <strong className="text-lg tracking-widest">{devOtp}</strong>
                   </p>
                   <p className="text-xs text-amber-600">
-                    Enable SMTP in server/.env to send via email.
+                    Enable SMTP in server/.env to send OTP via email.
                   </p>
                 </div>
               )}
@@ -568,5 +569,9 @@ export function LoginPage() {
         )}
       </section>
     </main>
+    <footer className="py-6 text-center text-xs text-slate-400">
+      <span className="font-semibold text-slate-500">🛍️ MyDukan</span> — Your Store. Your Link. Your Sales.
+    </footer>
+    </>
   );
 }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { api } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import type { Order, OrderStatus, Product, SocialLink, Banner } from "../types";
@@ -25,6 +25,83 @@ const statusClasses: Record<OrderStatus, string> = {
 
 const SOCIAL_PLATFORMS = ["Instagram", "Facebook", "Twitter/X", "YouTube", "LinkedIn", "Website", "Other"];
 
+const IMGBB_KEY = import.meta.env.VITE_IMGBB_API_KEY as string | undefined;
+
+// ─── Reusable image upload field ─────────────────────────────────────────────
+function ImageUploadField({
+  value,
+  onChange,
+  placeholder = "https://...",
+}: {
+  value: string;
+  onChange: (url: string) => void;
+  placeholder?: string;
+}) {
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState("");
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!IMGBB_KEY) {
+      setUploadError("Add VITE_IMGBB_API_KEY to client/.env to enable uploads.");
+      return;
+    }
+    setUploading(true);
+    setUploadError("");
+    try {
+      const form = new FormData();
+      form.append("image", file);
+      const res = await fetch(`https://api.imgbb.com/1/upload?key=${IMGBB_KEY}`, {
+        method: "POST",
+        body: form,
+      });
+      const data = await res.json() as { success: boolean; data?: { url: string } };
+      if (data.success && data.data?.url) {
+        onChange(data.data.url);
+      } else {
+        setUploadError("Upload failed. Check your ImgBB API key.");
+      }
+    } catch {
+      setUploadError("Upload failed. Check your internet connection.");
+    } finally {
+      setUploading(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  }
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex gap-2">
+        <input
+          className="flex-1 rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400"
+          placeholder={placeholder}
+          value={value}
+          onChange={e => onChange(e.target.value)}
+        />
+        <label
+          className={`flex cursor-pointer items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 ${uploading ? "pointer-events-none opacity-50" : ""}`}
+        >
+          {uploading ? "⏳" : "📁"} {uploading ? "Uploading…" : "Upload"}
+          <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
+        </label>
+      </div>
+      {uploadError && <p className="text-xs text-rose-600">{uploadError}</p>}
+    </div>
+  );
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+function timeAgo(date: Date | null): string {
+  if (!date) return "";
+  const secs = Math.floor((Date.now() - date.getTime()) / 1000);
+  if (secs < 5) return "just now";
+  if (secs < 60) return `${secs}s ago`;
+  return `${Math.floor(secs / 60)}m ago`;
+}
+
+// ─── DashboardPage ────────────────────────────────────────────────────────────
 export function DashboardPage() {
   const { seller, logout, updateProfile, refreshProfile } = useAuth();
 
@@ -35,9 +112,10 @@ export function DashboardPage() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
-  // ── Product form
+  // ── Product form + edit mode
   const [productForm, setProductForm] = useState<ProductForm>(emptyProductForm);
-  const [isCreatingProduct, setIsCreatingProduct] = useState(false);
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [isSubmittingProduct, setIsSubmittingProduct] = useState(false);
 
   // ── Profile form
   const [profileName, setProfileName] = useState(seller?.businessName || "");
@@ -54,6 +132,7 @@ export function DashboardPage() {
   const [storeFavicon, setStoreFavicon] = useState(seller?.favicon || "");
   const [storeWhatsapp, setStoreWhatsapp] = useState(seller?.whatsappNumber || "");
   const [storeCall, setStoreCall] = useState(seller?.callNumber || "");
+  const [storeDeliveryCharge, setStoreDeliveryCharge] = useState(seller?.defaultDeliveryCharge ?? 0);
   const [banners, setBanners] = useState<Banner[]>(seller?.banners || []);
   const [newBannerUrl, setNewBannerUrl] = useState("");
   const [newBannerTitle, setNewBannerTitle] = useState("");
@@ -68,8 +147,16 @@ export function DashboardPage() {
 
   // ── Reports
   const [reportDays, setReportDays] = useState(30);
-  const [report, setReport] = useState<{ totalOrders: number; totalRevenue: number; topProducts: { title: string; unitsSold: number; revenue: number }[] } | null>(null);
+  const [report, setReport] = useState<{
+    totalOrders: number; totalRevenue: number;
+    topProducts: { title: string; unitsSold: number; revenue: number }[];
+  } | null>(null);
   const [loadingReport, setLoadingReport] = useState(false);
+
+  // ── Real-time order refresh
+  const ordersIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [ordersLastUpdated, setOrdersLastUpdated] = useState<Date | null>(null);
+  const [, forceTickUpdate] = useState(0); // triggers re-render for "X ago" display
 
   const [copyFeedback, setCopyFeedback] = useState("");
 
@@ -87,6 +174,7 @@ export function DashboardPage() {
     setStoreFavicon(seller.favicon || "");
     setStoreWhatsapp(seller.whatsappNumber || "");
     setStoreCall(seller.callNumber || "");
+    setStoreDeliveryCharge(seller.defaultDeliveryCharge ?? 0);
     setBanners(seller.banners || []);
     setSocialLinks(seller.socialLinks || []);
     setCategories(seller.categories || []);
@@ -101,16 +189,41 @@ export function DashboardPage() {
       ]);
       setProducts(pr.data.products);
       setOrders(or.data.orders);
+      setOrdersLastUpdated(new Date());
     } catch { setError("Could not load dashboard data."); }
     finally { setLoading(false); }
   }
 
   useEffect(() => { void loadData(); }, []);
 
+  // ── Auto-refresh orders every 30s when on orders tab
+  useEffect(() => {
+    if (tab === "orders") {
+      // Refresh once immediately when switching to tab
+      void loadData();
+      ordersIntervalRef.current = setInterval(() => void loadData(), 30_000);
+      // Tick for "X ago" label every 5s
+      const tickInterval = setInterval(() => forceTickUpdate(n => n + 1), 5_000);
+      return () => {
+        clearInterval(ordersIntervalRef.current!);
+        clearInterval(tickInterval);
+        ordersIntervalRef.current = null;
+      };
+    }
+    // Clear interval when leaving orders tab
+    if (ordersIntervalRef.current) {
+      clearInterval(ordersIntervalRef.current);
+      ordersIntervalRef.current = null;
+    }
+  }, [tab]);
+
   async function loadReport() {
     setLoadingReport(true);
     try {
-      const r = await api.get<{ totalOrders: number; totalRevenue: number; topProducts: { title: string; unitsSold: number; revenue: number }[] }>(`/orders/my/report?days=${reportDays}`);
+      const r = await api.get<{
+        totalOrders: number; totalRevenue: number;
+        topProducts: { title: string; unitsSold: number; revenue: number }[];
+      }>(`/orders/my/report?days=${reportDays}`);
       setReport(r.data);
     } catch { setError("Could not load report."); }
     finally { setLoadingReport(false); }
@@ -149,7 +262,12 @@ export function DashboardPage() {
   async function handleProfileSave(e: FormEvent) {
     e.preventDefault(); setIsSavingProfile(true); setError(""); setSuccess("");
     try {
-      await updateProfile({ businessName: profileName.trim(), businessEmail: profileEmail.trim(), upiId: profileUpi.trim(), businessAddress: profileAddress.trim(), businessGST: profileGST.trim(), businessLogo: profileLogo.trim(), favicon: profileFavicon.trim() });
+      await updateProfile({
+        businessName: profileName.trim(), businessEmail: profileEmail.trim(),
+        upiId: profileUpi.trim(), businessAddress: profileAddress.trim(),
+        businessGST: profileGST.trim(), businessLogo: profileLogo.trim(),
+        favicon: profileFavicon.trim(),
+      });
       setSuccess("Profile saved.");
     } catch { setError("Could not save profile."); }
     finally { setIsSavingProfile(false); }
@@ -159,34 +277,80 @@ export function DashboardPage() {
   async function handleStoreSave() {
     setIsSavingStore(true); setError(""); setSuccess("");
     try {
-      await api.put("/store/options", { businessLogo: storeLogo.trim(), favicon: storeFavicon.trim(), whatsappNumber: storeWhatsapp.trim(), callNumber: storeCall.trim(), banners, socialLinks, categories });
+      await api.put("/store/options", {
+        businessLogo: storeLogo.trim(),
+        favicon: storeFavicon.trim(),
+        whatsappNumber: storeWhatsapp.trim(),
+        callNumber: storeCall.trim(),
+        banners, socialLinks, categories,
+        defaultDeliveryCharge: Number(storeDeliveryCharge) || 0,
+      });
       await refreshProfile();
       setSuccess("Store options saved.");
     } catch { setError("Could not save store options."); }
     finally { setIsSavingStore(false); }
   }
 
-  // ── Product create
-  async function handleCreateProduct(e: FormEvent) {
-    e.preventDefault(); setIsCreatingProduct(true); setError(""); setSuccess("");
+  // ── Product: start edit
+  function handleStartEdit(prod: Product) {
+    setEditingProduct(prod);
+    setProductForm({
+      title: prod.title,
+      description: prod.description || "",
+      price: String(prod.price),
+      mrp: String(prod.mrp || ""),
+      imageUrl: prod.imageUrl || "",
+      notes: prod.notes || "",
+      category: prod.category || "",
+      variants: (prod.variants || []).map(v => ({ label: v.label, options: v.options.join(", ") })),
+    });
+    // Scroll to form
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  // ── Product: cancel edit
+  function handleCancelEdit() {
+    setEditingProduct(null);
+    setProductForm(emptyProductForm);
+  }
+
+  // ── Product: create or update
+  async function handleSubmitProduct(e: FormEvent) {
+    e.preventDefault(); setIsSubmittingProduct(true); setError(""); setSuccess("");
     try {
       const variantPayload = productForm.variants
         .filter(v => v.label.trim())
-        .map(v => ({ label: v.label.trim(), options: v.options.split(",").map(o => o.trim()).filter(Boolean) }));
-      await api.post("/products", {
-        title: productForm.title.trim(), description: productForm.description.trim(),
-        price: Number(productForm.price), mrp: Number(productForm.mrp) || 0,
-        imageUrl: productForm.imageUrl.trim(), notes: productForm.notes.trim(),
-        category: productForm.category.trim(), variants: variantPayload,
-      });
-      if (productForm.category.trim() && !categories.includes(productForm.category.trim())) {
-        setCategories(prev => [...prev, productForm.category.trim()]);
+        .map(v => ({
+          label: v.label.trim(),
+          options: v.options.split(",").map(o => o.trim()).filter(Boolean),
+        }));
+
+      const payload = {
+        title: productForm.title.trim(),
+        description: productForm.description.trim(),
+        price: Number(productForm.price),
+        mrp: Number(productForm.mrp) || 0,
+        imageUrl: productForm.imageUrl.trim(),
+        notes: productForm.notes.trim(),
+        category: productForm.category.trim(),
+        variants: variantPayload,
+      };
+
+      if (editingProduct) {
+        await api.put(`/products/${editingProduct._id}`, payload);
+        setSuccess("Product updated.");
+        setEditingProduct(null);
+      } else {
+        await api.post("/products", payload);
+        if (productForm.category.trim() && !categories.includes(productForm.category.trim())) {
+          setCategories(prev => [...prev, productForm.category.trim()]);
+        }
+        setSuccess("Product added.");
       }
       setProductForm(emptyProductForm);
-      setSuccess("Product added.");
       await loadData();
-    } catch { setError("Could not create product."); }
-    finally { setIsCreatingProduct(false); }
+    } catch { setError(editingProduct ? "Could not update product." : "Could not create product."); }
+    finally { setIsSubmittingProduct(false); }
   }
 
   // ── Product toggle / delete
@@ -229,8 +393,8 @@ export function DashboardPage() {
             <img src={seller.businessLogo} alt="logo" className="h-10 w-10 rounded-xl object-contain border border-slate-200" />
           )}
           <div>
-            <p className="text-xs font-bold uppercase tracking-[0.18em] text-teal-700">Seller Dashboard</p>
-            <h1 className="font-heading text-xl font-bold text-slate-900 sm:text-2xl">{seller?.businessName || "Vendor Workspace"}</h1>
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-teal-700">🛍️ MyDukan</p>
+            <h1 className="font-heading text-xl font-bold text-slate-900 sm:text-2xl">{seller?.businessName || "My Dukan"}</h1>
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -257,12 +421,9 @@ export function DashboardPage() {
         ))}
       </nav>
 
-      {/* ═══════════════════════════════════════════════════════ */}
-      {/* TAB: DASHBOARD                                          */}
-      {/* ═══════════════════════════════════════════════════════ */}
+      {/* ═════════════════════════════════════ TAB: DASHBOARD ══ */}
       {tab === "dashboard" && (
         <div className="space-y-4">
-          {/* Quick stats */}
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {[
               { label: "Products", value: stats.totalProducts, color: "text-slate-900" },
@@ -276,7 +437,6 @@ export function DashboardPage() {
               </article>
             ))}
           </div>
-          {/* Revenue cards */}
           <div className="grid gap-3 sm:grid-cols-2">
             <article className="rounded-2xl border border-white/70 bg-white/90 p-4 shadow-card">
               <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Revenue — Last 7 Days</p>
@@ -287,7 +447,6 @@ export function DashboardPage() {
               <p className="mt-1 text-3xl font-bold text-teal-700">₹{stats.value30d.toLocaleString("en-IN")}</p>
             </article>
           </div>
-          {/* Store link */}
           <div className="rounded-2xl border border-white/70 bg-white/90 p-4 shadow-card">
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Your Public Store Link</p>
             <a href={storeUrl || "#"} target="_blank" rel="noreferrer"
@@ -298,22 +457,20 @@ export function DashboardPage() {
         </div>
       )}
 
-      {/* ═══════════════════════════════════════════════════════ */}
-      {/* TAB: STORE OPTIONS                                      */}
-      {/* ═══════════════════════════════════════════════════════ */}
+      {/* ══════════════════════════════════ TAB: STORE OPTIONS ══ */}
       {tab === "store" && (
         <div className="grid gap-6 lg:grid-cols-2">
           {/* Branding */}
           <article className="rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card space-y-4">
-            <h2 className="font-heading text-xl font-bold text-slate-900">Branding</h2>
+            <h2 className="font-heading text-xl font-bold text-slate-900">Branding & Contact</h2>
             <label className="block space-y-1">
               <span className="text-sm font-semibold text-slate-700">Business Logo URL</span>
-              <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400" placeholder="https://..." value={storeLogo} onChange={e => setStoreLogo(e.target.value)} />
+              <ImageUploadField value={storeLogo} onChange={setStoreLogo} placeholder="https://..." />
             </label>
             {storeLogo && <img src={storeLogo} alt="logo preview" className="h-16 w-16 rounded-xl object-contain border border-slate-200" />}
             <label className="block space-y-1">
               <span className="text-sm font-semibold text-slate-700">Favicon URL</span>
-              <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400" placeholder="https://..." value={storeFavicon} onChange={e => setStoreFavicon(e.target.value)} />
+              <ImageUploadField value={storeFavicon} onChange={setStoreFavicon} placeholder="https://..." />
             </label>
             <label className="block space-y-1">
               <span className="text-sm font-semibold text-slate-700">WhatsApp Number</span>
@@ -322,6 +479,17 @@ export function DashboardPage() {
             <label className="block space-y-1">
               <span className="text-sm font-semibold text-slate-700">Call Number</span>
               <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400" placeholder="9876543210" value={storeCall} onChange={e => setStoreCall(e.target.value)} />
+            </label>
+            <label className="block space-y-1">
+              <span className="text-sm font-semibold text-slate-700">Default Delivery Charge (₹)</span>
+              <input
+                type="number" min={0}
+                className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400"
+                placeholder="0"
+                value={storeDeliveryCharge}
+                onChange={e => setStoreDeliveryCharge(Math.max(0, Number(e.target.value)))}
+              />
+              <p className="text-xs text-slate-500">This fixed charge is shown to customers in the checkout — they cannot change it.</p>
             </label>
           </article>
 
@@ -338,10 +506,20 @@ export function DashboardPage() {
               ))}
             </div>
             <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
-              <input className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none" placeholder="Banner Image URL" value={newBannerUrl} onChange={e => setNewBannerUrl(e.target.value)} />
+              <label className="block space-y-1">
+                <span className="text-xs font-semibold text-slate-600">Banner Image</span>
+                <ImageUploadField value={newBannerUrl} onChange={setNewBannerUrl} placeholder="Banner Image URL" />
+              </label>
               <input className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none" placeholder="Banner title (optional)" value={newBannerTitle} onChange={e => setNewBannerTitle(e.target.value)} />
-              <button onClick={() => { if (newBannerUrl.trim()) { setBanners(prev => [...prev, { imageUrl: newBannerUrl.trim(), title: newBannerTitle.trim() }]); setNewBannerUrl(""); setNewBannerTitle(""); } }}
-                className="w-full rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-700 transition">+ Add Banner</button>
+              <button
+                onClick={() => {
+                  if (newBannerUrl.trim()) {
+                    setBanners(prev => [...prev, { imageUrl: newBannerUrl.trim(), title: newBannerTitle.trim() }]);
+                    setNewBannerUrl(""); setNewBannerTitle("");
+                  }
+                }}
+                className="w-full rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-700 transition"
+              >+ Add Banner</button>
             </div>
           </article>
 
@@ -360,8 +538,10 @@ export function DashboardPage() {
                 {SOCIAL_PLATFORMS.map(p => <option key={p}>{p}</option>)}
               </select>
               <input className="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none" placeholder="https://..." value={newSocialUrl} onChange={e => setNewSocialUrl(e.target.value)} />
-              <button onClick={() => { if (newSocialUrl.trim()) { setSocialLinks(prev => [...prev, { platform: newSocialPlatform, url: newSocialUrl.trim() }]); setNewSocialUrl(""); } }}
-                className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-700 transition">Add</button>
+              <button
+                onClick={() => { if (newSocialUrl.trim()) { setSocialLinks(prev => [...prev, { platform: newSocialPlatform, url: newSocialUrl.trim() }]); setNewSocialUrl(""); } }}
+                className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-700 transition"
+              >Add</button>
             </div>
           </article>
 
@@ -378,8 +558,10 @@ export function DashboardPage() {
             </div>
             <div className="flex gap-2">
               <input className="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none" placeholder="e.g. Food, Clothing..." value={newCategory} onChange={e => setNewCategory(e.target.value)} />
-              <button onClick={() => { const c = newCategory.trim(); if (c && !categories.includes(c)) { setCategories(prev => [...prev, c]); setNewCategory(""); } }}
-                className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-700 transition">Add</button>
+              <button
+                onClick={() => { const c = newCategory.trim(); if (c && !categories.includes(c)) { setCategories(prev => [...prev, c]); setNewCategory(""); } }}
+                className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-700 transition"
+              >Add</button>
             </div>
           </article>
 
@@ -392,15 +574,33 @@ export function DashboardPage() {
         </div>
       )}
 
-      {/* ═══════════════════════════════════════════════════════ */}
-      {/* TAB: PRODUCTS                                           */}
-      {/* ═══════════════════════════════════════════════════════ */}
+      {/* ══════════════════════════════════════ TAB: PRODUCTS ══ */}
       {tab === "products" && (
         <div className="grid gap-6 lg:grid-cols-5">
-          {/* Add product form */}
+          {/* Add / Edit product form */}
           <article className="rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card lg:col-span-3">
-            <h2 className="font-heading text-xl font-bold text-slate-900">Add New Product</h2>
-            <form className="mt-4 grid gap-3 sm:grid-cols-2" onSubmit={handleCreateProduct}>
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="font-heading text-xl font-bold text-slate-900">
+                {editingProduct ? "✏️ Edit Product" : "Add New Product"}
+              </h2>
+              {editingProduct && (
+                <button
+                  type="button"
+                  onClick={handleCancelEdit}
+                  className="rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition"
+                >
+                  ✕ Cancel Edit
+                </button>
+              )}
+            </div>
+
+            {editingProduct && (
+              <p className="mt-1 rounded-lg bg-amber-50 border border-amber-200 px-3 py-1.5 text-xs text-amber-700">
+                Editing: <strong>{editingProduct.title}</strong>
+              </p>
+            )}
+
+            <form className="mt-4 grid gap-3 sm:grid-cols-2" onSubmit={handleSubmitProduct}>
               <label className="block space-y-1 sm:col-span-2">
                 <span className="text-sm font-semibold text-slate-700">Product title *</span>
                 <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400"
@@ -428,12 +628,19 @@ export function DashboardPage() {
                   {categories.map(c => <option key={c} value={c}>{c}</option>)}
                 </select>
               </label>
-              <label className="block space-y-1">
-                <span className="text-sm font-semibold text-slate-700">Image URL</span>
-                <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400"
-                  placeholder="https://..." value={productForm.imageUrl}
-                  onChange={e => setProductForm(p => ({ ...p, imageUrl: e.target.value }))} />
+              <label className="block space-y-1 sm:col-span-2">
+                <span className="text-sm font-semibold text-slate-700">Product Image</span>
+                <ImageUploadField
+                  value={productForm.imageUrl}
+                  onChange={url => setProductForm(p => ({ ...p, imageUrl: url }))}
+                  placeholder="https://..."
+                />
               </label>
+              {productForm.imageUrl && (
+                <div className="sm:col-span-2">
+                  <img src={productForm.imageUrl} alt="preview" className="h-24 w-24 rounded-xl object-cover border border-slate-200" />
+                </div>
+              )}
               <label className="block space-y-1 sm:col-span-2">
                 <span className="text-sm font-semibold text-slate-700">Description</span>
                 <textarea className="min-h-16 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400"
@@ -465,9 +672,11 @@ export function DashboardPage() {
                   className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-100 transition">+ Add Variant</button>
               </div>
 
-              <button type="submit" disabled={isCreatingProduct}
-                className="sm:col-span-2 w-full rounded-xl bg-teal-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-teal-500 disabled:bg-teal-300">
-                {isCreatingProduct ? "Adding..." : "Add Product"}
+              <button type="submit" disabled={isSubmittingProduct}
+                className={`sm:col-span-2 w-full rounded-xl px-4 py-2.5 text-sm font-semibold text-white transition disabled:opacity-50 ${editingProduct ? "bg-amber-600 hover:bg-amber-500" : "bg-teal-600 hover:bg-teal-500"}`}>
+                {isSubmittingProduct
+                  ? (editingProduct ? "Saving…" : "Adding...")
+                  : (editingProduct ? "💾 Save Changes" : "Add Product")}
               </button>
             </form>
           </article>
@@ -493,7 +702,13 @@ export function DashboardPage() {
                       </div>
                     </div>
                   </div>
-                  <div className="mt-2 flex gap-2">
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <button
+                      onClick={() => handleStartEdit(prod)}
+                      className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-100 transition"
+                    >
+                      ✏️ Edit
+                    </button>
                     <button onClick={() => handleToggleProduct(prod._id)}
                       className={`rounded-lg px-3 py-1 text-xs font-semibold transition ${prod.isActive ? "bg-amber-100 text-amber-700 border border-amber-200" : "bg-emerald-100 text-emerald-700 border border-emerald-200"}`}>
                       {prod.isActive ? "Deactivate" : "Activate"}
@@ -508,14 +723,31 @@ export function DashboardPage() {
         </div>
       )}
 
-      {/* ═══════════════════════════════════════════════════════ */}
-      {/* TAB: ORDERS                                             */}
-      {/* ═══════════════════════════════════════════════════════ */}
+      {/* ═══════════════════════════════════════ TAB: ORDERS ══ */}
       {tab === "orders" && (
         <article className="rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card">
-          <h2 className="font-heading text-xl font-bold text-slate-900">Incoming Orders</h2>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="font-heading text-xl font-bold text-slate-900">Incoming Orders</h2>
+            <div className="flex items-center gap-3">
+              {ordersLastUpdated && (
+                <span className="flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
+                  <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                  Live · {timeAgo(ordersLastUpdated)}
+                </span>
+              )}
+              <button
+                onClick={() => void loadData()}
+                className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition"
+              >
+                ↻ Refresh
+              </button>
+            </div>
+          </div>
+
           {loading && <p className="mt-4 text-sm text-slate-500">Loading...</p>}
           {!loading && orders.length === 0 && <p className="mt-4 text-sm text-slate-500">No orders yet.</p>}
+
+          {/* Mobile cards */}
           {orders.length > 0 && (
             <div className="mt-4 space-y-3 md:hidden">
               {orders.map(order => (
@@ -538,12 +770,14 @@ export function DashboardPage() {
                   )}
                   <select className="mt-3 w-full rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm outline-none"
                     value={order.paymentStatus} onChange={e => handleOrderStatus(order._id, e.target.value as OrderStatus)}>
-                    {["pending","paid","confirmed","cancelled"].map(s => <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>)}
+                    {["pending", "paid", "confirmed", "cancelled"].map(s => <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>)}
                   </select>
                 </article>
               ))}
             </div>
           )}
+
+          {/* Desktop table */}
           {orders.length > 0 && (
             <div className="hidden overflow-auto md:block mt-4">
               <table className="min-w-full border-collapse text-left text-sm">
@@ -559,7 +793,7 @@ export function DashboardPage() {
                     <tr key={order._id} className="border-b border-slate-100">
                       <td className="py-3 pr-4"><p className="font-semibold text-slate-800">{order.customerName}</p><p className="text-xs text-slate-500">{order.customerPhone}</p>{order.deliveryAddress && <p className="text-xs text-slate-400">📍 {order.deliveryAddress}</p>}</td>
                       <td className="py-3 pr-4 text-slate-700">{order.product?.title || "—"}</td>
-                      <td className="py-3 pr-4 text-xs text-slate-500">{order.selectedVariants ? Object.entries(order.selectedVariants).map(([k,v]) => `${k}: ${v}`).join(", ") : "—"}</td>
+                      <td className="py-3 pr-4 text-xs text-slate-500">{order.selectedVariants ? Object.entries(order.selectedVariants).map(([k, v]) => `${k}: ${v}`).join(", ") : "—"}</td>
                       <td className="py-3 pr-4 text-slate-700">{order.quantity}</td>
                       <td className="py-3 pr-4 text-slate-700">₹{order.amount}</td>
                       <td className="py-3 pr-4 text-slate-700">₹{order.deliveryCharge || 0}</td>
@@ -568,7 +802,7 @@ export function DashboardPage() {
                       <td className="py-3 pr-4">{order.paymentScreenshotUrl ? <a href={order.paymentScreenshotUrl} target="_blank" rel="noreferrer" className="text-xs text-teal-700 underline">View</a> : <span className="text-xs text-slate-400">None</span>}</td>
                       <td className="py-3">
                         <select className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs outline-none" value={order.paymentStatus} onChange={e => handleOrderStatus(order._id, e.target.value as OrderStatus)}>
-                          {["pending","paid","confirmed","cancelled"].map(s => <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>)}
+                          {["pending", "paid", "confirmed", "cancelled"].map(s => <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>)}
                         </select>
                       </td>
                     </tr>
@@ -580,9 +814,7 @@ export function DashboardPage() {
         </article>
       )}
 
-      {/* ═══════════════════════════════════════════════════════ */}
-      {/* TAB: REPORTS                                            */}
-      {/* ═══════════════════════════════════════════════════════ */}
+      {/* ══════════════════════════════════════ TAB: REPORTS ══ */}
       {tab === "reports" && (
         <div className="space-y-4">
           <article className="rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card">
@@ -633,9 +865,7 @@ export function DashboardPage() {
         </div>
       )}
 
-      {/* ═══════════════════════════════════════════════════════ */}
-      {/* TAB: PROFILE                                            */}
-      {/* ═══════════════════════════════════════════════════════ */}
+      {/* ══════════════════════════════════════ TAB: PROFILE ══ */}
       {tab === "profile" && (
         <article className="mx-auto max-w-2xl rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card">
           <h2 className="font-heading text-xl font-bold text-slate-900">Seller Profile</h2>
@@ -662,12 +892,12 @@ export function DashboardPage() {
               <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400" value={profileGST} onChange={e => setProfileGST(e.target.value)} />
             </label>
             <label className="block space-y-1">
-              <span className="text-sm font-semibold text-slate-700">Business Logo URL</span>
-              <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400" placeholder="https://..." value={profileLogo} onChange={e => setProfileLogo(e.target.value)} />
+              <span className="text-sm font-semibold text-slate-700">Business Logo</span>
+              <ImageUploadField value={profileLogo} onChange={setProfileLogo} />
             </label>
             <label className="block space-y-1">
               <span className="text-sm font-semibold text-slate-700">Favicon URL</span>
-              <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400" placeholder="https://..." value={profileFavicon} onChange={e => setProfileFavicon(e.target.value)} />
+              <ImageUploadField value={profileFavicon} onChange={setProfileFavicon} />
             </label>
             <button type="submit" disabled={isSavingProfile}
               className="sm:col-span-2 w-full rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:bg-slate-400">
