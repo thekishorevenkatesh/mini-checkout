@@ -56,6 +56,11 @@ const productSchema = new mongoose.Schema(
       type: [variantSchema],
       default: [],
     },
+    variantPrices: {
+      type: Map,
+      of: Number,
+      default: {},
+    },
     isActive: {
       type: Boolean,
       default: true,

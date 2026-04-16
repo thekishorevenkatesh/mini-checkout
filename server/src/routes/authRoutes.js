@@ -4,6 +4,7 @@ const Seller = require("../models/Seller");
 const auth = require("../middleware/auth");
 const { slugify } = require("../utils/slug");
 const { generateOtp } = require("../utils/otp");
+const { getPolicyContent } = require("../utils/policyDefaults");
 // const { sendOtpEmail } = require("../utils/mailer"); // Email disabled for demo
 
 const router = express.Router();
@@ -12,6 +13,16 @@ function issueToken(sellerId) {
   return jwt.sign({ sellerId }, process.env.JWT_SECRET || "dev_secret", {
     expiresIn: "7d",
   });
+}
+
+function withPolicyDefaults(sellerDoc) {
+  if (!sellerDoc) return sellerDoc;
+
+  const seller = sellerDoc.toObject ? sellerDoc.toObject() : sellerDoc;
+  return {
+    ...seller,
+    ...getPolicyContent(seller),
+  };
 }
 
 async function createUniqueSellerSlug(businessName, ignoreSellerId = null) {
@@ -138,7 +149,7 @@ router.post("/verify-otp", async (req, res) => {
     );
 
     const token = issueToken(seller._id.toString());
-    return res.json({ token, seller, isProfileComplete });
+    return res.json({ token, seller: withPolicyDefaults(seller), isProfileComplete });
   } catch (error) {
     console.error(error);
     return res.status(500).json({ message: "Could not verify OTP" });
@@ -158,6 +169,9 @@ router.post("/register", auth, async (req, res) => {
       businessLogo,
       whatsappNumber,
       callNumber,
+      privacyPolicy,
+      returnRefundPolicy,
+      termsAndConditions,
     } = req.body;
 
     if (!businessName) {
@@ -182,9 +196,12 @@ router.post("/register", auth, async (req, res) => {
     if (businessLogo) seller.businessLogo = String(businessLogo).trim();
     if (whatsappNumber) seller.whatsappNumber = String(whatsappNumber).trim();
     if (callNumber) seller.callNumber = String(callNumber).trim();
+    if (typeof privacyPolicy === "string") seller.privacyPolicy = privacyPolicy.trim();
+    if (typeof returnRefundPolicy === "string") seller.returnRefundPolicy = returnRefundPolicy.trim();
+    if (typeof termsAndConditions === "string") seller.termsAndConditions = termsAndConditions.trim();
 
     await seller.save();
-    return res.json({ seller });
+    return res.json({ seller: withPolicyDefaults(seller) });
   } catch (error) {
     console.error(error);
     return res.status(500).json({ message: "Could not complete registration" });
@@ -208,7 +225,7 @@ router.get("/me", auth, async (req, res) => {
       await seller.save();
     }
 
-    return res.json({ seller });
+    return res.json({ seller: withPolicyDefaults(seller) });
   } catch (error) {
     return res.status(500).json({ message: "Unable to fetch profile" });
   }
@@ -228,6 +245,9 @@ router.put("/me", auth, async (req, res) => {
       favicon,
       whatsappNumber,
       callNumber,
+      privacyPolicy,
+      returnRefundPolicy,
+      termsAndConditions,
     } = req.body;
 
     const seller = await Seller.findById(req.sellerId);
@@ -245,6 +265,9 @@ router.put("/me", auth, async (req, res) => {
     if (typeof favicon === "string") seller.favicon = favicon.trim();
     if (typeof whatsappNumber === "string") seller.whatsappNumber = whatsappNumber.trim();
     if (typeof callNumber === "string") seller.callNumber = callNumber.trim();
+    if (typeof privacyPolicy === "string") seller.privacyPolicy = privacyPolicy.trim();
+    if (typeof returnRefundPolicy === "string") seller.returnRefundPolicy = returnRefundPolicy.trim();
+    if (typeof termsAndConditions === "string") seller.termsAndConditions = termsAndConditions.trim();
 
     if (!seller.slug) {
       seller.slug = await createUniqueSellerSlug(
@@ -254,7 +277,7 @@ router.put("/me", auth, async (req, res) => {
     }
 
     await seller.save();
-    return res.json({ seller });
+    return res.json({ seller: withPolicyDefaults(seller) });
   } catch (error) {
     return res.status(500).json({ message: "Unable to update profile" });
   }

@@ -1,14 +1,20 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { api } from "../api/client";
 import { useAuth } from "../context/AuthContext";
-import type { Order, OrderStatus, Product, SocialLink, Banner } from "../types";
+import { DEFAULT_POLICY_CONTENT } from "../constants/policyDefaults";
+import type { Order, OrderStatus, Product, SocialLink, Banner, PaymentMode } from "../types";
 
-type Tab = "dashboard" | "store" | "products" | "orders" | "reports" | "profile";
+type Tab = "dashboard" | "store" | "products" | "orders" | "reports" | "profile" | "policies";
+type ProductFormVariant = {
+  label: string;
+  options: string;
+  optionPrices: Record<string, string>;
+};
 
 type ProductForm = {
   title: string; description: string; price: string; mrp: string;
   imageUrl: string; notes: string; category: string;
-  variants: { label: string; options: string }[];
+  variants: ProductFormVariant[];
 };
 
 const emptyProductForm: ProductForm = {
@@ -101,6 +107,14 @@ function timeAgo(date: Date | null): string {
   return `${Math.floor(secs / 60)}m ago`;
 }
 
+function getVariantPriceKey(label: string, option: string) {
+  return `${label}::${option}`;
+}
+
+function parseVariantOptions(options: string) {
+  return options.split(",").map(option => option.trim()).filter(Boolean);
+}
+
 // ─── DashboardPage ────────────────────────────────────────────────────────────
 export function DashboardPage() {
   const { seller, logout, updateProfile, refreshProfile } = useAuth();
@@ -126,13 +140,20 @@ export function DashboardPage() {
   const [profileLogo, setProfileLogo] = useState(seller?.businessLogo || "");
   const [profileFavicon, setProfileFavicon] = useState(seller?.favicon || "");
   const [isSavingProfile, setIsSavingProfile] = useState(false);
+  const [privacyPolicy, setPrivacyPolicy] = useState<string>(DEFAULT_POLICY_CONTENT.privacyPolicy);
+  const [returnRefundPolicy, setReturnRefundPolicy] = useState<string>(DEFAULT_POLICY_CONTENT.returnRefundPolicy);
+  const [termsAndConditions, setTermsAndConditions] = useState<string>(DEFAULT_POLICY_CONTENT.termsAndConditions);
+  const [isSavingPolicies, setIsSavingPolicies] = useState(false);
 
   // ── Store options
   const [storeLogo, setStoreLogo] = useState(seller?.businessLogo || "");
   const [storeFavicon, setStoreFavicon] = useState(seller?.favicon || "");
   const [storeWhatsapp, setStoreWhatsapp] = useState(seller?.whatsappNumber || "");
   const [storeCall, setStoreCall] = useState(seller?.callNumber || "");
-  const [storeDeliveryCharge, setStoreDeliveryCharge] = useState(seller?.defaultDeliveryCharge ?? 0);
+  const [storeDeliveryMode, setStoreDeliveryMode] = useState<"always_free" | "flat_rate">(seller?.deliveryMode || "always_free");
+  const [storeDeliveryCharge, setStoreDeliveryCharge] = useState<string>(String(seller?.defaultDeliveryCharge ?? 0));
+  const [storeFreeDeliveryThreshold, setStoreFreeDeliveryThreshold] = useState<string>(String(seller?.freeDeliveryThreshold ?? 500));
+  const [storePaymentMode, setStorePaymentMode] = useState<PaymentMode>(seller?.paymentMode || "prepaid_only");
   const [banners, setBanners] = useState<Banner[]>(seller?.banners || []);
   const [newBannerUrl, setNewBannerUrl] = useState("");
   const [newBannerTitle, setNewBannerTitle] = useState("");
@@ -174,10 +195,16 @@ export function DashboardPage() {
     setStoreFavicon(seller.favicon || "");
     setStoreWhatsapp(seller.whatsappNumber || "");
     setStoreCall(seller.callNumber || "");
-    setStoreDeliveryCharge(seller.defaultDeliveryCharge ?? 0);
+    setStoreDeliveryMode(seller.deliveryMode || "always_free");
+    setStoreDeliveryCharge(String(seller.defaultDeliveryCharge ?? 0));
+    setStoreFreeDeliveryThreshold(String(seller.freeDeliveryThreshold ?? 500));
+    setStorePaymentMode(seller.paymentMode || "prepaid_only");
     setBanners(seller.banners || []);
     setSocialLinks(seller.socialLinks || []);
     setCategories(seller.categories || []);
+    setPrivacyPolicy(seller.privacyPolicy || DEFAULT_POLICY_CONTENT.privacyPolicy);
+    setReturnRefundPolicy(seller.returnRefundPolicy || DEFAULT_POLICY_CONTENT.returnRefundPolicy);
+    setTermsAndConditions(seller.termsAndConditions || DEFAULT_POLICY_CONTENT.termsAndConditions);
   }, [seller]);
 
   async function loadData() {
@@ -283,12 +310,32 @@ export function DashboardPage() {
         whatsappNumber: storeWhatsapp.trim(),
         callNumber: storeCall.trim(),
         banners, socialLinks, categories,
-        defaultDeliveryCharge: Number(storeDeliveryCharge) || 0,
+        deliveryMode: storeDeliveryMode,
+        defaultDeliveryCharge: Math.max(0, Number(storeDeliveryCharge) || 0),
+        freeDeliveryThreshold: Math.max(0, Number(storeFreeDeliveryThreshold) || 0),
+        paymentMode: storePaymentMode,
       });
       await refreshProfile();
       setSuccess("Store options saved.");
     } catch { setError("Could not save store options."); }
     finally { setIsSavingStore(false); }
+  }
+
+  async function handlePoliciesSave(e: FormEvent) {
+    e.preventDefault();
+    setIsSavingPolicies(true); setError(""); setSuccess("");
+    try {
+      await updateProfile({
+        privacyPolicy: privacyPolicy.trim(),
+        returnRefundPolicy: returnRefundPolicy.trim(),
+        termsAndConditions: termsAndConditions.trim(),
+      });
+      setSuccess("Policies saved.");
+    } catch {
+      setError("Could not save policies.");
+    } finally {
+      setIsSavingPolicies(false);
+    }
   }
 
   // ── Product: start edit
@@ -302,7 +349,17 @@ export function DashboardPage() {
       imageUrl: prod.imageUrl || "",
       notes: prod.notes || "",
       category: prod.category || "",
-      variants: (prod.variants || []).map(v => ({ label: v.label, options: v.options.join(", ") })),
+      variants: (prod.variants || []).map(v => {
+        const optionPrices = v.options.reduce<Record<string, string>>((acc, option) => {
+          const price = prod.variantPrices?.[getVariantPriceKey(v.label, option)];
+          if (price) {
+            acc[option] = String(price);
+          }
+          return acc;
+        }, {});
+
+        return { label: v.label, options: v.options.join(", "), optionPrices };
+      }),
     });
     // Scroll to form
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -322,8 +379,35 @@ export function DashboardPage() {
         .filter(v => v.label.trim())
         .map(v => ({
           label: v.label.trim(),
-          options: v.options.split(",").map(o => o.trim()).filter(Boolean),
+          options: parseVariantOptions(v.options),
         }));
+
+      const hasVariants = variantPayload.some(v => v.options.length > 0);
+      const variantPrices = productForm.variants.reduce<Record<string, number>>((acc, variant) => {
+        const label = variant.label.trim();
+        const options = parseVariantOptions(variant.options);
+
+        options.forEach(option => {
+          const price = Number(variant.optionPrices[option]);
+          if (label && Number.isFinite(price) && price > 0) {
+            acc[getVariantPriceKey(label, option)] = price;
+          }
+        });
+
+        return acc;
+      }, {});
+
+      if (hasVariants) {
+        const missingPrice = variantPayload.some(variant =>
+          variant.options.some(option => !variantPrices[getVariantPriceKey(variant.label, option)])
+        );
+
+        if (missingPrice) {
+          setError("Enter a specific price for every variant option.");
+          setIsSubmittingProduct(false);
+          return;
+        }
+      }
 
       const payload = {
         title: productForm.title.trim(),
@@ -334,6 +418,7 @@ export function DashboardPage() {
         notes: productForm.notes.trim(),
         category: productForm.category.trim(),
         variants: variantPayload,
+        variantPrices,
       };
 
       if (editingProduct) {
@@ -382,6 +467,7 @@ export function DashboardPage() {
     { key: "orders", label: "🧾 Orders" },
     { key: "reports", label: "📈 Reports" },
     { key: "profile", label: "👤 Profile" },
+    { key: "policies", label: "📄 Policies" },
   ];
 
   return (
@@ -481,15 +567,68 @@ export function DashboardPage() {
               <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400" placeholder="9876543210" value={storeCall} onChange={e => setStoreCall(e.target.value)} />
             </label>
             <label className="block space-y-1">
+              <span className="text-sm font-semibold text-slate-700">Delivery Option</span>
+              <select
+                className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400 bg-white"
+                value={storeDeliveryMode}
+                onChange={e => setStoreDeliveryMode(e.target.value as "always_free" | "flat_rate")}
+              >
+                <option value="always_free">Free Delivery</option>
+                <option value="flat_rate">Flat Charge with Free Above Billing Amount</option>
+              </select>
+            </label>
+            <label className="block space-y-1">
+              <span className="text-sm font-semibold text-slate-700">Payment Option</span>
+              <select
+                className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400 bg-white"
+                value={storePaymentMode}
+                onChange={e => setStorePaymentMode(e.target.value as PaymentMode)}
+              >
+                <option value="prepaid_only">UPI / Pay Before Order</option>
+                <option value="cod_only">Cash on Delivery Only</option>
+                <option value="both">Allow Both Prepaid and Cash on Delivery</option>
+              </select>
+              <p className="text-xs text-slate-500">This controls what the customer can choose during checkout.</p>
+            </label>
+            <label className="block space-y-1">
               <span className="text-sm font-semibold text-slate-700">Default Delivery Charge (₹)</span>
               <input
                 type="number" min={0}
                 className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400"
                 placeholder="0"
                 value={storeDeliveryCharge}
-                onChange={e => setStoreDeliveryCharge(Math.max(0, Number(e.target.value)))}
+                onChange={e => {
+                  const v = e.target.value;
+                  if (v === "") { setStoreDeliveryCharge(""); return; }
+                  setStoreDeliveryCharge(String(Math.max(0, Number(v) || 0)));
+                }}
+                disabled={storeDeliveryMode === "always_free"}
               />
-              <p className="text-xs text-slate-500">This fixed charge is shown to customers in the checkout — they cannot change it.</p>
+              <p className="text-xs text-slate-500">
+                {storeDeliveryMode === "always_free"
+                  ? "Customers will always see free delivery."
+                  : "This flat charge applies until the free-delivery threshold is reached."}
+              </p>
+            </label>
+            <label className="block space-y-1">
+              <span className="text-sm font-semibold text-slate-700">Free Delivery Above Billing Amount (₹)</span>
+              <input
+                type="number" min={0}
+                className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400"
+                placeholder="500"
+                value={storeFreeDeliveryThreshold}
+                onChange={e => {
+                  const v = e.target.value;
+                  if (v === "") { setStoreFreeDeliveryThreshold(""); return; }
+                  setStoreFreeDeliveryThreshold(String(Math.max(0, Number(v) || 0)));
+                }}
+                disabled={storeDeliveryMode === "always_free"}
+              />
+              <p className="text-xs text-slate-500">
+                {storeDeliveryMode === "always_free"
+                  ? "Threshold is ignored when delivery is always free."
+                  : "If the customer billing amount reaches this value, delivery becomes free."}
+              </p>
             </label>
           </article>
 
@@ -658,17 +797,45 @@ export function DashboardPage() {
               <div className="sm:col-span-2 space-y-2">
                 <p className="text-sm font-semibold text-slate-700">Variants (e.g. Size, Color)</p>
                 {productForm.variants.map((v, i) => (
-                  <div key={i} className="flex gap-2">
-                    <input className="w-28 rounded-lg border border-slate-200 px-2 py-2 text-sm outline-none" placeholder="Size" value={v.label}
-                      onChange={e => setProductForm(p => { const vv = [...p.variants]; vv[i] = { ...vv[i], label: e.target.value }; return { ...p, variants: vv }; })} />
-                    <input className="flex-1 rounded-lg border border-slate-200 px-2 py-2 text-sm outline-none" placeholder="S, M, L, XL"
-                      value={v.options}
-                      onChange={e => setProductForm(p => { const vv = [...p.variants]; vv[i] = { ...vv[i], options: e.target.value }; return { ...p, variants: vv }; })} />
-                    <button type="button" onClick={() => setProductForm(p => ({ ...p, variants: p.variants.filter((_, j) => j !== i) }))}
-                      className="rounded-lg border border-rose-200 bg-rose-50 px-2 text-rose-600 text-sm">✕</button>
+                  <div key={i} className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    <div className="flex gap-2">
+                      <input className="w-28 rounded-lg border border-slate-200 px-2 py-2 text-sm outline-none" placeholder="Size" value={v.label}
+                        onChange={e => setProductForm(p => { const vv = [...p.variants]; vv[i] = { ...vv[i], label: e.target.value }; return { ...p, variants: vv }; })} />
+                      <input className="flex-1 rounded-lg border border-slate-200 px-2 py-2 text-sm outline-none" placeholder="S, M, L, XL"
+                        value={v.options}
+                        onChange={e => setProductForm(p => { const vv = [...p.variants]; vv[i] = { ...vv[i], options: e.target.value }; return { ...p, variants: vv }; })} />
+                      <button type="button" onClick={() => setProductForm(p => ({ ...p, variants: p.variants.filter((_, j) => j !== i) }))}
+                        className="rounded-lg border border-rose-200 bg-rose-50 px-2 text-rose-600 text-sm">✕</button>
+                    </div>
+                    {parseVariantOptions(v.options).length > 0 && (
+                      <div className="space-y-2">
+                        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Option Prices</p>
+                        {parseVariantOptions(v.options).map(option => (
+                          <div key={option} className="flex items-center gap-2">
+                            <span className="min-w-24 rounded-lg bg-white px-3 py-2 text-sm font-semibold text-slate-700">{option}</span>
+                            <input
+                              type="number"
+                              min={1}
+                              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none"
+                              placeholder={`Price for ${option}`}
+                              value={v.optionPrices[option] || ""}
+                              onChange={e => setProductForm(p => {
+                                const vv = [...p.variants];
+                                vv[i] = {
+                                  ...vv[i],
+                                  optionPrices: { ...vv[i].optionPrices, [option]: e.target.value },
+                                };
+                                return { ...p, variants: vv };
+                              })}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 ))}
-                <button type="button" onClick={() => setProductForm(p => ({ ...p, variants: [...p.variants, { label: "", options: "" }] }))}
+                <p className="text-xs text-slate-500">If you add variants, each option must have its own selling price.</p>
+                <button type="button" onClick={() => setProductForm(p => ({ ...p, variants: [...p.variants, { label: "", options: "", optionPrices: {} }] }))}
                   className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-100 transition">+ Add Variant</button>
               </div>
 
@@ -700,6 +867,18 @@ export function DashboardPage() {
                           <span className="text-xs text-slate-400 line-through self-center">₹{prod.mrp}</span>
                         )}
                       </div>
+                      {prod.variants.some(v => v.options.length > 0) && (
+                        <div className="mt-2 space-y-1">
+                          {prod.variants.map(variant => (
+                            <p key={variant.label} className="text-xs text-slate-500">
+                              {variant.label}: {variant.options.map(option => {
+                                const variantPrice = prod.variantPrices?.[getVariantPriceKey(variant.label, option)];
+                                return variantPrice ? `${option} (₹${variantPrice})` : option;
+                              }).join(", ")}
+                            </p>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
                   <div className="mt-2 flex flex-wrap gap-2">
@@ -902,6 +1081,49 @@ export function DashboardPage() {
             <button type="submit" disabled={isSavingProfile}
               className="sm:col-span-2 w-full rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:bg-slate-400">
               {isSavingProfile ? "Saving..." : "Save Profile"}
+            </button>
+          </form>
+        </article>
+      )}
+
+      {/* ═════════════════════════════════════ TAB: POLICIES ══ */}
+      {tab === "policies" && (
+        <article className="mx-auto max-w-4xl rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card">
+          <h2 className="font-heading text-xl font-bold text-slate-900">Store Policies</h2>
+          <p className="mt-1 text-sm text-slate-500">
+            These policy pages are shown to customers in your public store. You can keep the default text or customize it for your business.
+          </p>
+          <form className="mt-5 space-y-4" onSubmit={handlePoliciesSave}>
+            <label className="block space-y-1">
+              <span className="text-sm font-semibold text-slate-700">Privacy Policy</span>
+              <textarea
+                className="min-h-40 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400"
+                value={privacyPolicy}
+                onChange={e => setPrivacyPolicy(e.target.value)}
+              />
+            </label>
+            <label className="block space-y-1">
+              <span className="text-sm font-semibold text-slate-700">Return & Refund Policy</span>
+              <textarea
+                className="min-h-40 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400"
+                value={returnRefundPolicy}
+                onChange={e => setReturnRefundPolicy(e.target.value)}
+              />
+            </label>
+            <label className="block space-y-1">
+              <span className="text-sm font-semibold text-slate-700">Terms & Conditions</span>
+              <textarea
+                className="min-h-40 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400"
+                value={termsAndConditions}
+                onChange={e => setTermsAndConditions(e.target.value)}
+              />
+            </label>
+            <button
+              type="submit"
+              disabled={isSavingPolicies}
+              className="w-full rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:bg-slate-400"
+            >
+              {isSavingPolicies ? "Saving..." : "Save Policies"}
             </button>
           </form>
         </article>

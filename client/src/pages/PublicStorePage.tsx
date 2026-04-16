@@ -1,20 +1,81 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { QRCodeSVG } from "qrcode.react";
 import { api } from "../api/client";
-import type { Product, Seller } from "../types";
+import { DEFAULT_POLICY_CONTENT } from "../constants/policyDefaults";
+import type { OrderStatus, PaymentMethod, Product, Seller } from "../types";
 
 type CartItem = { quantity: number; variants: Record<string, string> };
 type CartMap = Record<string, CartItem>;
+type PaymentSession = {
+  orderIds: string[];
+  amount: number;
+  transactionRef: string;
+  upiLink: string;
+  sellerSlug: string;
+};
+type PublicOrderStatus = {
+  _id: string;
+  paymentStatus: OrderStatus;
+};
+type PolicyKey = "privacyPolicy" | "returnRefundPolicy" | "termsAndConditions";
 
 const SOCIAL_ICONS: Record<string, string> = {
   Instagram: "📸", Facebook: "👥", "Twitter/X": "🐦",
   YouTube: "▶️", LinkedIn: "💼", Website: "🌐", Other: "🔗",
 };
 
-function buildUpiLink(upiId: string, businessName: string, amount: number, ref: string) {
-  const params = new URLSearchParams({ pa: upiId, pn: businessName, am: amount.toFixed(2), cu: "INR", tn: ref });
+const PAYMENT_SUCCESS_STATUSES: OrderStatus[] = ["paid", "confirmed"];
+const POLL_INTERVAL_MS = 3000;
+const UPI_SESSION_STORAGE_KEY = "mini-checkout-upi-session";
+
+function createTransactionRef() {
+  return `ORD-${Date.now()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+}
+
+function buildThankYouUrl(sellerSlug: string, orderIds: string[]) {
+  const params = new URLSearchParams({
+    sellerSlug,
+    orderIds: orderIds.join(","),
+  });
+  return `${window.location.origin}/thank-you?${params.toString()}`;
+}
+
+function buildUpiLink(
+  upiId: string,
+  businessName: string,
+  amount: number,
+  transactionRef: string,
+  callbackUrl: string
+) {
+  const params = new URLSearchParams({
+    pa: upiId,
+    pn: businessName,
+    am: amount.toFixed(2),
+    cu: "INR",
+    tn: `Order ${transactionRef}`,
+    tr: transactionRef,
+    url: callbackUrl,
+    refUrl: callbackUrl,
+  });
   return `upi://pay?${params.toString()}`;
+}
+
+function getVariantPriceKey(label: string, option: string) {
+  return `${label}::${option}`;
+}
+
+function getProductUnitPrice(product: Product, selectedVariants: Record<string, string>) {
+  for (const variant of product.variants || []) {
+    const option = selectedVariants[variant.label];
+    if (!option) continue;
+    const variantPrice = product.variantPrices?.[getVariantPriceKey(variant.label, option)];
+    if (typeof variantPrice === "number" && variantPrice > 0) {
+      return variantPrice;
+    }
+  }
+
+  return product.price;
 }
 
 // Simple auto-play banner carousel
@@ -47,6 +108,7 @@ function BannerCarousel({ banners }: { banners: { imageUrl: string; title?: stri
 }
 
 export function PublicStorePage() {
+  const navigate = useNavigate();
   const { sellerSlug } = useParams<{ sellerSlug: string }>();
   const [seller, setSeller] = useState<Seller | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
@@ -59,11 +121,10 @@ export function PublicStorePage() {
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
   const [deliveryAddress, setDeliveryAddress] = useState("");
-  const [deliveryCharge, setDeliveryCharge] = useState(0);
   const [note, setNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
-  const [placedOrderIds, setPlacedOrderIds] = useState<string[]>([]);
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("prepaid");
 
   // Payment proof
   const [screenshotUrl, setScreenshotUrl] = useState("");
@@ -71,6 +132,10 @@ export function PublicStorePage() {
   const [proofSuccess, setProofSuccess] = useState("");
 
   const [intentFeedback, setIntentFeedback] = useState("");
+  const [paymentSession, setPaymentSession] = useState<PaymentSession | null>(null);
+  const [orderStatuses, setOrderStatuses] = useState<Record<string, OrderStatus>>({});
+  const [checkingPayment, setCheckingPayment] = useState(false);
+  const [activePolicy, setActivePolicy] = useState<PolicyKey | null>(null);
 
   useEffect(() => {
     async function fetchStore() {
@@ -79,8 +144,6 @@ export function PublicStorePage() {
         const r = await api.get<{ seller: Seller; products: Product[] }>(`/products/public/${sellerSlug}`);
         setSeller(r.data.seller);
         setProducts(r.data.products);
-        // Initialise delivery charge from seller's store setting
-        setDeliveryCharge(r.data.seller.defaultDeliveryCharge ?? 0);
       } catch { setError("Seller store unavailable."); }
       finally { setLoading(false); }
     }
@@ -106,16 +169,78 @@ export function PublicStorePage() {
   );
 
   const itemsTotal = useMemo(() =>
-    selectedItems.reduce((s, p) => s + p.price * (cart[p._id]?.quantity || 1), 0),
+    selectedItems.reduce((s, p) => {
+      const quantity = cart[p._id]?.quantity || 1;
+      const unitPrice = getProductUnitPrice(p, cart[p._id]?.variants || {});
+      return s + unitPrice * quantity;
+    }, 0),
     [cart, selectedItems]
   );
 
-  const grandTotal = itemsTotal + deliveryCharge;
+  const deliveryCharge = useMemo(() => {
+    if (!seller) return 0;
+    if (seller.deliveryMode !== "flat_rate") return 0;
 
-  const upiLink = useMemo(() => {
-    if (!seller?.upiId || grandTotal <= 0) return "";
-    return buildUpiLink(seller.upiId, seller.businessName, grandTotal, `Order (${selectedItems.length} item(s))`);
-  }, [grandTotal, selectedItems.length, seller]);
+    const threshold = seller.freeDeliveryThreshold ?? 500;
+    if (threshold > 0 && itemsTotal >= threshold) return 0;
+
+    return seller.defaultDeliveryCharge ?? 0;
+  }, [itemsTotal, seller]);
+
+  const grandTotal = itemsTotal + deliveryCharge;
+  const isPrepaidCheckout = paymentMethod === "prepaid";
+  const isCodCheckout = paymentMethod === "cod";
+  const supportsPrepaid = seller?.paymentMode === "prepaid_only" || seller?.paymentMode === "both";
+  const supportsCod = seller?.paymentMode === "cod_only" || seller?.paymentMode === "both";
+
+  const previewUpiLink = useMemo(() => {
+    if (!seller?.upiId || grandTotal <= 0 || !isPrepaidCheckout) return "";
+    const callbackUrl = buildThankYouUrl(seller.slug, ["preview"]);
+    return buildUpiLink(
+      seller.upiId,
+      seller.businessName,
+      grandTotal,
+      createTransactionRef(),
+      callbackUrl
+    );
+  }, [grandTotal, isPrepaidCheckout, seller]);
+
+  const activeUpiLink = paymentSession?.upiLink || previewUpiLink;
+  const activeAmount = paymentSession?.amount ?? grandTotal;
+  const placedOrderIds = paymentSession?.orderIds || [];
+  const thankYouPath = useMemo(() => {
+    if (!paymentSession) return "";
+    const params = new URLSearchParams({
+      sellerSlug: paymentSession.sellerSlug,
+      orderIds: paymentSession.orderIds.join(","),
+    });
+    return `/thank-you?${params.toString()}`;
+  }, [paymentSession]);
+  const policyMeta: Record<PolicyKey, { title: string; content: string }> = useMemo(() => ({
+    privacyPolicy: {
+      title: "Privacy Policy",
+      content: seller?.privacyPolicy || DEFAULT_POLICY_CONTENT.privacyPolicy,
+    },
+    returnRefundPolicy: {
+      title: "Return & Refund Policy",
+      content: seller?.returnRefundPolicy || DEFAULT_POLICY_CONTENT.returnRefundPolicy,
+    },
+    termsAndConditions: {
+      title: "Terms & Conditions",
+      content: seller?.termsAndConditions || DEFAULT_POLICY_CONTENT.termsAndConditions,
+    },
+  }), [seller]);
+
+  useEffect(() => {
+    if (!seller) return;
+
+    if (seller.paymentMode === "cod_only") {
+      setPaymentMethod("cod");
+      return;
+    }
+
+    setPaymentMethod("prepaid");
+  }, [seller]);
 
   function getItem(productId: string): CartItem {
     return cart[productId] || { quantity: 0, variants: {} };
@@ -144,11 +269,99 @@ export function PublicStorePage() {
     }));
   }
 
+  function openUpiIntent(link: string) {
+    window.location.href = link;
+  }
+
+  const checkPaymentStatus = useCallback(async () => {
+    if (!paymentSession || !sellerSlug) return false;
+
+    setCheckingPayment(true);
+
+    try {
+      const response = await api.get<{ orders: PublicOrderStatus[] }>("/orders/public/status", {
+        params: {
+          ids: paymentSession.orderIds.join(","),
+          sellerSlug,
+        },
+      });
+
+      const nextStatuses = response.data.orders.reduce<Record<string, OrderStatus>>((acc, order) => {
+        acc[order._id] = order.paymentStatus;
+        return acc;
+      }, {});
+
+      setOrderStatuses(nextStatuses);
+
+      const allPaid =
+        response.data.orders.length === paymentSession.orderIds.length &&
+        response.data.orders.every(order => PAYMENT_SUCCESS_STATUSES.includes(order.paymentStatus));
+
+      if (allPaid) {
+        localStorage.removeItem(UPI_SESSION_STORAGE_KEY);
+        navigate(thankYouPath, { replace: true });
+        return true;
+      }
+    } catch {
+      setIntentFeedback("We could not refresh payment status right now. Please try again.");
+    } finally {
+      setCheckingPayment(false);
+    }
+
+    return false;
+  }, [navigate, paymentSession, sellerSlug, thankYouPath]);
+
+  useEffect(() => {
+    if (!sellerSlug || paymentSession) return;
+
+    const rawSession = localStorage.getItem(UPI_SESSION_STORAGE_KEY);
+    if (!rawSession) return;
+
+    try {
+      const parsed = JSON.parse(rawSession) as PaymentSession;
+      if (parsed.sellerSlug === sellerSlug && parsed.orderIds.length > 0) {
+        setPaymentSession(parsed);
+      }
+    } catch {
+      localStorage.removeItem(UPI_SESSION_STORAGE_KEY);
+    }
+  }, [paymentSession, sellerSlug]);
+
+  useEffect(() => {
+    if (!paymentSession) return;
+    localStorage.setItem(UPI_SESSION_STORAGE_KEY, JSON.stringify(paymentSession));
+  }, [paymentSession]);
+
+  useEffect(() => {
+    if (!paymentSession) return;
+
+    void checkPaymentStatus();
+    const poller = window.setInterval(() => {
+      void checkPaymentStatus();
+    }, POLL_INTERVAL_MS);
+
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        void checkPaymentStatus();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      window.clearInterval(poller);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [checkPaymentStatus, paymentSession]);
+
   // ── Place order
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError(""); setSuccessMessage("");
     if (selectedItems.length === 0) { setError("Select at least one product."); return; }
+    if (!sellerSlug) { setError("Store link is invalid."); return; }
+    if (!seller) { setError("Seller store unavailable."); return; }
+    if (isPrepaidCheckout && !seller.upiId) { setError("UPI is not configured for this store."); return; }
     setSubmitting(true);
     try {
       const reqs = selectedItems.map(p =>
@@ -161,15 +374,44 @@ export function PublicStorePage() {
           deliveryCharge,
           selectedVariants: cart[p._id]?.variants || {},
           note: note.trim(),
+          paymentMethod,
         })
       );
       const results = await Promise.allSettled(reqs);
       const ids = results.filter(r => r.status === "fulfilled").map(r => (r as PromiseFulfilledResult<{ data: { order: { _id: string } } }>).value.data.order._id);
-      setPlacedOrderIds(ids);
       if (ids.length === 0) { setError("Could not place order. Please retry."); }
       else {
-        setSuccessMessage(`Order placed for ${ids.length} item(s)! Please complete payment and share proof below.`);
+        if (isCodCheckout) {
+          localStorage.removeItem(UPI_SESSION_STORAGE_KEY);
+          setPaymentSession(null);
+          setOrderStatuses({});
+          setSuccessMessage(`Order placed successfully for ${ids.length} item(s). The seller will collect payment on delivery.`);
+          setProofSuccess("");
+          setIntentFeedback("");
+          setCustomerName(""); setCustomerPhone(""); setDeliveryAddress(""); setNote(""); setCart({});
+          return;
+        }
+
+        const transactionRef = createTransactionRef();
+        const callbackUrl = buildThankYouUrl(sellerSlug, ids);
+        const nextSession: PaymentSession = {
+          orderIds: ids,
+          amount: grandTotal,
+          transactionRef,
+          upiLink: buildUpiLink(seller.upiId, seller.businessName, grandTotal, transactionRef, callbackUrl),
+          sellerSlug,
+        };
+
+        setPaymentSession(nextSession);
+        setOrderStatuses(ids.reduce<Record<string, OrderStatus>>((acc, id) => {
+          acc[id] = "pending";
+          return acc;
+        }, {}));
+        setSuccessMessage(`Order placed for ${ids.length} item(s). Complete the payment in your UPI app and we will redirect you once the payment is marked successful.`);
+        setProofSuccess("");
+        setIntentFeedback("Opening your UPI app. If it does not open, use the button below.");
         setCustomerName(""); setCustomerPhone(""); setDeliveryAddress(""); setNote(""); setCart({});
+        window.setTimeout(() => openUpiIntent(nextSession.upiLink), 200);
       }
     } catch { setError("Could not submit order."); }
     finally { setSubmitting(false); }
@@ -190,8 +432,8 @@ export function PublicStorePage() {
   }
 
   async function copyIntentLink() {
-    if (!upiLink) return;
-    await navigator.clipboard.writeText(upiLink);
+    if (!activeUpiLink) return;
+    await navigator.clipboard.writeText(activeUpiLink);
     setIntentFeedback("UPI intent link copied.");
     window.setTimeout(() => setIntentFeedback(""), 2200);
   }
@@ -284,6 +526,7 @@ export function PublicStorePage() {
             {visibleProducts.map(product => {
               const item = getItem(product._id);
               const isSelected = item.quantity > 0;
+              const unitPrice = getProductUnitPrice(product, item.variants);
               return (
                 <article key={product._id}
                   className={`rounded-2xl border p-4 transition ${isSelected ? "border-teal-400 bg-teal-50" : "border-slate-200 bg-white"}`}>
@@ -295,13 +538,13 @@ export function PublicStorePage() {
                   )}
                   <p className="mt-2 font-semibold text-slate-800">{product.title}</p>
                   <div className="mt-1 flex items-baseline gap-2">
-                    <span className="text-lg font-bold text-slate-900">₹{product.price}</span>
-                    {product.mrp > 0 && product.mrp > product.price && (
+                    <span className="text-lg font-bold text-slate-900">₹{unitPrice}</span>
+                    {product.mrp > 0 && product.mrp > unitPrice && (
                       <span className="text-sm text-slate-400 line-through">₹{product.mrp}</span>
                     )}
-                    {product.mrp > product.price && (
+                    {product.mrp > unitPrice && (
                       <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-xs font-semibold text-emerald-700">
-                        {Math.round(((product.mrp - product.price) / product.mrp) * 100)}% off
+                        {Math.round(((product.mrp - unitPrice) / product.mrp) * 100)}% off
                       </span>
                     )}
                   </div>
@@ -315,13 +558,15 @@ export function PublicStorePage() {
                         <div key={v.label}>
                           <p className="text-xs font-semibold text-slate-600 mb-1">{v.label}</p>
                           <div className="flex flex-wrap gap-1.5">
-                            {v.options.map(opt => (
+                            {v.options.map(opt => {
+                              const optionPrice = product.variantPrices?.[getVariantPriceKey(v.label, opt)];
+                              return (
                               <button key={opt} type="button"
                                 onClick={() => setVariant(product._id, v.label, opt)}
                                 className={`rounded-lg border px-3 py-1 text-xs font-semibold transition ${item.variants[v.label] === opt ? "border-teal-500 bg-teal-600 text-white" : "border-slate-200 bg-white text-slate-700 hover:border-slate-400"}`}>
-                                {opt}
+                                {opt}{optionPrice ? ` - ₹${optionPrice}` : ""}
                               </button>
-                            ))}
+                            );})}
                           </div>
                         </div>
                       ))}
@@ -344,7 +589,7 @@ export function PublicStorePage() {
                         onChange={e => setQty(product._id, Number(e.target.value))} />
                       <button type="button" onClick={() => setQty(product._id, item.quantity + 1)}
                         className="h-8 w-8 rounded-md border border-slate-200 bg-slate-50 font-bold text-slate-700">+</button>
-                      <span className="ml-auto text-sm font-semibold text-slate-900">₹{item.quantity * product.price}</span>
+                      <span className="ml-auto text-sm font-semibold text-slate-900">₹{item.quantity * unitPrice}</span>
                       <button onClick={() => removeProduct(product._id)}
                         className="rounded-lg border border-rose-200 bg-rose-50 px-2 py-1 text-xs font-semibold text-rose-700">Remove</button>
                     </div>
@@ -369,7 +614,7 @@ export function PublicStorePage() {
             {selectedItems.map(p => (
               <div key={p._id} className="flex items-center justify-between gap-2 text-sm text-slate-700">
                 <span className="max-w-[65%] break-words">{p.title} × {cart[p._id]?.quantity}</span>
-                <span className="font-semibold text-slate-900">₹{p.price * (cart[p._id]?.quantity || 1)}</span>
+                <span className="font-semibold text-slate-900">₹{getProductUnitPrice(p, cart[p._id]?.variants || {}) * (cart[p._id]?.quantity || 1)}</span>
               </div>
             ))}
             <div className="border-t border-slate-200 pt-2 space-y-1">
@@ -377,8 +622,14 @@ export function PublicStorePage() {
                 <span>Items total</span><span>₹{itemsTotal}</span>
               </div>
               <div className="flex items-center justify-between text-sm text-slate-600">
-                <span>Delivery charge</span>
-                <span className="font-semibold text-slate-800">₹{deliveryCharge}</span>
+                <span>
+                  {seller?.deliveryMode === "flat_rate"
+                    ? `Delivery charge${seller.freeDeliveryThreshold > 0 ? ` (Free above ₹${seller.freeDeliveryThreshold})` : ""}`
+                    : "Delivery charge"}
+                </span>
+                <span className="font-semibold text-slate-800">
+                  {deliveryCharge === 0 ? "Free" : `₹${deliveryCharge}`}
+                </span>
               </div>
               <div className="flex justify-between font-bold text-slate-900 pt-1 border-t border-slate-200 text-sm">
                 <span>Total Payable</span><span>₹{grandTotal}</span>
@@ -387,25 +638,37 @@ export function PublicStorePage() {
           </div>
         )}
 
-        {/* UPI payment */}
-        {seller.upiId && grandTotal > 0 && (
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-3">
-            <p className="text-sm text-slate-700">UPI: <span className="font-semibold text-slate-900">{seller.upiId}</span></p>
-            <div className="inline-flex rounded-xl bg-white p-3">
-              <QRCodeSVG value={upiLink} size={128} />
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 space-y-4">
+        <div className="space-y-1">
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Customer Details</p>
+          <p className="text-sm text-slate-600">Fill your details and choose how you want to pay before placing the order.</p>
+        </div>
+
+        {(supportsPrepaid || supportsCod) && (
+          <div className="space-y-2">
+            <p className="text-sm font-semibold text-slate-700">Payment method</p>
+            <div className="grid gap-2">
+              {supportsPrepaid && (
+                <button
+                  type="button"
+                  onClick={() => setPaymentMethod("prepaid")}
+                  className={`rounded-xl border px-4 py-3 text-left transition ${isPrepaidCheckout ? "border-teal-500 bg-teal-50" : "border-slate-200 bg-slate-50 hover:border-slate-300"}`}
+                >
+                  <p className="text-sm font-semibold text-slate-900">Pay Before Order</p>
+                  <p className="text-xs text-slate-500">Pay now using UPI and continue automatically after payment.</p>
+                </button>
+              )}
+              {supportsCod && (
+                <button
+                  type="button"
+                  onClick={() => setPaymentMethod("cod")}
+                  className={`rounded-xl border px-4 py-3 text-left transition ${isCodCheckout ? "border-teal-500 bg-teal-50" : "border-slate-200 bg-slate-50 hover:border-slate-300"}`}
+                >
+                  <p className="text-sm font-semibold text-slate-900">Cash on Delivery</p>
+                  <p className="text-xs text-slate-500">Place the order now and pay the seller at the time of delivery.</p>
+                </button>
+              )}
             </div>
-            <div className="flex flex-col gap-2 sm:flex-row">
-              <a href={upiLink}
-                className="flex-1 rounded-xl bg-teal-600 px-4 py-2 text-center text-sm font-semibold text-white hover:bg-teal-500 transition">
-                Pay ₹{grandTotal} via UPI
-              </a>
-              <button type="button" onClick={copyIntentLink}
-                className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:border-slate-400 transition">
-                Copy Link
-              </button>
-            </div>
-            {intentFeedback && <p className="text-xs text-sky-700 bg-sky-50 border border-sky-200 rounded-lg px-2.5 py-1.5">{intentFeedback}</p>}
-            <p className="text-xs text-slate-400">Scan QR or tap Pay button on mobile with a UPI app.</p>
           </div>
         )}
 
@@ -437,12 +700,84 @@ export function PublicStorePage() {
 
           <button type="submit" disabled={submitting || selectedItems.length === 0}
             className="w-full rounded-xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:bg-slate-400">
-            {submitting ? "Submitting..." : "I Have Paid & Place Order"}
+            {submitting ? "Submitting..." : isPrepaidCheckout ? "Place Order & Continue to Pay" : "Place Order with Cash on Delivery"}
           </button>
         </form>
+        </div>
 
+        {/* UPI payment */}
+        {(supportsPrepaid && isPrepaidCheckout && seller.upiId && activeAmount > 0 && (selectedItems.length > 0 || Boolean(paymentSession))) && (
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-3">
+            <div className="space-y-1">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Step 2: UPI Payment</p>
+              <p className="text-sm text-slate-600">After placing the order, pay the exact amount below using any UPI app.</p>
+            </div>
+            <p className="text-sm text-slate-700">UPI: <span className="font-semibold text-slate-900">{seller.upiId}</span></p>
+            {paymentSession && (
+              <div className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-800">
+                <p className="font-semibold">Transaction Ref: {paymentSession.transactionRef}</p>
+                <p className="mt-1">This page is checking your order status every few seconds and will move to the thank you page automatically after payment confirmation.</p>
+              </div>
+            )}
+            <div className="inline-flex rounded-xl bg-white p-3">
+              <QRCodeSVG value={activeUpiLink} size={128} />
+            </div>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <button type="button" onClick={() => openUpiIntent(activeUpiLink)}
+                className="flex-1 rounded-xl bg-teal-600 px-4 py-2 text-center text-sm font-semibold text-white hover:bg-teal-500 transition">
+                Pay ₹{activeAmount} via UPI
+              </button>
+              <button type="button" onClick={copyIntentLink}
+                className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:border-slate-400 transition">
+                Copy Link
+              </button>
+            </div>
+            {paymentSession && (
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <button
+                  type="button"
+                  onClick={() => void checkPaymentStatus()}
+                  className="flex-1 rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-400"
+                >
+                  {checkingPayment ? "Checking..." : "Already paid? Check status"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => navigate(thankYouPath)}
+                  className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-400"
+                >
+                  Open Thank You Page
+                </button>
+              </div>
+            )}
+            {paymentSession && placedOrderIds.length > 0 && (
+              <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
+                {placedOrderIds.map(id => (
+                  <div key={id} className="flex items-center justify-between gap-3 py-1">
+                    <span className="truncate">{id}</span>
+                    <span className="rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 font-semibold capitalize text-slate-700">
+                      {orderStatuses[id] || "pending"}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {intentFeedback && <p className="text-xs text-sky-700 bg-sky-50 border border-sky-200 rounded-lg px-2.5 py-1.5">{intentFeedback}</p>}
+            <p className="text-xs text-slate-400">
+              {paymentSession
+                ? "If your UPI app does not return automatically, come back to this tab or use the Thank You page button."
+                : "Scan QR or tap Pay button on mobile with a UPI app."}
+            </p>
+          </div>
+        )}
+        {supportsCod && isCodCheckout && (
+          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-700">Payment on Delivery</p>
+            <p className="text-sm text-emerald-900">No online payment is needed now. Your order will be placed first and the seller can collect payment at delivery.</p>
+          </div>
+        )}
         {/* Payment proof upload — shown after order placed */}
-        {placedOrderIds.length > 0 && (
+        {isPrepaidCheckout && placedOrderIds.length > 0 && (
           <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 space-y-3">
             <p className="text-sm font-semibold text-amber-800">📸 Share Payment Screenshot</p>
             <p className="text-xs text-amber-700">Paste the URL of your payment screenshot so the seller can confirm your order.</p>
@@ -457,9 +792,46 @@ export function PublicStorePage() {
         )}
       </section>
     </main>
-    <footer className="py-4 text-center text-xs text-slate-400">
-      Powered by <span className="font-semibold text-slate-500">🛍️ MyDukan</span>
+    <footer className="space-y-3 py-4 text-center text-xs text-slate-400">
+      <div className="flex flex-wrap items-center justify-center gap-3">
+        <button type="button" onClick={() => setActivePolicy("privacyPolicy")} className="font-semibold text-slate-500 hover:text-slate-700">
+          Privacy Policy
+        </button>
+        <button type="button" onClick={() => setActivePolicy("returnRefundPolicy")} className="font-semibold text-slate-500 hover:text-slate-700">
+          Return & Refund Policy
+        </button>
+        <button type="button" onClick={() => setActivePolicy("termsAndConditions")} className="font-semibold text-slate-500 hover:text-slate-700">
+          Terms & Conditions
+        </button>
+      </div>
+      <p>
+        Powered by <span className="font-semibold text-slate-500">🛍️ MyDukan</span>
+      </p>
     </footer>
+    {activePolicy && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 px-4 py-6">
+        <div className="max-h-[85vh] w-full max-w-2xl overflow-hidden rounded-3xl border border-white/70 bg-white shadow-card">
+          <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-teal-700">Store Policy</p>
+              <h3 className="mt-1 font-heading text-xl font-bold text-slate-900">{policyMeta[activePolicy].title}</h3>
+            </div>
+            <button
+              type="button"
+              onClick={() => setActivePolicy(null)}
+              className="rounded-xl border border-slate-200 px-3 py-1.5 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+            >
+              Close
+            </button>
+          </div>
+          <div className="max-h-[calc(85vh-88px)] overflow-y-auto px-5 py-4">
+            <div className="whitespace-pre-line text-sm leading-6 text-slate-700">
+              {policyMeta[activePolicy].content}
+            </div>
+          </div>
+        </div>
+      </div>
+    )}
     </>
   );
 }

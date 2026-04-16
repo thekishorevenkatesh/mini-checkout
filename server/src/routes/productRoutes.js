@@ -2,8 +2,33 @@ const express = require("express");
 const Product = require("../models/Product");
 const Seller = require("../models/Seller");
 const auth = require("../middleware/auth");
+const { getPolicyContent } = require("../utils/policyDefaults");
 
 const router = express.Router();
+
+function withPolicyDefaults(sellerDoc) {
+  if (!sellerDoc) return sellerDoc;
+
+  const seller = sellerDoc.toObject ? sellerDoc.toObject() : sellerDoc;
+  return {
+    ...seller,
+    ...getPolicyContent(seller),
+  };
+}
+
+function normalizeVariantPrices(input) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return {};
+  }
+
+  return Object.entries(input).reduce((acc, [key, value]) => {
+    const numericValue = Number(value);
+    if (key && Number.isFinite(numericValue) && numericValue > 0) {
+      acc[key] = numericValue;
+    }
+    return acc;
+  }, {});
+}
 
 // ─── POST /products — Create product (auth) ───────────────────────────────
 router.post("/", auth, async (req, res) => {
@@ -17,6 +42,7 @@ router.post("/", auth, async (req, res) => {
       mrp,
       category,
       variants,
+      variantPrices,
     } = req.body;
 
     if (!title || !price) {
@@ -38,6 +64,7 @@ router.post("/", auth, async (req, res) => {
       mrp: mrp ? Number(mrp) : 0,
       category: category ? String(category).trim() : "",
       variants: Array.isArray(variants) ? variants : [],
+      variantPrices: normalizeVariantPrices(variantPrices),
     });
 
     // Ensure category is tracked in seller's categories list
@@ -82,7 +109,7 @@ router.get("/public/:sellerSlug", async (req, res) => {
       isActive: true,
     }).sort({ createdAt: -1 });
 
-    return res.json({ seller, products });
+    return res.json({ seller: withPolicyDefaults(seller), products });
   } catch (error) {
     return res.status(500).json({ message: "Unable to fetch seller store" });
   }
@@ -121,7 +148,7 @@ router.put("/:productId", auth, async (req, res) => {
       return res.status(404).json({ message: "Product not found" });
     }
 
-    const { title, description, imageUrl, notes, price, mrp, category, variants } =
+    const { title, description, imageUrl, notes, price, mrp, category, variants, variantPrices } =
       req.body;
 
     if (title) product.title = String(title).trim();
@@ -132,6 +159,7 @@ router.put("/:productId", auth, async (req, res) => {
     if (mrp !== undefined) product.mrp = Number(mrp);
     if (category !== undefined) product.category = String(category).trim();
     if (Array.isArray(variants)) product.variants = variants;
+    if (variantPrices !== undefined) product.variantPrices = normalizeVariantPrices(variantPrices);
 
     await product.save();
 

@@ -29,6 +29,9 @@ interface RegisterInput {
   businessLogo?: string;
   whatsappNumber?: string;
   callNumber?: string;
+  privacyPolicy?: string;
+  returnRefundPolicy?: string;
+  termsAndConditions?: string;
 }
 
 interface UpdateProfileInput {
@@ -42,6 +45,9 @@ interface UpdateProfileInput {
   favicon?: string;
   whatsappNumber?: string;
   callNumber?: string;
+  privacyPolicy?: string;
+  returnRefundPolicy?: string;
+  termsAndConditions?: string;
 }
 
 interface AuthContextShape {

@@ -1,10 +1,29 @@
 const express = require("express");
 const Product = require("../models/Product");
 const Order = require("../models/Order");
+const Seller = require("../models/Seller");
 const auth = require("../middleware/auth");
 
 const router = express.Router();
 const validStatuses = ["pending", "paid", "confirmed", "cancelled"];
+
+function resolveProductUnitPrice(product, selectedVariants = {}) {
+  const priceMap = product.variantPrices instanceof Map
+    ? Object.fromEntries(product.variantPrices.entries())
+    : product.variantPrices || {};
+
+  for (const variant of product.variants || []) {
+    const option = selectedVariants?.[variant.label];
+    if (!option) continue;
+    const key = `${variant.label}::${option}`;
+    const variantPrice = Number(priceMap[key]);
+    if (Number.isFinite(variantPrice) && variantPrice > 0) {
+      return variantPrice;
+    }
+  }
+
+  return Number(product.price);
+}
 
 // ─── POST /orders — Customer places order (no auth) ───────────────────────
 router.post("/", async (req, res) => {
@@ -18,6 +37,7 @@ router.post("/", async (req, res) => {
       deliveryAddress = "",
       deliveryCharge = 0,
       selectedVariants = {},
+      paymentMethod = "prepaid",
     } = req.body;
 
     if (!productId || !customerName || !customerPhone) {
@@ -38,8 +58,10 @@ router.post("/", async (req, res) => {
       return res.status(404).json({ message: "Product is unavailable" });
     }
 
-    const itemTotal = Number(product.price) * safeQuantity;
+    const unitPrice = resolveProductUnitPrice(product, selectedVariants);
+    const itemTotal = unitPrice * safeQuantity;
     const safeDeliveryCharge = Number(deliveryCharge) >= 0 ? Number(deliveryCharge) : 0;
+    const safePaymentMethod = paymentMethod === "cod" ? "cod" : "prepaid";
 
     const order = await Order.create({
       seller: product.seller._id,
@@ -52,7 +74,8 @@ router.post("/", async (req, res) => {
       quantity: safeQuantity,
       deliveryCharge: safeDeliveryCharge,
       selectedVariants,
-      paymentStatus: "pending",
+      paymentMethod: safePaymentMethod,
+      paymentStatus: safePaymentMethod === "cod" ? "confirmed" : "pending",
     });
 
     return res.status(201).json({ order });
@@ -119,6 +142,42 @@ router.get("/my/report", auth, async (req, res) => {
     });
   } catch (error) {
     return res.status(500).json({ message: "Unable to generate report" });
+  }
+});
+
+// ─── GET /orders/public/status — Customer polling endpoint ────────────────
+router.get("/public/status", async (req, res) => {
+  try {
+    const ids = String(req.query.ids || "")
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean)
+      .slice(0, 20);
+    const sellerSlug = String(req.query.sellerSlug || "").trim();
+
+    if (ids.length === 0) {
+      return res.status(400).json({ message: "At least one order id is required" });
+    }
+
+    const query = { _id: { $in: ids } };
+
+    if (sellerSlug) {
+      const seller = await Seller.findOne({ slug: sellerSlug }).select("_id");
+
+      if (!seller) {
+        return res.status(404).json({ message: "Seller not found" });
+      }
+
+      query.seller = seller._id;
+    }
+
+    const orders = await Order.find(query)
+      .select("_id paymentStatus updatedAt createdAt")
+      .sort({ createdAt: -1 });
+
+    return res.json({ orders });
+  } catch (error) {
+    return res.status(500).json({ message: "Unable to fetch order statuses" });
   }
 });
 

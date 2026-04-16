@@ -3,12 +3,14 @@ import { ProtectedRoute } from "./components/ProtectedRoute";
 import { DashboardPage } from "./pages/DashboardPage";
 import { LoginPage } from "./pages/LoginPage";
 import { PublicStorePage } from "./pages/PublicStorePage";
+import { ThankYouPage } from "./pages/ThankYouPage";
 
 export default function App() {
   return (
     <BrowserRouter>
       <Routes>
         <Route path="/store/:sellerSlug" element={<PublicStorePage />} />
+        <Route path="/thank-you" element={<ThankYouPage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route
           path="/dashboard"

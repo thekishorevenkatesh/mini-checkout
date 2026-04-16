@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const { DEFAULT_POLICY_CONTENT } = require("../utils/policyDefaults");
 
 const socialLinkSchema = new mongoose.Schema(
   {
@@ -98,6 +99,36 @@ const sellerSchema = new mongoose.Schema(
       type: Number,
       default: 0,
       min: 0,
+    },
+    deliveryMode: {
+      type: String,
+      enum: ["always_free", "flat_rate"],
+      default: "always_free",
+    },
+    freeDeliveryThreshold: {
+      type: Number,
+      default: 500,
+      min: 0,
+    },
+    paymentMode: {
+      type: String,
+      enum: ["prepaid_only", "cod_only", "both"],
+      default: "prepaid_only",
+    },
+    privacyPolicy: {
+      type: String,
+      trim: true,
+      default: DEFAULT_POLICY_CONTENT.privacyPolicy,
+    },
+    returnRefundPolicy: {
+      type: String,
+      trim: true,
+      default: DEFAULT_POLICY_CONTENT.returnRefundPolicy,
+    },
+    termsAndConditions: {
+      type: String,
+      trim: true,
+      default: DEFAULT_POLICY_CONTENT.termsAndConditions,
     },
     // OTP fields (transient — cleared after verification)
     otp: {

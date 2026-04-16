@@ -1,4 +1,6 @@
 export type OrderStatus = "pending" | "paid" | "confirmed" | "cancelled";
+export type PaymentMode = "prepaid_only" | "cod_only" | "both";
+export type PaymentMethod = "prepaid" | "cod";
 
 export interface SocialLink {
   platform: string;
@@ -32,7 +34,13 @@ export interface Seller {
   socialLinks: SocialLink[];
   banners: Banner[];
   categories: string[];
+  deliveryMode: "always_free" | "flat_rate";
   defaultDeliveryCharge: number;
+  freeDeliveryThreshold: number;
+  paymentMode: PaymentMode;
+  privacyPolicy: string;
+  returnRefundPolicy: string;
+  termsAndConditions: string;
 }
 
 export interface Product {
@@ -46,6 +54,7 @@ export interface Product {
   mrp: number;
   price: number; // selling price
   variants: ProductVariant[];
+  variantPrices?: Record<string, number>;
   isActive: boolean;
   createdAt: string;
 }
@@ -62,6 +71,7 @@ export interface Order {
   quantity: number;
   deliveryCharge: number;
   selectedVariants: Record<string, string>;
+  paymentMethod: PaymentMethod;
   paymentStatus: OrderStatus;
   paymentScreenshotUrl: string;
   createdAt: string;

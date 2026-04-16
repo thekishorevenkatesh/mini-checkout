@@ -56,6 +56,11 @@ const orderSchema = new mongoose.Schema(
       of: String,
       default: {},
     },
+    paymentMethod: {
+      type: String,
+      enum: ["prepaid", "cod"],
+      default: "prepaid",
+    },
     paymentStatus: {
       type: String,
       enum: ["pending", "paid", "confirmed", "cancelled"],
