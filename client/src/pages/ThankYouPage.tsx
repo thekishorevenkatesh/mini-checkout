@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
+import { Alert } from "../components/ui/Alert";
+import { Button } from "../components/ui/Button";
+import { Card } from "../components/ui/Card";
 import type { OrderStatus } from "../types";
 
 type PublicOrderStatus = {
@@ -76,7 +79,7 @@ export function ThankYouPage() {
 
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-3xl items-center justify-center px-4 py-10">
-      <section className="w-full rounded-3xl border border-white/70 bg-white/90 p-6 shadow-card sm:p-8">
+      <Card className="w-full p-6 sm:p-8">
         <p className="text-xs font-bold uppercase tracking-[0.18em] text-teal-700">Payment Status</p>
         <h1 className="mt-2 font-heading text-3xl font-bold text-slate-900">
           {allSuccessful ? "Thank you for your payment" : "We are checking your payment"}
@@ -90,22 +93,20 @@ export function ThankYouPage() {
               : "If you just finished the UPI payment, keep this page open. It will refresh automatically as soon as the order status changes."}
         </p>
 
-        {error && (
-          <p className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
-            {error}
-          </p>
-        )}
+        {error ? <Alert tone="error" className="mt-4">{error}</Alert> : null}
 
         <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4">
           <div className="flex items-center justify-between gap-3">
             <p className="text-sm font-semibold text-slate-900">Tracked orders</p>
-            <button
+            <Button
               type="button"
               onClick={() => void fetchStatuses()}
-              className="rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 transition hover:border-slate-400"
+              variant="secondary"
+              loading={loading}
+              className="px-3 py-1.5"
             >
-              {loading ? "Checking..." : "Check status"}
-            </button>
+              Check status
+            </Button>
           </div>
 
           <div className="mt-4 space-y-2">
@@ -132,20 +133,20 @@ export function ThankYouPage() {
           {sellerSlug && (
             <Link
               to={`/store/${sellerSlug}`}
-              className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-center text-sm font-semibold text-slate-700 transition hover:border-slate-400"
+              className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-center text-sm font-semibold text-slate-700 transition hover:border-slate-400 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
             >
               Back to Store
             </Link>
           )}
-          <button
+          <Button
             type="button"
             onClick={() => void fetchStatuses()}
-            className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-700"
+            loading={loading}
           >
             Refresh Now
-          </button>
+          </Button>
         </div>
-      </section>
+      </Card>
     </main>
   );
 }

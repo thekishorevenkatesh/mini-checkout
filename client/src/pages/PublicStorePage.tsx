@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { QRCodeSVG } from "qrcode.react";
 import { api } from "../api/client";
 import { DEFAULT_POLICY_CONTENT } from "../constants/policyDefaults";
+import { useI18n } from "../context/I18nContext";
 import type { OrderStatus, PaymentMethod, Product, Seller } from "../types";
 
 type CartItem = { quantity: number; variants: Record<string, string> };
@@ -65,17 +66,84 @@ function getVariantPriceKey(label: string, option: string) {
   return `${label}::${option}`;
 }
 
-function getProductUnitPrice(product: Product, selectedVariants: Record<string, string>) {
+function getNormalizedVariantGroups(product: Product) {
+  const grouped = new Map<string, Set<string>>();
   for (const variant of product.variants || []) {
-    const option = selectedVariants[variant.label];
-    if (!option) continue;
-    const variantPrice = product.variantPrices?.[getVariantPriceKey(variant.label, option)];
-    if (typeof variantPrice === "number" && variantPrice > 0) {
-      return variantPrice;
+    const label = String(variant.label || "").trim();
+    if (!label) continue;
+    if (!grouped.has(label)) grouped.set(label, new Set<string>());
+    for (const option of variant.options || []) {
+      const cleanOption = String(option || "").trim();
+      if (cleanOption) grouped.get(label)?.add(cleanOption);
     }
   }
 
-  return product.price;
+  return Array.from(grouped.entries()).map(([label, options]) => ({
+    label,
+    options: Array.from(options),
+  }));
+}
+
+function getProductUnitPricing(product: Product, selectedVariants: Record<string, string>) {
+  let selectedVariantMrp: number | undefined;
+  for (const variant of getNormalizedVariantGroups(product)) {
+    const option = selectedVariants[variant.label];
+    if (!option) continue;
+    const variantPrice = product.variantPrices?.[getVariantPriceKey(variant.label, option)];
+    const variantMrp = product.variantMrps?.[getVariantPriceKey(variant.label, option)];
+    if (typeof variantPrice === "number" && variantPrice > 0) {
+      if (typeof variantMrp === "number" && variantMrp > 0) {
+        selectedVariantMrp = variantMrp;
+      }
+      return {
+        price: variantPrice,
+        mrp: selectedVariantMrp || product.mrp,
+      };
+    }
+  }
+
+  return {
+    price: product.price,
+    mrp: product.mrp,
+  };
+}
+
+function getProductAvailableStock(product: Product, selectedVariants: Record<string, string>) {
+  const quantityMap = product.variantQuantities || {};
+  const stocks: number[] = [];
+  for (const variant of getNormalizedVariantGroups(product)) {
+    if (!variant.options?.length) continue;
+    const option = selectedVariants[variant.label];
+    if (!option) continue;
+    const value = Number(quantityMap[getVariantPriceKey(variant.label, option)]);
+    if (Number.isFinite(value) && value >= 0) {
+      stocks.push(value);
+    }
+  }
+  if (!stocks.length) return null;
+  return Math.min(...stocks);
+}
+
+function withAutoSelectedSingleVariants(product: Product, selectedVariants: Record<string, string>) {
+  const next = { ...selectedVariants };
+  for (const variant of getNormalizedVariantGroups(product)) {
+    if (!variant.options?.length) continue;
+    if (!next[variant.label] && variant.options.length === 1) {
+      next[variant.label] = variant.options[0];
+    }
+  }
+  return next;
+}
+
+function hasCompleteVariantSelection(product: Product, selectedVariants: Record<string, string>) {
+  for (const variant of getNormalizedVariantGroups(product)) {
+    if (!variant.options?.length) continue;
+    const selected = selectedVariants[variant.label];
+    if (!selected || !variant.options.includes(selected)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 // Simple auto-play banner carousel
@@ -108,6 +176,7 @@ function BannerCarousel({ banners }: { banners: { imageUrl: string; title?: stri
 }
 
 export function PublicStorePage() {
+  const { t } = useI18n();
   const navigate = useNavigate();
   const { sellerSlug } = useParams<{ sellerSlug: string }>();
   const [seller, setSeller] = useState<Seller | null>(null);
@@ -116,6 +185,13 @@ export function PublicStorePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [activeCategory, setActiveCategory] = useState("All");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [sortBy, setSortBy] = useState<"latest" | "price_low" | "price_high" | "discount">("latest");
+  const [maxPriceFilter, setMaxPriceFilter] = useState<number | null>(null);
+  const [showMobileFilters, setShowMobileFilters] = useState(false);
+  const [expandedProductId, setExpandedProductId] = useState<string | null>(null);
+  const [cartFeedback, setCartFeedback] = useState("");
+  const [variantErrorProductId, setVariantErrorProductId] = useState<string | null>(null);
 
   // Checkout fields
   const [customerName, setCustomerName] = useState("");
@@ -156,11 +232,35 @@ export function PublicStorePage() {
     return ["All", ...cats];
   }, [products]);
 
-  // Filtered products
-  const visibleProducts = useMemo(() =>
-    activeCategory === "All" ? products : products.filter(p => p.category === activeCategory),
-    [products, activeCategory]
-  );
+  // Filtered + sorted products for discovery UX
+  const visibleProducts = useMemo(() => {
+    const filtered = products.filter((p) => {
+      if (activeCategory !== "All" && p.category !== activeCategory) return false;
+      if (searchQuery.trim()) {
+        const q = searchQuery.trim().toLowerCase();
+        const text = `${p.title} ${p.description || ""} ${p.category || ""}`.toLowerCase();
+        if (!text.includes(q)) return false;
+      }
+      if (maxPriceFilter !== null) {
+        const unit = getProductUnitPricing(p, {});
+        if (unit.price > maxPriceFilter) return false;
+      }
+      return true;
+    });
+
+    return [...filtered].sort((a, b) => {
+      const unitA = getProductUnitPricing(a, {});
+      const unitB = getProductUnitPricing(b, {});
+      if (sortBy === "price_low") return unitA.price - unitB.price;
+      if (sortBy === "price_high") return unitB.price - unitA.price;
+      if (sortBy === "discount") {
+        const dA = unitA.mrp > unitA.price ? ((unitA.mrp - unitA.price) / unitA.mrp) * 100 : 0;
+        const dB = unitB.mrp > unitB.price ? ((unitB.mrp - unitB.price) / unitB.mrp) * 100 : 0;
+        return dB - dA;
+      }
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    });
+  }, [activeCategory, maxPriceFilter, products, searchQuery, sortBy]);
 
   // Selected products from cart
   const selectedItems = useMemo(() =>
@@ -171,8 +271,8 @@ export function PublicStorePage() {
   const itemsTotal = useMemo(() =>
     selectedItems.reduce((s, p) => {
       const quantity = cart[p._id]?.quantity || 1;
-      const unitPrice = getProductUnitPrice(p, cart[p._id]?.variants || {});
-      return s + unitPrice * quantity;
+      const unit = getProductUnitPricing(p, cart[p._id]?.variants || {});
+      return s + unit.price * quantity;
     }, 0),
     [cart, selectedItems]
   );
@@ -249,7 +349,27 @@ export function PublicStorePage() {
   function addProduct(productId: string) {
     setCart(prev => {
       if (prev[productId]?.quantity) return prev;
-      return { ...prev, [productId]: { quantity: 1, variants: {} } };
+      const product = products.find((p) => p._id === productId);
+      if (!product) return prev;
+
+      const currentItem = prev[productId] || { quantity: 0, variants: {} };
+      const variants = withAutoSelectedSingleVariants(product, currentItem.variants);
+      const requiresVariantSelection = (product.variants || []).some(v => (v.options || []).length > 0);
+      const hasSelection = hasCompleteVariantSelection(product, variants);
+
+      if (requiresVariantSelection && !hasSelection) {
+        setVariantErrorProductId(productId);
+        setCartFeedback("Please select a variant");
+        window.setTimeout(() => setCartFeedback(""), 1800);
+        return prev;
+      }
+
+      setVariantErrorProductId(null);
+      if (product) {
+        setCartFeedback(`${product.title} added to cart`);
+        window.setTimeout(() => setCartFeedback(""), 1800);
+      }
+      return { ...prev, [productId]: { quantity: 1, variants } };
     });
   }
 
@@ -259,10 +379,16 @@ export function PublicStorePage() {
 
   function setQty(productId: string, q: number) {
     if (q <= 0) { removeProduct(productId); return; }
-    setCart(prev => ({ ...prev, [productId]: { ...getItem(productId), quantity: q } }));
+    const product = products.find(p => p._id === productId);
+    if (!product) return;
+    const item = getItem(productId);
+    const availableStock = getProductAvailableStock(product, item.variants);
+    const safeQty = availableStock !== null ? Math.min(q, availableStock) : q;
+    setCart(prev => ({ ...prev, [productId]: { ...getItem(productId), quantity: Math.max(1, safeQty) } }));
   }
 
   function setVariant(productId: string, label: string, value: string) {
+    setVariantErrorProductId((prev) => (prev === productId ? null : prev));
     setCart(prev => ({
       ...prev,
       [productId]: { ...getItem(productId), variants: { ...getItem(productId).variants, [label]: value } },
@@ -362,6 +488,22 @@ export function PublicStorePage() {
     if (!sellerSlug) { setError("Store link is invalid."); return; }
     if (!seller) { setError("Seller store unavailable."); return; }
     if (isPrepaidCheckout && !seller.upiId) { setError("UPI is not configured for this store."); return; }
+
+    for (const product of selectedItems) {
+      const item = cart[product._id];
+      for (const variant of getNormalizedVariantGroups(product)) {
+        if (!variant.options?.length) continue;
+        if (!item?.variants?.[variant.label]) {
+          setError(`Please select ${variant.label} for ${product.title}.`);
+          return;
+        }
+      }
+      const selectedStock = getProductAvailableStock(product, item?.variants || {});
+      if (selectedStock !== null && item.quantity > selectedStock) {
+        setError(`Only ${selectedStock} quantity left for selected options in ${product.title}.`);
+        return;
+      }
+    }
     setSubmitting(true);
     try {
       const reqs = selectedItems.map(p =>
@@ -440,8 +582,19 @@ export function PublicStorePage() {
 
   if (loading) {
     return (
-      <main className="mx-auto flex min-h-screen w-full max-w-5xl items-center justify-center px-4 py-10">
-        <p className="rounded-full border border-white/80 bg-white/90 px-5 py-2 text-sm font-semibold text-slate-700 shadow-card">Loading store...</p>
+      <main className="mx-auto min-h-screen w-full max-w-7xl px-4 py-8">
+        <div className="mb-6 h-24 animate-pulse rounded-3xl bg-slate-200/80 dark:bg-slate-800/80" />
+        <div className="mb-4 h-16 animate-pulse rounded-2xl bg-slate-200/80 dark:bg-slate-800/80" />
+        <div className="grid gap-4 min-[480px]:grid-cols-2 lg:grid-cols-3">
+          {Array.from({ length: 8 }).map((_, index) => (
+            <div key={index} className="overflow-hidden rounded-3xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+              <div className="h-36 animate-pulse rounded-xl bg-slate-200 dark:bg-slate-800" />
+              <div className="mt-3 h-4 w-3/4 animate-pulse rounded bg-slate-200 dark:bg-slate-800" />
+              <div className="mt-2 h-4 w-1/2 animate-pulse rounded bg-slate-200 dark:bg-slate-800" />
+              <div className="mt-4 h-10 animate-pulse rounded-xl bg-slate-200 dark:bg-slate-800" />
+            </div>
+          ))}
+        </div>
       </main>
     );
   }
@@ -506,94 +659,217 @@ export function PublicStorePage() {
           <BannerCarousel banners={seller.banners} />
         )}
 
-        {/* Category Tabs */}
-        {categoryTabs.length > 1 && (
-          <div className="flex flex-wrap gap-2">
-            {categoryTabs.map(c => (
-              <button key={c} onClick={() => setActiveCategory(c)}
-                className={`rounded-full px-4 py-1.5 text-sm font-semibold transition ${activeCategory === c ? "bg-slate-900 text-white" : "border border-slate-200 bg-white text-slate-600 hover:border-slate-400"}`}>
-                {c}
-              </button>
-            ))}
+        {/* Discovery controls */}
+        <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-900/90">
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search products, categories..."
+              className="min-w-[220px] flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-teal-400 dark:border-slate-700 dark:bg-slate-900"
+            />
+            <button
+              type="button"
+              onClick={() => setShowMobileFilters((prev) => !prev)}
+              className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700 md:hidden"
+            >
+              {showMobileFilters ? "Hide Filters" : "Show Filters"}
+            </button>
           </div>
+
+          <div className={`mt-3 grid gap-2 ${showMobileFilters ? "grid" : "hidden"} md:grid md:grid-cols-3`}>
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as "latest" | "price_low" | "price_high" | "discount")}
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none dark:border-slate-700 dark:bg-slate-900"
+            >
+              <option value="latest">Sort: Latest</option>
+              <option value="price_low">Sort: Price low to high</option>
+              <option value="price_high">Sort: Price high to low</option>
+              <option value="discount">Sort: Best discount</option>
+            </select>
+            <select
+              value={maxPriceFilter ?? ""}
+              onChange={(e) => setMaxPriceFilter(e.target.value ? Number(e.target.value) : null)}
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none dark:border-slate-700 dark:bg-slate-900"
+            >
+              <option value="">All prices</option>
+              <option value="100">Under ₹100</option>
+              <option value="250">Under ₹250</option>
+              <option value="500">Under ₹500</option>
+              <option value="1000">Under ₹1000</option>
+            </select>
+            <button
+              type="button"
+              onClick={() => {
+                setSearchQuery("");
+                setMaxPriceFilter(null);
+                setSortBy("latest");
+                setActiveCategory("All");
+              }}
+              className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+            >
+              Reset
+            </button>
+          </div>
+
+          {/* Category Tabs */}
+          {categoryTabs.length > 1 && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {categoryTabs.map(c => (
+                <button key={c} onClick={() => setActiveCategory(c)}
+                  className={`rounded-full px-4 py-1.5 text-sm font-semibold transition ${activeCategory === c ? "bg-slate-900 text-white" : "border border-slate-200 bg-white text-slate-600 hover:border-slate-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"}`}>
+                  {c}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {cartFeedback && (
+          <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+            {cartFeedback}
+          </p>
         )}
 
         {/* Products */}
         {visibleProducts.length === 0 ? (
-          <p className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">No products available right now.</p>
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-6 text-center">
+            <p className="text-sm font-semibold text-amber-700">No products match your filters.</p>
+            <p className="mt-1 text-xs text-amber-600">Try clearing search or selecting a different category.</p>
+          </div>
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-4 grid-cols-1 min-[480px]:grid-cols-2 lg:grid-cols-3">
             {visibleProducts.map(product => {
               const item = getItem(product._id);
               const isSelected = item.quantity > 0;
-              const unitPrice = getProductUnitPrice(product, item.variants);
+              const unit = getProductUnitPricing(product, item.variants);
+              const unitPrice = unit.price;
+              const unitMrp = unit.mrp;
+              const normalizedVariants = getNormalizedVariantGroups(product);
+              const selectedStock = getProductAvailableStock(product, item.variants);
+              const effectiveVariants = withAutoSelectedSingleVariants(product, item.variants);
+              const requiresVariantSelection = normalizedVariants.some(v => (v.options || []).length > 0);
+              const hasVariantSelection = hasCompleteVariantSelection(product, effectiveVariants);
+              const discountPercent =
+                unitMrp > unitPrice
+                  ? Math.round(((unitMrp - unitPrice) / unitMrp) * 100)
+                  : 0;
+              const isOutOfStock = selectedStock !== null && selectedStock <= 0;
+              const isNewProduct = Date.now() - new Date(product.createdAt).getTime() < 1000 * 60 * 60 * 24 * 7;
+
               return (
                 <article key={product._id}
-                  className={`rounded-2xl border p-4 transition ${isSelected ? "border-teal-400 bg-teal-50" : "border-slate-200 bg-white"}`}>
-                  {product.imageUrl && (
-                    <img src={product.imageUrl} alt={product.title} className="h-36 w-full rounded-xl object-cover" />
-                  )}
-                  {product.category && (
-                    <span className="mt-2 inline-block rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-500">{product.category}</span>
-                  )}
-                  <p className="mt-2 font-semibold text-slate-800">{product.title}</p>
-                  <div className="mt-1 flex items-baseline gap-2">
-                    <span className="text-lg font-bold text-slate-900">₹{unitPrice}</span>
-                    {product.mrp > 0 && product.mrp > unitPrice && (
-                      <span className="text-sm text-slate-400 line-through">₹{product.mrp}</span>
+                  className={`group overflow-hidden rounded-3xl border bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-slate-700 dark:bg-slate-900 ${isSelected ? "border-emerald-400 ring-2 ring-emerald-100" : "border-slate-200"}`}>
+                  <div className="relative">
+                    {product.imageUrl ? (
+                      <img src={product.imageUrl} alt={product.title} className="aspect-[4/3] w-full object-cover" />
+                    ) : (
+                      <div className="aspect-[4/3] w-full bg-slate-100 dark:bg-slate-800" />
                     )}
-                    {product.mrp > unitPrice && (
-                      <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-xs font-semibold text-emerald-700">
-                        {Math.round(((product.mrp - unitPrice) / product.mrp) * 100)}% off
-                      </span>
+                    <div className="absolute left-2 top-2 flex flex-wrap gap-1">
+                      {isNewProduct && <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-bold text-sky-700">NEW</span>}
+                      {discountPercent > 0 && <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">{discountPercent}% OFF</span>}
+                      {isOutOfStock && <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-bold text-rose-700">OUT OF STOCK</span>}
+                    </div>
+                  </div>
+                  <div className="space-y-3 p-4">
+                    {product.category && (
+                      <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">{product.category}</span>
+                    )}
+                    <p className="line-clamp-2 text-lg font-bold leading-tight text-slate-900 dark:text-slate-100">{product.title}</p>
+                    <div className="flex items-end gap-2">
+                      <span className="text-xl font-bold text-slate-900 dark:text-slate-100">₹{unitPrice}</span>
+                      {unitMrp > 0 && unitMrp > unitPrice && (
+                        <span className="text-sm font-medium text-slate-400 line-through">₹{unitMrp}</span>
+                      )}
+                    </div>
+                    {product.description && (expandedProductId === product._id) && (
+                      <p className="text-sm text-slate-600 dark:text-slate-300">{product.description}</p>
+                    )}
+                    {(product.description || product.notes) && (
+                      <button
+                        type="button"
+                        onClick={() => setExpandedProductId((prev) => (prev === product._id ? null : product._id))}
+                        className="text-xs font-semibold text-emerald-700 underline-offset-2 hover:underline"
+                      >
+                        {expandedProductId === product._id ? "Hide details" : "View details"}
+                      </button>
+                    )}
+                    {product.notes && expandedProductId === product._id && <p className="text-xs text-slate-500 italic dark:text-slate-400">{product.notes}</p>}
+
+                    {/* Variants / units */}
+                    {normalizedVariants.length > 0 && (
+                      <div className={`space-y-2 rounded-xl p-2 ${variantErrorProductId === product._id ? "border border-rose-300 bg-rose-50/60 dark:bg-rose-950/30" : ""}`}>
+                        {normalizedVariants.map(v => (
+                          <div key={v.label}>
+                            <p className="mb-1 text-sm font-semibold text-slate-700 dark:text-slate-200">Select {v.label}</p>
+                            <div className="flex flex-wrap gap-2">
+                              {v.options.map(opt => {
+                                const optionPrice = product.variantPrices?.[getVariantPriceKey(v.label, opt)];
+                                const optionMrp = product.variantMrps?.[getVariantPriceKey(v.label, opt)];
+                                const optionQty = product.variantQuantities?.[getVariantPriceKey(v.label, opt)];
+                                const optionOut = optionQty !== undefined && optionQty <= 0;
+                                return (
+                                <button key={opt} type="button"
+                                  disabled={optionOut}
+                                  onClick={() => setVariant(product._id, v.label, opt)}
+                                  className={`min-w-28 rounded-xl border px-3 py-2 text-left text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${item.variants[v.label] === opt ? "border-emerald-400 bg-emerald-50 text-emerald-800" : "border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"}`}>
+                                  <span className="block">{opt}</span>
+                                  {optionPrice ? (
+                                    <span className="block text-xs font-bold">
+                                      ₹{optionPrice}
+                                      {optionMrp && optionMrp > optionPrice ? ` · MRP ₹${optionMrp}` : ""}
+                                    </span>
+                                  ) : null}
+                                  {optionQty !== undefined ? <span className="block text-[11px] font-medium text-slate-500">{optionQty > 0 ? `${optionQty} left` : "Out of stock"}</span> : null}
+                                </button>
+                              );})}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Add to cart / qty controls */}
+                    {!isSelected ? (
+                      <div className="mt-2 flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/80">
+                        <div>
+                          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Selected Unit</p>
+                          <p className="text-base font-bold text-slate-900 dark:text-slate-100">
+                            {(product.variants || []).length > 0
+                              ? Object.values(effectiveVariants).join(" • ") || "Choose options"
+                              : "Default"}
+                          </p>
+                          {requiresVariantSelection && !hasVariantSelection && (
+                            <p className="mt-0.5 text-xs font-semibold text-rose-600">Please select a variant</p>
+                          )}
+                        </div>
+                        <button type="button" onClick={() => addProduct(product._id)}
+                          disabled={isOutOfStock || (requiresVariantSelection && !hasVariantSelection)}
+                          className="rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-emerald-500 transition disabled:opacity-50">
+                          Add to cart
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="mt-2 flex flex-wrap items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-800 dark:bg-emerald-950/40">
+                        <button type="button" onClick={() => setQty(product._id, item.quantity - 1)}
+                          className="h-9 w-9 rounded-lg border border-emerald-200 bg-white text-lg font-bold text-slate-700">−</button>
+                        <input type="number" min={1}
+                          className="h-9 w-16 rounded-lg border border-emerald-200 bg-white text-center text-sm font-semibold outline-none"
+                          value={item.quantity}
+                          onChange={e => setQty(product._id, Number(e.target.value))} />
+                        <button type="button" onClick={() => setQty(product._id, item.quantity + 1)}
+                          className="h-9 w-9 rounded-lg border border-emerald-200 bg-white text-lg font-bold text-slate-700">+</button>
+                        <span className="ml-auto text-sm font-bold text-slate-900 dark:text-slate-100">₹{item.quantity * unitPrice}</span>
+                        <button onClick={() => removeProduct(product._id)}
+                          className="rounded-lg border border-rose-200 bg-rose-50 px-2 py-1 text-xs font-semibold text-rose-700">Remove</button>
+                      </div>
+                    )}
+                    {selectedStock !== null && (
+                      <p className="text-xs text-slate-500">Available quantity for selected options: {selectedStock}</p>
                     )}
                   </div>
-                  {product.description && <p className="mt-1 text-xs text-slate-600">{product.description}</p>}
-                  {product.notes && <p className="mt-1 text-xs text-slate-500 italic">{product.notes}</p>}
-
-                  {/* Variants */}
-                  {isSelected && product.variants?.length > 0 && (
-                    <div className="mt-3 space-y-2">
-                      {product.variants.map(v => (
-                        <div key={v.label}>
-                          <p className="text-xs font-semibold text-slate-600 mb-1">{v.label}</p>
-                          <div className="flex flex-wrap gap-1.5">
-                            {v.options.map(opt => {
-                              const optionPrice = product.variantPrices?.[getVariantPriceKey(v.label, opt)];
-                              return (
-                              <button key={opt} type="button"
-                                onClick={() => setVariant(product._id, v.label, opt)}
-                                className={`rounded-lg border px-3 py-1 text-xs font-semibold transition ${item.variants[v.label] === opt ? "border-teal-500 bg-teal-600 text-white" : "border-slate-200 bg-white text-slate-700 hover:border-slate-400"}`}>
-                                {opt}{optionPrice ? ` - ₹${optionPrice}` : ""}
-                              </button>
-                            );})}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* Add to cart / qty controls */}
-                  {!isSelected ? (
-                    <button type="button" onClick={() => addProduct(product._id)}
-                      className="mt-3 rounded-lg bg-slate-900 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-700 transition">
-                      Add to Cart
-                    </button>
-                  ) : (
-                    <div className="mt-3 flex items-center gap-2">
-                      <button type="button" onClick={() => setQty(product._id, item.quantity - 1)}
-                        className="h-8 w-8 rounded-md border border-slate-200 bg-slate-50 font-bold text-slate-700">−</button>
-                      <input type="number" min={1}
-                        className="h-8 w-14 rounded-md border border-slate-200 text-center text-sm outline-none"
-                        value={item.quantity}
-                        onChange={e => setQty(product._id, Number(e.target.value))} />
-                      <button type="button" onClick={() => setQty(product._id, item.quantity + 1)}
-                        className="h-8 w-8 rounded-md border border-slate-200 bg-slate-50 font-bold text-slate-700">+</button>
-                      <span className="ml-auto text-sm font-semibold text-slate-900">₹{item.quantity * unitPrice}</span>
-                      <button onClick={() => removeProduct(product._id)}
-                        className="rounded-lg border border-rose-200 bg-rose-50 px-2 py-1 text-xs font-semibold text-rose-700">Remove</button>
-                    </div>
-                  )}
                 </article>
               );
             })}
@@ -603,7 +879,7 @@ export function PublicStorePage() {
 
       {/* ── RIGHT: Checkout ────────────────────────────────── */}
       <section className="space-y-4 rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card sm:p-6 lg:sticky lg:top-6 lg:self-start">
-        <h2 className="font-heading text-2xl font-bold text-slate-900">Checkout</h2>
+        <h2 className="font-heading text-2xl font-bold text-slate-900">{t("store.checkout", "Checkout")}</h2>
 
         {/* Order summary */}
         {selectedItems.length === 0 ? (
@@ -614,7 +890,7 @@ export function PublicStorePage() {
             {selectedItems.map(p => (
               <div key={p._id} className="flex items-center justify-between gap-2 text-sm text-slate-700">
                 <span className="max-w-[65%] break-words">{p.title} × {cart[p._id]?.quantity}</span>
-                <span className="font-semibold text-slate-900">₹{getProductUnitPrice(p, cart[p._id]?.variants || {}) * (cart[p._id]?.quantity || 1)}</span>
+                <span className="font-semibold text-slate-900">₹{getProductUnitPricing(p, cart[p._id]?.variants || {}).price * (cart[p._id]?.quantity || 1)}</span>
               </div>
             ))}
             <div className="border-t border-slate-200 pt-2 space-y-1">

@@ -41,6 +41,10 @@ export interface Seller {
   privacyPolicy: string;
   returnRefundPolicy: string;
   termsAndConditions: string;
+  approvalStatus: "pending" | "approved" | "rejected";
+  approvedAt?: string | null;
+  approvedBy?: string;
+  createdAt?: string;
 }
 
 export interface Product {
@@ -55,6 +59,8 @@ export interface Product {
   price: number; // selling price
   variants: ProductVariant[];
   variantPrices?: Record<string, number>;
+  variantMrps?: Record<string, number>;
+  variantQuantities?: Record<string, number>;
   isActive: boolean;
   createdAt: string;
 }

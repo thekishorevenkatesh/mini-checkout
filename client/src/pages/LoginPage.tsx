@@ -2,13 +2,17 @@ import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { useAuth } from "../context/AuthContext";
+import { useI18n } from "../context/I18nContext";
+import { Alert } from "../components/ui/Alert";
+import { Button } from "../components/ui/Button";
 
 type Mode = "login" | "register";
 type Step = "contact" | "otp" | "profile";
 
 export function LoginPage() {
   const navigate = useNavigate();
-  const { sendOtp, verifyOtp, register } = useAuth();
+  const { sendOtp, verifyOtp, register, logout } = useAuth();
+  const { t } = useI18n();
 
   const [mode, setMode] = useState<Mode>("login");
   const [step, setStep] = useState<Step>("contact");
@@ -32,6 +36,29 @@ export function LoginPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
+
+  const phoneDigits = phone.replace(/\D/g, "");
+  const phoneError =
+    phone.length > 0 && phoneDigits.length !== 10
+      ? "Enter a valid 10-digit phone number."
+      : "";
+  const emailError =
+    email.trim().length > 0 && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
+      ? "Enter a valid email address."
+      : "";
+  const businessNameError =
+    (mode === "register" || step === "profile") && businessName.length > 0 && businessName.trim().length < 3
+      ? "Business name should be at least 3 characters."
+      : "";
+  const otpError =
+    otp.length > 0 && otp.length < 6 ? "OTP must be 6 digits." : "";
+
+  const canSendOtp =
+    phoneDigits.length === 10 &&
+    !emailError &&
+    (mode !== "register" || businessName.trim().length >= 3);
+  const canVerifyOtp = otp.length === 6;
+  const canCompleteProfile = businessName.trim().length >= 3;
 
   function errMsg(err: unknown, fallback: string) {
     if (axios.isAxiosError(err)) {
@@ -57,6 +84,8 @@ export function LoginPage() {
     e.preventDefault();
     setError("");
     if (!phone.trim()) { setError("Phone number is required."); return; }
+    if (phoneDigits.length !== 10) { setError("Enter a valid 10-digit phone number."); return; }
+    if (emailError) { setError(emailError); return; }
     if (mode === "register" && !businessName.trim()) {
       setError("Business name is required.");
       return;
@@ -64,7 +93,7 @@ export function LoginPage() {
     setSubmitting(true);
     try {
       const result = await sendOtp({
-        phone: phone.trim(),
+        phone: phoneDigits,
         email: email.trim() || undefined,
       });
       if (result.otp) setDevOtp(result.otp);
@@ -82,10 +111,11 @@ export function LoginPage() {
     e.preventDefault();
     setError("");
     if (!otp.trim()) { setError("Please enter the OTP."); return; }
+    if (otp.trim().length !== 6) { setError("OTP must be 6 digits."); return; }
     setSubmitting(true);
     try {
       const { isProfileComplete } = await verifyOtp({
-        phone: phone.trim() || undefined,
+        phone: phoneDigits || undefined,
         email: email.trim() || undefined,
         otp: otp.trim(),
       });
@@ -113,6 +143,11 @@ export function LoginPage() {
         }
       }
     } catch (err) {
+      if (axios.isAxiosError(err) && err.response?.status === 403) {
+        setError(err.response.data?.message || "Your account is pending admin approval.");
+        setStep("contact");
+        return;
+      }
       setError(errMsg(err, "Invalid or expired OTP. Try again."));
     } finally {
       setSubmitting(false);
@@ -124,6 +159,7 @@ export function LoginPage() {
     e.preventDefault();
     setError("");
     if (!businessName.trim()) { setError("Business name is required."); return; }
+    if (businessName.trim().length < 3) { setError("Business name should be at least 3 characters."); return; }
     setSubmitting(true);
     try {
       await register({
@@ -136,7 +172,11 @@ export function LoginPage() {
         whatsappNumber: whatsappNumber.trim() || undefined,
         callNumber: callNumber.trim() || undefined,
       });
-      navigate("/dashboard", { replace: true });
+      logout();
+      setMode("login");
+      setStep("contact");
+      setInfo("Registration submitted. Wait for admin approval before logging in.");
+      setError("");
     } catch (err) {
       setError(errMsg(err, "Could not complete registration. Try again."));
     } finally {
@@ -159,7 +199,7 @@ export function LoginPage() {
 
   return (
     <>
-    <main className="mx-auto grid min-h-screen w-full max-w-6xl items-center gap-8 px-4 py-8 sm:py-10 lg:grid-cols-2">
+    <main className="mx-auto grid min-h-[calc(100vh-52px)] w-full max-w-6xl items-center gap-6 px-4 py-4 sm:py-5 lg:grid-cols-2 lg:gap-8">
 
       {/* ── Left: Hero ─────────────────────────────────────────────── */}
       <section className="space-y-5 text-center lg:space-y-6 lg:text-left">
@@ -214,7 +254,7 @@ export function LoginPage() {
       </section>
 
       {/* ── Right: Form Card ───────────────────────────────────────── */}
-      <section className="mx-auto w-full max-w-xl rounded-3xl border border-white/80 bg-white/90 p-5 shadow-card backdrop-blur sm:p-8">
+      <section className="mx-auto w-full max-w-xl rounded-3xl border border-white/80 bg-white/90 p-5 shadow-card backdrop-blur sm:p-6">
 
         {/* Mode Toggle Tabs */}
         <div className="mb-6 flex rounded-2xl border border-slate-200 bg-slate-50 p-1">
@@ -229,7 +269,7 @@ export function LoginPage() {
                   : "text-slate-500 hover:text-slate-700"
               }`}
             >
-              {m === "login" ? "🔑 Login" : "🚀 Register"}
+              {m === "login" ? `🔑 ${t("auth.login", "Login")}` : `🚀 ${t("auth.register", "Register")}`}
             </button>
           ))}
         </div>
@@ -257,9 +297,10 @@ export function LoginPage() {
                   className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-base text-slate-900 outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50 sm:text-sm"
                   placeholder="9876543210"
                   value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
+                  onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
                   required
                 />
+                {phoneError && <span className="text-xs text-rose-600">{phoneError}</span>}
               </label>
 
               {/* Email */}
@@ -274,6 +315,7 @@ export function LoginPage() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                 />
+                {emailError && <span className="text-xs text-rose-600">{emailError}</span>}
               </label>
 
               {/* ── Register Mode: Extra Business Fields ── */}
@@ -298,6 +340,7 @@ export function LoginPage() {
                       onChange={(e) => setBusinessName(e.target.value)}
                       required
                     />
+                    {businessNameError && <span className="text-xs text-rose-600">{businessNameError}</span>}
                   </label>
 
                   {/* Business Email */}
@@ -359,24 +402,22 @@ export function LoginPage() {
               )}
 
               {error && (
-                <p
-                  className={`rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700 ${
-                    mode === "register" ? "sm:col-span-2" : ""
-                  }`}
-                >
+                <Alert tone="error" className={mode === "register" ? "sm:col-span-2" : ""}>
                   {error}
-                </p>
+                </Alert>
               )}
 
-              <button
+              <Button
                 type="submit"
-                disabled={submitting}
-                className={`w-full rounded-xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:bg-slate-400 ${
+                disabled={submitting || !canSendOtp}
+                loading={submitting}
+                fullWidth
+                className={`${
                   mode === "register" ? "sm:col-span-2" : ""
                 }`}
               >
-                {submitting ? "Sending OTP…" : "Send OTP →"}
-              </button>
+                Send OTP →
+              </Button>
             </form>
           </>
         )}
@@ -406,6 +447,7 @@ export function LoginPage() {
                   required
                   autoFocus
                 />
+                {otpError && <span className="text-xs text-rose-600">{otpError}</span>}
               </label>
 
               {devOtp && (
@@ -421,29 +463,24 @@ export function LoginPage() {
                 </div>
               )}
 
-              {error && (
-                <p className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
-                  {error}
-                </p>
-              )}
+              {error && <Alert tone="error">{error}</Alert>}
 
-              <button
+              <Button
                 type="submit"
-                disabled={submitting}
-                className="w-full rounded-xl bg-teal-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-teal-500 disabled:bg-teal-300"
+                disabled={submitting || !canVerifyOtp}
+                loading={submitting}
+                variant="success"
+                fullWidth
               >
-                {submitting
-                  ? mode === "register"
-                    ? "Creating your store…"
-                    : "Verifying…"
-                  : mode === "register"
+                {mode === "register"
                   ? "Verify & Create Store 🎉"
                   : "Verify OTP"}
-              </button>
+              </Button>
 
-              <button
+              <Button
                 type="button"
-                className="w-full rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
+                variant="secondary"
+                fullWidth
                 onClick={() => {
                   setStep("contact");
                   setError("");
@@ -452,7 +489,7 @@ export function LoginPage() {
                 }}
               >
                 ← Back
-              </button>
+              </Button>
             </form>
           </>
         )}
@@ -552,24 +589,28 @@ export function LoginPage() {
                 />
               </label>
 
+              {businessNameError && <span className="text-xs text-rose-600 sm:col-span-2">{businessNameError}</span>}
               {error && (
-                <p className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700 sm:col-span-2">
+                <Alert tone="error" className="sm:col-span-2">
                   {error}
-                </p>
+                </Alert>
               )}
-              <button
+              <Button
                 type="submit"
-                disabled={submitting}
-                className="sm:col-span-2 w-full rounded-xl bg-teal-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-teal-500 disabled:bg-teal-300"
+                disabled={submitting || !canCompleteProfile}
+                loading={submitting}
+                variant="success"
+                fullWidth
+                className="sm:col-span-2"
               >
-                {submitting ? "Saving…" : "Complete Setup & Go to Dashboard 🚀"}
-              </button>
+                Complete Setup & Go to Dashboard 🚀
+              </Button>
             </form>
           </>
         )}
       </section>
     </main>
-    <footer className="py-6 text-center text-xs text-slate-400">
+    <footer className="pb-2 text-center text-xs text-slate-400">
       <span className="font-semibold text-slate-500">🛍️ MyDukan</span> — Your Store. Your Link. Your Sales.
     </footer>
     </>

@@ -25,6 +25,12 @@ function resolveProductUnitPrice(product, selectedVariants = {}) {
   return Number(product.price);
 }
 
+function resolveVariantQuantityMap(product) {
+  return product.variantQuantities instanceof Map
+    ? Object.fromEntries(product.variantQuantities.entries())
+    : product.variantQuantities || {};
+}
+
 // ─── POST /orders — Customer places order (no auth) ───────────────────────
 router.post("/", async (req, res) => {
   try {
@@ -58,6 +64,26 @@ router.post("/", async (req, res) => {
       return res.status(404).json({ message: "Product is unavailable" });
     }
 
+    const quantityMap = resolveVariantQuantityMap(product);
+    for (const variant of product.variants || []) {
+      if (!Array.isArray(variant.options) || variant.options.length === 0) continue;
+
+      const chosenOption = selectedVariants?.[variant.label];
+      if (!chosenOption || !variant.options.includes(chosenOption)) {
+        return res.status(400).json({
+          message: `Please select a valid option for ${variant.label}`,
+        });
+      }
+
+      const stockKey = `${variant.label}::${chosenOption}`;
+      const availableStock = Number(quantityMap[stockKey]);
+      if (Number.isFinite(availableStock) && availableStock >= 0 && safeQuantity > availableStock) {
+        return res.status(400).json({
+          message: `${chosenOption} (${variant.label}) has only ${availableStock} quantity left`,
+        });
+      }
+    }
+
     const unitPrice = resolveProductUnitPrice(product, selectedVariants);
     const itemTotal = unitPrice * safeQuantity;
     const safeDeliveryCharge = Number(deliveryCharge) >= 0 ? Number(deliveryCharge) : 0;
@@ -77,6 +103,28 @@ router.post("/", async (req, res) => {
       paymentMethod: safePaymentMethod,
       paymentStatus: safePaymentMethod === "cod" ? "confirmed" : "pending",
     });
+
+    // Decrease variant stock after successful order creation.
+    if ((product.variants || []).length > 0) {
+      let didChangeStock = false;
+      for (const variant of product.variants || []) {
+        if (!Array.isArray(variant.options) || variant.options.length === 0) continue;
+        const chosenOption = selectedVariants?.[variant.label];
+        if (!chosenOption) continue;
+
+        const stockKey = `${variant.label}::${chosenOption}`;
+        const availableStock = Number(quantityMap[stockKey]);
+        if (Number.isFinite(availableStock) && availableStock >= 0) {
+          quantityMap[stockKey] = Math.max(0, availableStock - safeQuantity);
+          didChangeStock = true;
+        }
+      }
+
+      if (didChangeStock) {
+        product.variantQuantities = quantityMap;
+        await product.save();
+      }
+    }
 
     return res.status(201).json({ order });
   } catch (error) {

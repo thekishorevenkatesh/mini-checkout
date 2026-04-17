@@ -130,6 +130,21 @@ const sellerSchema = new mongoose.Schema(
       trim: true,
       default: DEFAULT_POLICY_CONTENT.termsAndConditions,
     },
+    approvalStatus: {
+      type: String,
+      enum: ["pending", "approved", "rejected"],
+      default: "pending",
+      index: true,
+    },
+    approvedAt: {
+      type: Date,
+      default: null,
+    },
+    approvedBy: {
+      type: String,
+      trim: true,
+      default: "",
+    },
     // OTP fields (transient — cleared after verification)
     otp: {
       type: String,

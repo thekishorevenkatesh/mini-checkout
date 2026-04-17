@@ -49,14 +49,24 @@ const productSchema = new mongoose.Schema(
     // "price" kept for backward compat — represents the selling price
     price: {
       type: Number,
-      required: true,
-      min: 1,
+      default: 0,
+      min: 0,
     },
     variants: {
       type: [variantSchema],
       default: [],
     },
     variantPrices: {
+      type: Map,
+      of: Number,
+      default: {},
+    },
+    variantMrps: {
+      type: Map,
+      of: Number,
+      default: {},
+    },
+    variantQuantities: {
       type: Map,
       of: Number,
       default: {},

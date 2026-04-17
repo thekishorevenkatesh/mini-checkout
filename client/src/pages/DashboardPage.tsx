@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { api } from "../api/client";
 import { useAuth } from "../context/AuthContext";
+import { useI18n } from "../context/I18nContext";
 import { DEFAULT_POLICY_CONTENT } from "../constants/policyDefaults";
 import type { Order, OrderStatus, Product, SocialLink, Banner, PaymentMode } from "../types";
 
@@ -9,6 +10,7 @@ type ProductFormVariant = {
   label: string;
   options: string;
   optionPrices: Record<string, string>;
+  optionMrps: Record<string, string>;
 };
 
 type ProductForm = {
@@ -16,11 +18,18 @@ type ProductForm = {
   imageUrl: string; notes: string; category: string;
   variants: ProductFormVariant[];
 };
+type ProductFormStep = "basic" | "pricing" | "media" | "variants";
 
 const emptyProductForm: ProductForm = {
   title: "", description: "", price: "", mrp: "",
   imageUrl: "", notes: "", category: "", variants: [],
 };
+const productFormSteps: { key: ProductFormStep; title: string; helper: string }[] = [
+  { key: "basic", title: "Product Info", helper: "Title and category" },
+  { key: "pricing", title: "Pricing", helper: "Selling price and MRP" },
+  { key: "media", title: "Media & Details", helper: "Image and description" },
+  { key: "variants", title: "Variants", helper: "Bundle options pricing" },
+];
 
 const statusClasses: Record<OrderStatus, string> = {
   pending: "bg-amber-100 text-amber-700 border-amber-200",
@@ -118,6 +127,7 @@ function parseVariantOptions(options: string) {
 // ─── DashboardPage ────────────────────────────────────────────────────────────
 export function DashboardPage() {
   const { seller, logout, updateProfile, refreshProfile } = useAuth();
+  const { t } = useI18n();
 
   const [tab, setTab] = useState<Tab>("dashboard");
   const [products, setProducts] = useState<Product[]>([]);
@@ -130,6 +140,7 @@ export function DashboardPage() {
   const [productForm, setProductForm] = useState<ProductForm>(emptyProductForm);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [isSubmittingProduct, setIsSubmittingProduct] = useState(false);
+  const [productFormStep, setProductFormStep] = useState<ProductFormStep>("basic");
 
   // ── Profile form
   const [profileName, setProfileName] = useState(seller?.businessName || "");
@@ -341,6 +352,7 @@ export function DashboardPage() {
   // ── Product: start edit
   function handleStartEdit(prod: Product) {
     setEditingProduct(prod);
+    setProductFormStep("basic");
     setProductForm({
       title: prod.title,
       description: prod.description || "",
@@ -358,7 +370,15 @@ export function DashboardPage() {
           return acc;
         }, {});
 
-        return { label: v.label, options: v.options.join(", "), optionPrices };
+        const optionMrps = v.options.reduce<Record<string, string>>((acc, option) => {
+          const mrp = prod.variantMrps?.[getVariantPriceKey(v.label, option)];
+          if (mrp !== undefined && mrp !== null) {
+            acc[option] = String(mrp);
+          }
+          return acc;
+        }, {});
+
+        return { label: v.label, options: v.options.join(", "), optionPrices, optionMrps };
       }),
     });
     // Scroll to form
@@ -369,6 +389,7 @@ export function DashboardPage() {
   function handleCancelEdit() {
     setEditingProduct(null);
     setProductForm(emptyProductForm);
+    setProductFormStep("basic");
   }
 
   // ── Product: create or update
@@ -383,6 +404,8 @@ export function DashboardPage() {
         }));
 
       const hasVariants = variantPayload.some(v => v.options.length > 0);
+      const baseSellingPrice = Number(productForm.price);
+      const baseMrp = Number(productForm.mrp);
       const variantPrices = productForm.variants.reduce<Record<string, number>>((acc, variant) => {
         const label = variant.label.trim();
         const options = parseVariantOptions(variant.options);
@@ -391,6 +414,20 @@ export function DashboardPage() {
           const price = Number(variant.optionPrices[option]);
           if (label && Number.isFinite(price) && price > 0) {
             acc[getVariantPriceKey(label, option)] = price;
+          }
+        });
+
+        return acc;
+      }, {});
+
+      const variantMrps = productForm.variants.reduce<Record<string, number>>((acc, variant) => {
+        const label = variant.label.trim();
+        const options = parseVariantOptions(variant.options);
+
+        options.forEach(option => {
+          const mrp = Number(variant.optionMrps[option]);
+          if (label && Number.isFinite(mrp) && mrp >= 0) {
+            acc[getVariantPriceKey(label, option)] = mrp;
           }
         });
 
@@ -409,16 +446,44 @@ export function DashboardPage() {
         }
       }
 
+      if (!hasVariants && (!Number.isFinite(baseSellingPrice) || baseSellingPrice <= 0)) {
+        setError("Enter product selling price, or add variants with prices.");
+        setIsSubmittingProduct(false);
+        return;
+      }
+
+      if (Number.isFinite(baseMrp) && baseMrp > 0 && Number.isFinite(baseSellingPrice) && baseSellingPrice > 0 && baseSellingPrice >= baseMrp) {
+        setError("Product selling price should be less than product MRP.");
+        setIsSubmittingProduct(false);
+        return;
+      }
+
+      const invalidVariantMrp = variantPayload.some(variant =>
+        variant.options.some(option => {
+          const key = getVariantPriceKey(variant.label, option);
+          const sellingPrice = variantPrices[key];
+          const mrp = variantMrps[key];
+          return mrp !== undefined && mrp > 0 && sellingPrice >= mrp;
+        })
+      );
+
+      if (invalidVariantMrp) {
+        setError("Each variant selling price should be less than its variant MRP.");
+        setIsSubmittingProduct(false);
+        return;
+      }
+
       const payload = {
         title: productForm.title.trim(),
         description: productForm.description.trim(),
-        price: Number(productForm.price),
+        price: Number.isFinite(baseSellingPrice) ? baseSellingPrice : 0,
         mrp: Number(productForm.mrp) || 0,
         imageUrl: productForm.imageUrl.trim(),
         notes: productForm.notes.trim(),
         category: productForm.category.trim(),
         variants: variantPayload,
         variantPrices,
+        variantMrps,
       };
 
       if (editingProduct) {
@@ -433,6 +498,7 @@ export function DashboardPage() {
         setSuccess("Product added.");
       }
       setProductForm(emptyProductForm);
+      setProductFormStep("basic");
       await loadData();
     } catch { setError(editingProduct ? "Could not update product." : "Could not create product."); }
     finally { setIsSubmittingProduct(false); }
@@ -461,14 +527,42 @@ export function DashboardPage() {
   }
 
   const tabs: { key: Tab; label: string }[] = [
-    { key: "dashboard", label: "📊 Dashboard" },
-    { key: "store", label: "🏪 Store Options" },
-    { key: "products", label: "📦 Products" },
-    { key: "orders", label: "🧾 Orders" },
-    { key: "reports", label: "📈 Reports" },
-    { key: "profile", label: "👤 Profile" },
-    { key: "policies", label: "📄 Policies" },
+    { key: "dashboard", label: `📊 ${t("nav.dashboard", "Dashboard")}` },
+    { key: "store", label: `🏪 ${t("nav.store", "Store Options")}` },
+    { key: "products", label: `📦 ${t("nav.products", "Products")}` },
+    { key: "orders", label: `🧾 ${t("nav.orders", "Orders")}` },
+    { key: "reports", label: `📈 ${t("nav.reports", "Reports")}` },
+    { key: "profile", label: `👤 ${t("nav.profile", "Profile")}` },
+    { key: "policies", label: `📄 ${t("nav.policies", "Policies")}` },
   ];
+  const productStepIndex = productFormSteps.findIndex((step) => step.key === productFormStep);
+  const productStepValidation: Record<ProductFormStep, boolean> = {
+    basic: productForm.title.trim().length > 1,
+    pricing: (() => {
+      const baseSellingPrice = Number(productForm.price);
+      const baseMrp = Number(productForm.mrp);
+      if (
+        Number.isFinite(baseMrp) &&
+        baseMrp > 0 &&
+        Number.isFinite(baseSellingPrice) &&
+        baseSellingPrice > 0 &&
+        baseSellingPrice >= baseMrp
+      ) {
+        return false;
+      }
+      return true;
+    })(),
+    media: true,
+    variants: true,
+  };
+  function goToNextProductStep() {
+    const next = productFormSteps[productStepIndex + 1];
+    if (next) setProductFormStep(next.key);
+  }
+  function goToPrevProductStep() {
+    const prev = productFormSteps[productStepIndex - 1];
+    if (prev) setProductFormStep(prev.key);
+  }
 
   return (
     <main className="mx-auto w-full max-w-7xl space-y-4 px-3 py-5 sm:px-4 sm:py-8">
@@ -738,113 +832,214 @@ export function DashboardPage() {
                 Editing: <strong>{editingProduct.title}</strong>
               </p>
             )}
+            <div className="mt-4 grid gap-2 sm:grid-cols-4">
+              {productFormSteps.map((step, index) => {
+                const isActive = productFormStep === step.key;
+                const isDone = index < productStepIndex && productStepValidation[step.key];
+                return (
+                  <button
+                    key={step.key}
+                    type="button"
+                    onClick={() => setProductFormStep(step.key)}
+                    className={`rounded-2xl border px-3 py-2 text-left transition ${
+                      isActive
+                        ? "border-teal-500 bg-teal-50"
+                        : "border-slate-200 bg-slate-50 hover:border-slate-300"
+                    }`}
+                  >
+                    <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">
+                      Step {index + 1}
+                    </p>
+                    <p className="mt-0.5 text-sm font-semibold text-slate-800">{step.title}</p>
+                    <p className="text-xs text-slate-500">{isDone ? "Completed" : step.helper}</p>
+                  </button>
+                );
+              })}
+            </div>
 
-            <form className="mt-4 grid gap-3 sm:grid-cols-2" onSubmit={handleSubmitProduct}>
-              <label className="block space-y-1 sm:col-span-2">
-                <span className="text-sm font-semibold text-slate-700">Product title *</span>
-                <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400"
-                  placeholder="Home-made Ragi Laddu" value={productForm.title}
-                  onChange={e => setProductForm(p => ({ ...p, title: e.target.value }))} required />
-              </label>
-              <label className="block space-y-1">
-                <span className="text-sm font-semibold text-slate-700">Selling Price (₹) *</span>
-                <input type="number" className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400"
-                  placeholder="499" value={productForm.price}
-                  onChange={e => setProductForm(p => ({ ...p, price: e.target.value }))} required />
-              </label>
-              <label className="block space-y-1">
-                <span className="text-sm font-semibold text-slate-700">MRP (₹)</span>
-                <input type="number" className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400"
-                  placeholder="599" value={productForm.mrp}
-                  onChange={e => setProductForm(p => ({ ...p, mrp: e.target.value }))} />
-              </label>
-              <label className="block space-y-1">
-                <span className="text-sm font-semibold text-slate-700">Category</span>
-                <select className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400 bg-white"
-                  value={productForm.category}
-                  onChange={e => setProductForm(p => ({ ...p, category: e.target.value }))}>
-                  <option value="">-- Select --</option>
-                  {categories.map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
-              </label>
-              <label className="block space-y-1 sm:col-span-2">
-                <span className="text-sm font-semibold text-slate-700">Product Image</span>
-                <ImageUploadField
-                  value={productForm.imageUrl}
-                  onChange={url => setProductForm(p => ({ ...p, imageUrl: url }))}
-                  placeholder="https://..."
-                />
-              </label>
-              {productForm.imageUrl && (
-                <div className="sm:col-span-2">
-                  <img src={productForm.imageUrl} alt="preview" className="h-24 w-24 rounded-xl object-cover border border-slate-200" />
+            <form className="mt-4 space-y-4" onSubmit={handleSubmitProduct}>
+              {productFormStep === "basic" && (
+                <div className="grid gap-3 sm:grid-cols-2 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <label className="block space-y-1 sm:col-span-2">
+                    <span className="text-sm font-semibold text-slate-700">Product title *</span>
+                    <input
+                      className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400"
+                      placeholder="Home-made Ragi Laddu"
+                      value={productForm.title}
+                      onChange={e => setProductForm(p => ({ ...p, title: e.target.value }))}
+                      required
+                    />
+                  </label>
+                  <label className="block space-y-1">
+                    <span className="text-sm font-semibold text-slate-700">Category</span>
+                    <select
+                      className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400 bg-white"
+                      value={productForm.category}
+                      onChange={e => setProductForm(p => ({ ...p, category: e.target.value }))}
+                    >
+                      <option value="">-- Select --</option>
+                      {categories.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </label>
                 </div>
               )}
-              <label className="block space-y-1 sm:col-span-2">
-                <span className="text-sm font-semibold text-slate-700">Description</span>
-                <textarea className="min-h-16 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400"
-                  placeholder="What does the customer get?" value={productForm.description}
-                  onChange={e => setProductForm(p => ({ ...p, description: e.target.value }))} />
-              </label>
-              <label className="block space-y-1 sm:col-span-2">
-                <span className="text-sm font-semibold text-slate-700">Additional Info (Notes)</span>
-                <textarea className="min-h-12 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400"
-                  placeholder="Delivery info, pickup details..." value={productForm.notes}
-                  onChange={e => setProductForm(p => ({ ...p, notes: e.target.value }))} />
-              </label>
 
-              {/* Variants */}
-              <div className="sm:col-span-2 space-y-2">
-                <p className="text-sm font-semibold text-slate-700">Variants (e.g. Size, Color)</p>
-                {productForm.variants.map((v, i) => (
-                  <div key={i} className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
-                    <div className="flex gap-2">
-                      <input className="w-28 rounded-lg border border-slate-200 px-2 py-2 text-sm outline-none" placeholder="Size" value={v.label}
-                        onChange={e => setProductForm(p => { const vv = [...p.variants]; vv[i] = { ...vv[i], label: e.target.value }; return { ...p, variants: vv }; })} />
-                      <input className="flex-1 rounded-lg border border-slate-200 px-2 py-2 text-sm outline-none" placeholder="S, M, L, XL"
-                        value={v.options}
-                        onChange={e => setProductForm(p => { const vv = [...p.variants]; vv[i] = { ...vv[i], options: e.target.value }; return { ...p, variants: vv }; })} />
-                      <button type="button" onClick={() => setProductForm(p => ({ ...p, variants: p.variants.filter((_, j) => j !== i) }))}
-                        className="rounded-lg border border-rose-200 bg-rose-50 px-2 text-rose-600 text-sm">✕</button>
+              {productFormStep === "pricing" && (
+                <div className="grid gap-3 sm:grid-cols-2 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <label className="block space-y-1">
+                    <span className="text-sm font-semibold text-slate-700">Selling Price (₹)</span>
+                    <input
+                      type="number"
+                      className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400"
+                      placeholder="499"
+                      value={productForm.price}
+                      onChange={e => setProductForm(p => ({ ...p, price: e.target.value }))}
+                    />
+                    <p className="text-xs text-slate-500">Keep this empty if you are pricing only through variants.</p>
+                  </label>
+                  <label className="block space-y-1">
+                    <span className="text-sm font-semibold text-slate-700">MRP (₹)</span>
+                    <input
+                      type="number"
+                      className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400"
+                      placeholder="599"
+                      value={productForm.mrp}
+                      onChange={e => setProductForm(p => ({ ...p, mrp: e.target.value }))}
+                    />
+                    <p className="text-xs text-slate-500">MRP should be greater than selling price.</p>
+                  </label>
+                </div>
+              )}
+
+              {productFormStep === "media" && (
+                <div className="grid gap-3 sm:grid-cols-2 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <label className="block space-y-1 sm:col-span-2">
+                    <span className="text-sm font-semibold text-slate-700">Product Image</span>
+                    <ImageUploadField
+                      value={productForm.imageUrl}
+                      onChange={url => setProductForm(p => ({ ...p, imageUrl: url }))}
+                      placeholder="https://..."
+                    />
+                  </label>
+                  {productForm.imageUrl && (
+                    <div className="sm:col-span-2">
+                      <img src={productForm.imageUrl} alt="preview" className="h-24 w-24 rounded-xl object-cover border border-slate-200" />
                     </div>
-                    {parseVariantOptions(v.options).length > 0 && (
-                      <div className="space-y-2">
-                        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Option Prices</p>
-                        {parseVariantOptions(v.options).map(option => (
-                          <div key={option} className="flex items-center gap-2">
-                            <span className="min-w-24 rounded-lg bg-white px-3 py-2 text-sm font-semibold text-slate-700">{option}</span>
-                            <input
-                              type="number"
-                              min={1}
-                              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none"
-                              placeholder={`Price for ${option}`}
-                              value={v.optionPrices[option] || ""}
-                              onChange={e => setProductForm(p => {
-                                const vv = [...p.variants];
-                                vv[i] = {
-                                  ...vv[i],
-                                  optionPrices: { ...vv[i].optionPrices, [option]: e.target.value },
-                                };
-                                return { ...p, variants: vv };
-                              })}
-                            />
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ))}
-                <p className="text-xs text-slate-500">If you add variants, each option must have its own selling price.</p>
-                <button type="button" onClick={() => setProductForm(p => ({ ...p, variants: [...p.variants, { label: "", options: "", optionPrices: {} }] }))}
-                  className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-100 transition">+ Add Variant</button>
-              </div>
+                  )}
+                  <label className="block space-y-1 sm:col-span-2">
+                    <span className="text-sm font-semibold text-slate-700">Description</span>
+                    <textarea
+                      className="min-h-20 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400"
+                      placeholder="What does the customer get?"
+                      value={productForm.description}
+                      onChange={e => setProductForm(p => ({ ...p, description: e.target.value }))}
+                    />
+                  </label>
+                  <label className="block space-y-1 sm:col-span-2">
+                    <span className="text-sm font-semibold text-slate-700">Additional Info (Notes)</span>
+                    <textarea
+                      className="min-h-16 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400"
+                      placeholder="Delivery info, pickup details..."
+                      value={productForm.notes}
+                      onChange={e => setProductForm(p => ({ ...p, notes: e.target.value }))}
+                    />
+                  </label>
+                </div>
+              )}
 
-              <button type="submit" disabled={isSubmittingProduct}
-                className={`sm:col-span-2 w-full rounded-xl px-4 py-2.5 text-sm font-semibold text-white transition disabled:opacity-50 ${editingProduct ? "bg-amber-600 hover:bg-amber-500" : "bg-teal-600 hover:bg-teal-500"}`}>
-                {isSubmittingProduct
-                  ? (editingProduct ? "Saving…" : "Adding...")
-                  : (editingProduct ? "💾 Save Changes" : "Add Product")}
-              </button>
+              {productFormStep === "variants" && (
+                <div className="space-y-2 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <p className="text-sm font-semibold text-slate-700">Product Variants & Bundle Pricing</p>
+                  <p className="text-xs text-slate-500">
+                    Add a variant type (like <span className="font-semibold">Bundle</span>, <span className="font-semibold">Pack Size</span>, or <span className="font-semibold">Weight</span>), then add options with selling price and MRP.
+                  </p>
+                  {productForm.variants.map((v, i) => (
+                    <div key={i} className="space-y-2 rounded-xl border border-slate-200 bg-white p-3">
+                      <div className="flex gap-2">
+                        <input className="w-40 rounded-lg border border-slate-200 px-2 py-2 text-sm outline-none" placeholder="Variant type (e.g. Bundle)" value={v.label}
+                          onChange={e => setProductForm(p => { const vv = [...p.variants]; vv[i] = { ...vv[i], label: e.target.value }; return { ...p, variants: vv }; })} />
+                        <input className="flex-1 rounded-lg border border-slate-200 px-2 py-2 text-sm outline-none" placeholder="Options (comma separated): 1 Pack, 2 Pack, 5 Pack"
+                          value={v.options}
+                          onChange={e => setProductForm(p => { const vv = [...p.variants]; vv[i] = { ...vv[i], options: e.target.value }; return { ...p, variants: vv }; })} />
+                        <button type="button" onClick={() => setProductForm(p => ({ ...p, variants: p.variants.filter((_, j) => j !== i) }))}
+                          className="rounded-lg border border-rose-200 bg-rose-50 px-2 text-rose-600 text-sm">✕</button>
+                      </div>
+                      {parseVariantOptions(v.options).length > 0 && (
+                        <div className="space-y-2">
+                          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Set Selling Price + MRP For Each Option</p>
+                          {parseVariantOptions(v.options).map(option => (
+                            <div key={option} className="flex items-center gap-2">
+                              <span className="min-w-24 rounded-lg bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700">{option}</span>
+                              <input
+                                type="number"
+                                min={1}
+                                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none"
+                                placeholder={`Price for ${option}`}
+                                value={v.optionPrices[option] || ""}
+                                onChange={e => setProductForm(p => {
+                                  const vv = [...p.variants];
+                                  vv[i] = {
+                                    ...vv[i],
+                                    optionPrices: { ...vv[i].optionPrices, [option]: e.target.value },
+                                  };
+                                  return { ...p, variants: vv };
+                                })}
+                              />
+                              <input
+                                type="number"
+                                min={0}
+                                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none"
+                                placeholder={`MRP for ${option}`}
+                                value={v.optionMrps[option] || ""}
+                                onChange={e => setProductForm(p => {
+                                  const vv = [...p.variants];
+                                  vv[i] = {
+                                    ...vv[i],
+                                    optionMrps: { ...vv[i].optionMrps, [option]: e.target.value },
+                                  };
+                                  return { ...p, variants: vv };
+                                })}
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                  <p className="text-xs text-slate-500">Each variant option can have its own selling price and MRP. Quantity is optional and can be managed separately if needed.</p>
+                  <button type="button" onClick={() => setProductForm(p => ({ ...p, variants: [...p.variants, { label: "", options: "", optionPrices: {}, optionMrps: {} }] }))}
+                    className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-100 transition">+ Add Variant</button>
+                </div>
+              )}
+
+              <div className="flex flex-wrap justify-between gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={goToPrevProductStep}
+                  disabled={productStepIndex === 0}
+                  className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-50"
+                >
+                  ← Previous
+                </button>
+
+                {productStepIndex < productFormSteps.length - 1 ? (
+                  <button
+                    type="button"
+                    onClick={goToNextProductStep}
+                    disabled={!productStepValidation[productFormStep]}
+                    className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                  >
+                    Next →
+                  </button>
+                ) : (
+                  <button type="submit" disabled={isSubmittingProduct}
+                    className={`rounded-xl px-4 py-2.5 text-sm font-semibold text-white transition disabled:opacity-50 ${editingProduct ? "bg-amber-600 hover:bg-amber-500" : "bg-teal-600 hover:bg-teal-500"}`}>
+                    {isSubmittingProduct
+                      ? (editingProduct ? "Saving…" : "Adding...")
+                      : (editingProduct ? "💾 Save Changes" : "Add Product")}
+                  </button>
+                )}
+              </div>
             </form>
           </article>
 
@@ -873,7 +1068,11 @@ export function DashboardPage() {
                             <p key={variant.label} className="text-xs text-slate-500">
                               {variant.label}: {variant.options.map(option => {
                                 const variantPrice = prod.variantPrices?.[getVariantPriceKey(variant.label, option)];
-                                return variantPrice ? `${option} (₹${variantPrice})` : option;
+                                const variantMrp = prod.variantMrps?.[getVariantPriceKey(variant.label, option)];
+                                const variantQty = prod.variantQuantities?.[getVariantPriceKey(variant.label, option)];
+                                return variantPrice
+                                  ? `${option} (₹${variantPrice}${variantMrp && variantMrp > variantPrice ? `, MRP ₹${variantMrp}` : ""}${variantQty !== undefined ? `, Qty ${variantQty}` : ""})`
+                                  : `${option}${variantQty !== undefined ? ` (Qty ${variantQty})` : ""}`;
                               }).join(", ")}
                             </p>
                           ))}
