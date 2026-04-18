@@ -8,9 +8,7 @@ import type { Order, OrderStatus, Product, SocialLink, Banner, PaymentMode } fro
 type Tab = "dashboard" | "store" | "products" | "orders" | "reports" | "profile" | "policies";
 type ProductFormVariant = {
   label: string;
-  options: string;
-  optionPrices: Record<string, string>;
-  optionMrps: Record<string, string>;
+  amount: string;
 };
 
 type ProductForm = {
@@ -18,18 +16,10 @@ type ProductForm = {
   imageUrl: string; notes: string; category: string;
   variants: ProductFormVariant[];
 };
-type ProductFormStep = "basic" | "pricing" | "media" | "variants";
-
 const emptyProductForm: ProductForm = {
   title: "", description: "", price: "", mrp: "",
   imageUrl: "", notes: "", category: "", variants: [],
 };
-const productFormSteps: { key: ProductFormStep; title: string; helper: string }[] = [
-  { key: "basic", title: "Product Info", helper: "Title and category" },
-  { key: "pricing", title: "Pricing", helper: "Selling price and MRP" },
-  { key: "media", title: "Media & Details", helper: "Image and description" },
-  { key: "variants", title: "Variants", helper: "Bundle options pricing" },
-];
 
 const statusClasses: Record<OrderStatus, string> = {
   pending: "bg-amber-100 text-amber-700 border-amber-200",
@@ -38,7 +28,7 @@ const statusClasses: Record<OrderStatus, string> = {
   cancelled: "bg-rose-100 text-rose-700 border-rose-200",
 };
 
-const SOCIAL_PLATFORMS = ["Instagram", "Facebook", "Twitter/X", "YouTube", "LinkedIn", "Website", "Other"];
+const SOCIAL_PLATFORMS = ["Instagram", "Facebook", "Twitter/X", "YouTube", "LinkedIn", "Website", "Google Location", "Other"];
 
 const IMGBB_KEY = import.meta.env.VITE_IMGBB_API_KEY as string | undefined;
 
@@ -120,8 +110,11 @@ function getVariantPriceKey(label: string, option: string) {
   return `${label}::${option}`;
 }
 
-function parseVariantOptions(options: string) {
-  return options.split(",").map(option => option.trim()).filter(Boolean);
+function normalizeImageUrl(url: string) {
+  const trimmed = url.trim();
+  if (!trimmed) return "";
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  return `https://${trimmed}`;
 }
 
 // ─── DashboardPage ────────────────────────────────────────────────────────────
@@ -140,7 +133,6 @@ export function DashboardPage() {
   const [productForm, setProductForm] = useState<ProductForm>(emptyProductForm);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [isSubmittingProduct, setIsSubmittingProduct] = useState(false);
-  const [productFormStep, setProductFormStep] = useState<ProductFormStep>("basic");
 
   // ── Profile form
   const [profileName, setProfileName] = useState(seller?.businessName || "");
@@ -352,7 +344,21 @@ export function DashboardPage() {
   // ── Product: start edit
   function handleStartEdit(prod: Product) {
     setEditingProduct(prod);
-    setProductFormStep("basic");
+    const variantRows: ProductFormVariant[] = [];
+    const grouped = new Set<string>();
+    (prod.variants || []).forEach((variant) => {
+      (variant.options || []).forEach((option) => {
+        if (!option || grouped.has(option)) return;
+        grouped.add(option);
+        const key = getVariantPriceKey(variant.label, option);
+        const fallbackKey = getVariantPriceKey("Variant", option);
+        const rawPrice = prod.variantPrices?.[key] ?? prod.variantPrices?.[fallbackKey];
+        variantRows.push({
+          label: option,
+          amount: rawPrice !== undefined && rawPrice !== null ? String(rawPrice) : "",
+        });
+      });
+    });
     setProductForm({
       title: prod.title,
       description: prod.description || "",
@@ -361,25 +367,7 @@ export function DashboardPage() {
       imageUrl: prod.imageUrl || "",
       notes: prod.notes || "",
       category: prod.category || "",
-      variants: (prod.variants || []).map(v => {
-        const optionPrices = v.options.reduce<Record<string, string>>((acc, option) => {
-          const price = prod.variantPrices?.[getVariantPriceKey(v.label, option)];
-          if (price) {
-            acc[option] = String(price);
-          }
-          return acc;
-        }, {});
-
-        const optionMrps = v.options.reduce<Record<string, string>>((acc, option) => {
-          const mrp = prod.variantMrps?.[getVariantPriceKey(v.label, option)];
-          if (mrp !== undefined && mrp !== null) {
-            acc[option] = String(mrp);
-          }
-          return acc;
-        }, {});
-
-        return { label: v.label, options: v.options.join(", "), optionPrices, optionMrps };
-      }),
+      variants: variantRows,
     });
     // Scroll to form
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -389,7 +377,6 @@ export function DashboardPage() {
   function handleCancelEdit() {
     setEditingProduct(null);
     setProductForm(emptyProductForm);
-    setProductFormStep("basic");
   }
 
   // ── Product: create or update
@@ -397,54 +384,17 @@ export function DashboardPage() {
     e.preventDefault(); setIsSubmittingProduct(true); setError(""); setSuccess("");
     try {
       const variantPayload = productForm.variants
-        .filter(v => v.label.trim())
-        .map(v => ({
-          label: v.label.trim(),
-          options: parseVariantOptions(v.options),
-        }));
+        .filter(v => v.label.trim() && Number(v.amount) > 0)
+        .map(v => ({ label: "Variant", option: v.label.trim(), amount: Number(v.amount) }));
 
-      const hasVariants = variantPayload.some(v => v.options.length > 0);
+      const hasVariants = variantPayload.length > 0;
       const baseSellingPrice = Number(productForm.price);
       const baseMrp = Number(productForm.mrp);
-      const variantPrices = productForm.variants.reduce<Record<string, number>>((acc, variant) => {
-        const label = variant.label.trim();
-        const options = parseVariantOptions(variant.options);
-
-        options.forEach(option => {
-          const price = Number(variant.optionPrices[option]);
-          if (label && Number.isFinite(price) && price > 0) {
-            acc[getVariantPriceKey(label, option)] = price;
-          }
-        });
-
+      const variantPrices = variantPayload.reduce<Record<string, number>>((acc, variant) => {
+        acc[getVariantPriceKey(variant.label, variant.option)] = variant.amount;
         return acc;
       }, {});
-
-      const variantMrps = productForm.variants.reduce<Record<string, number>>((acc, variant) => {
-        const label = variant.label.trim();
-        const options = parseVariantOptions(variant.options);
-
-        options.forEach(option => {
-          const mrp = Number(variant.optionMrps[option]);
-          if (label && Number.isFinite(mrp) && mrp >= 0) {
-            acc[getVariantPriceKey(label, option)] = mrp;
-          }
-        });
-
-        return acc;
-      }, {});
-
-      if (hasVariants) {
-        const missingPrice = variantPayload.some(variant =>
-          variant.options.some(option => !variantPrices[getVariantPriceKey(variant.label, option)])
-        );
-
-        if (missingPrice) {
-          setError("Enter a specific price for every variant option.");
-          setIsSubmittingProduct(false);
-          return;
-        }
-      }
+      const variantMrps = {};
 
       if (!hasVariants && (!Number.isFinite(baseSellingPrice) || baseSellingPrice <= 0)) {
         setError("Enter product selling price, or add variants with prices.");
@@ -458,30 +408,15 @@ export function DashboardPage() {
         return;
       }
 
-      const invalidVariantMrp = variantPayload.some(variant =>
-        variant.options.some(option => {
-          const key = getVariantPriceKey(variant.label, option);
-          const sellingPrice = variantPrices[key];
-          const mrp = variantMrps[key];
-          return mrp !== undefined && mrp > 0 && sellingPrice >= mrp;
-        })
-      );
-
-      if (invalidVariantMrp) {
-        setError("Each variant selling price should be less than its variant MRP.");
-        setIsSubmittingProduct(false);
-        return;
-      }
-
       const payload = {
         title: productForm.title.trim(),
         description: productForm.description.trim(),
         price: Number.isFinite(baseSellingPrice) ? baseSellingPrice : 0,
         mrp: Number(productForm.mrp) || 0,
-        imageUrl: productForm.imageUrl.trim(),
+        imageUrl: normalizeImageUrl(productForm.imageUrl),
         notes: productForm.notes.trim(),
         category: productForm.category.trim(),
-        variants: variantPayload,
+        variants: hasVariants ? [{ label: "Variant", options: variantPayload.map(v => v.option) }] : [],
         variantPrices,
         variantMrps,
       };
@@ -498,7 +433,6 @@ export function DashboardPage() {
         setSuccess("Product added.");
       }
       setProductForm(emptyProductForm);
-      setProductFormStep("basic");
       await loadData();
     } catch { setError(editingProduct ? "Could not update product." : "Could not create product."); }
     finally { setIsSubmittingProduct(false); }
@@ -535,35 +469,6 @@ export function DashboardPage() {
     { key: "profile", label: `👤 ${t("nav.profile", "Profile")}` },
     { key: "policies", label: `📄 ${t("nav.policies", "Policies")}` },
   ];
-  const productStepIndex = productFormSteps.findIndex((step) => step.key === productFormStep);
-  const productStepValidation: Record<ProductFormStep, boolean> = {
-    basic: productForm.title.trim().length > 1,
-    pricing: (() => {
-      const baseSellingPrice = Number(productForm.price);
-      const baseMrp = Number(productForm.mrp);
-      if (
-        Number.isFinite(baseMrp) &&
-        baseMrp > 0 &&
-        Number.isFinite(baseSellingPrice) &&
-        baseSellingPrice > 0 &&
-        baseSellingPrice >= baseMrp
-      ) {
-        return false;
-      }
-      return true;
-    })(),
-    media: true,
-    variants: true,
-  };
-  function goToNextProductStep() {
-    const next = productFormSteps[productStepIndex + 1];
-    if (next) setProductFormStep(next.key);
-  }
-  function goToPrevProductStep() {
-    const prev = productFormSteps[productStepIndex - 1];
-    if (prev) setProductFormStep(prev.key);
-  }
-
   return (
     <main className="mx-auto w-full max-w-7xl space-y-4 px-3 py-5 sm:px-4 sm:py-8">
       {/* Header */}
@@ -647,7 +552,7 @@ export function DashboardPage() {
               <span className="text-sm font-semibold text-slate-700">Business Logo URL</span>
               <ImageUploadField value={storeLogo} onChange={setStoreLogo} placeholder="https://..." />
             </label>
-            {storeLogo && <img src={storeLogo} alt="logo preview" className="h-16 w-16 rounded-xl object-contain border border-slate-200" />}
+            {storeLogo && <img src={normalizeImageUrl(storeLogo)} alt="logo preview" className="h-16 w-16 rounded-xl object-contain border border-slate-200" />}
             <label className="block space-y-1">
               <span className="text-sm font-semibold text-slate-700">Favicon URL</span>
               <ImageUploadField value={storeFavicon} onChange={setStoreFavicon} placeholder="https://..." />
@@ -732,7 +637,7 @@ export function DashboardPage() {
             <div className="space-y-2">
               {banners.map((b, i) => (
                 <div key={i} className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2">
-                  {b.imageUrl && <img src={b.imageUrl} alt="" className="h-12 w-20 rounded-lg object-cover" />}
+                  {b.imageUrl && <img src={normalizeImageUrl(b.imageUrl)} alt="" className="h-12 w-20 rounded-lg object-cover" />}
                   <p className="flex-1 text-xs text-slate-700 break-all">{b.title || b.imageUrl}</p>
                   <button onClick={() => setBanners(prev => prev.filter((_, j) => j !== i))} className="text-rose-600 text-xs font-semibold px-2 py-1 rounded-lg border border-rose-200 bg-rose-50">Remove</button>
                 </div>
@@ -832,34 +737,8 @@ export function DashboardPage() {
                 Editing: <strong>{editingProduct.title}</strong>
               </p>
             )}
-            <div className="mt-4 grid gap-2 sm:grid-cols-4">
-              {productFormSteps.map((step, index) => {
-                const isActive = productFormStep === step.key;
-                const isDone = index < productStepIndex && productStepValidation[step.key];
-                return (
-                  <button
-                    key={step.key}
-                    type="button"
-                    onClick={() => setProductFormStep(step.key)}
-                    className={`rounded-2xl border px-3 py-2 text-left transition ${
-                      isActive
-                        ? "border-teal-500 bg-teal-50"
-                        : "border-slate-200 bg-slate-50 hover:border-slate-300"
-                    }`}
-                  >
-                    <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">
-                      Step {index + 1}
-                    </p>
-                    <p className="mt-0.5 text-sm font-semibold text-slate-800">{step.title}</p>
-                    <p className="text-xs text-slate-500">{isDone ? "Completed" : step.helper}</p>
-                  </button>
-                );
-              })}
-            </div>
-
             <form className="mt-4 space-y-4" onSubmit={handleSubmitProduct}>
-              {productFormStep === "basic" && (
-                <div className="grid gap-3 sm:grid-cols-2 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div className="grid gap-3 sm:grid-cols-2 rounded-2xl border border-slate-200 bg-slate-50 p-4">
                   <label className="block space-y-1 sm:col-span-2">
                     <span className="text-sm font-semibold text-slate-700">Product title *</span>
                     <input
@@ -882,10 +761,7 @@ export function DashboardPage() {
                     </select>
                   </label>
                 </div>
-              )}
-
-              {productFormStep === "pricing" && (
-                <div className="grid gap-3 sm:grid-cols-2 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div className="grid gap-3 sm:grid-cols-2 rounded-2xl border border-slate-200 bg-slate-50 p-4">
                   <label className="block space-y-1">
                     <span className="text-sm font-semibold text-slate-700">Selling Price (₹)</span>
                     <input
@@ -909,10 +785,7 @@ export function DashboardPage() {
                     <p className="text-xs text-slate-500">MRP should be greater than selling price.</p>
                   </label>
                 </div>
-              )}
-
-              {productFormStep === "media" && (
-                <div className="grid gap-3 sm:grid-cols-2 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div className="grid gap-3 sm:grid-cols-2 rounded-2xl border border-slate-200 bg-slate-50 p-4">
                   <label className="block space-y-1 sm:col-span-2">
                     <span className="text-sm font-semibold text-slate-700">Product Image</span>
                     <ImageUploadField
@@ -923,7 +796,7 @@ export function DashboardPage() {
                   </label>
                   {productForm.imageUrl && (
                     <div className="sm:col-span-2">
-                      <img src={productForm.imageUrl} alt="preview" className="h-24 w-24 rounded-xl object-cover border border-slate-200" />
+                      <img src={normalizeImageUrl(productForm.imageUrl)} alt="preview" className="h-24 w-24 rounded-xl object-cover border border-slate-200" />
                     </div>
                   )}
                   <label className="block space-y-1 sm:col-span-2">
@@ -945,100 +818,36 @@ export function DashboardPage() {
                     />
                   </label>
                 </div>
-              )}
-
-              {productFormStep === "variants" && (
-                <div className="space-y-2 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div className="space-y-2 rounded-2xl border border-slate-200 bg-slate-50 p-4">
                   <p className="text-sm font-semibold text-slate-700">Product Variants & Bundle Pricing</p>
                   <p className="text-xs text-slate-500">
-                    Add a variant type (like <span className="font-semibold">Bundle</span>, <span className="font-semibold">Pack Size</span>, or <span className="font-semibold">Weight</span>), then add options with selling price and MRP.
+                    Add a variant type and amount for that variant.
                   </p>
                   {productForm.variants.map((v, i) => (
                     <div key={i} className="space-y-2 rounded-xl border border-slate-200 bg-white p-3">
                       <div className="flex gap-2">
-                        <input className="w-40 rounded-lg border border-slate-200 px-2 py-2 text-sm outline-none" placeholder="Variant type (e.g. Bundle)" value={v.label}
+                        <input className="flex-1 rounded-lg border border-slate-200 px-2 py-2 text-sm outline-none" placeholder="Variant type (e.g. 1 Pack, 500g)" value={v.label}
                           onChange={e => setProductForm(p => { const vv = [...p.variants]; vv[i] = { ...vv[i], label: e.target.value }; return { ...p, variants: vv }; })} />
-                        <input className="flex-1 rounded-lg border border-slate-200 px-2 py-2 text-sm outline-none" placeholder="Options (comma separated): 1 Pack, 2 Pack, 5 Pack"
-                          value={v.options}
-                          onChange={e => setProductForm(p => { const vv = [...p.variants]; vv[i] = { ...vv[i], options: e.target.value }; return { ...p, variants: vv }; })} />
+                        <input type="number" min={1} className="w-40 rounded-lg border border-slate-200 px-2 py-2 text-sm outline-none" placeholder="Amount"
+                          value={v.amount}
+                          onChange={e => setProductForm(p => { const vv = [...p.variants]; vv[i] = { ...vv[i], amount: e.target.value }; return { ...p, variants: vv }; })} />
                         <button type="button" onClick={() => setProductForm(p => ({ ...p, variants: p.variants.filter((_, j) => j !== i) }))}
                           className="rounded-lg border border-rose-200 bg-rose-50 px-2 text-rose-600 text-sm">✕</button>
                       </div>
-                      {parseVariantOptions(v.options).length > 0 && (
-                        <div className="space-y-2">
-                          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Set Selling Price + MRP For Each Option</p>
-                          {parseVariantOptions(v.options).map(option => (
-                            <div key={option} className="flex items-center gap-2">
-                              <span className="min-w-24 rounded-lg bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700">{option}</span>
-                              <input
-                                type="number"
-                                min={1}
-                                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none"
-                                placeholder={`Price for ${option}`}
-                                value={v.optionPrices[option] || ""}
-                                onChange={e => setProductForm(p => {
-                                  const vv = [...p.variants];
-                                  vv[i] = {
-                                    ...vv[i],
-                                    optionPrices: { ...vv[i].optionPrices, [option]: e.target.value },
-                                  };
-                                  return { ...p, variants: vv };
-                                })}
-                              />
-                              <input
-                                type="number"
-                                min={0}
-                                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none"
-                                placeholder={`MRP for ${option}`}
-                                value={v.optionMrps[option] || ""}
-                                onChange={e => setProductForm(p => {
-                                  const vv = [...p.variants];
-                                  vv[i] = {
-                                    ...vv[i],
-                                    optionMrps: { ...vv[i].optionMrps, [option]: e.target.value },
-                                  };
-                                  return { ...p, variants: vv };
-                                })}
-                              />
-                            </div>
-                          ))}
-                        </div>
-                      )}
                     </div>
                   ))}
-                  <p className="text-xs text-slate-500">Each variant option can have its own selling price and MRP. Quantity is optional and can be managed separately if needed.</p>
-                  <button type="button" onClick={() => setProductForm(p => ({ ...p, variants: [...p.variants, { label: "", options: "", optionPrices: {}, optionMrps: {} }] }))}
+                  <p className="text-xs text-slate-500">Use this for simple variant pricing such as 1 Pack, 2 Pack, 5 Pack.</p>
+                  <button type="button" onClick={() => setProductForm(p => ({ ...p, variants: [...p.variants, { label: "", amount: "" }] }))}
                     className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-100 transition">+ Add Variant</button>
                 </div>
-              )}
 
               <div className="flex flex-wrap justify-between gap-2 pt-1">
-                <button
-                  type="button"
-                  onClick={goToPrevProductStep}
-                  disabled={productStepIndex === 0}
-                  className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-50"
-                >
-                  ← Previous
+                <button type="submit" disabled={isSubmittingProduct}
+                  className={`rounded-xl px-4 py-2.5 text-sm font-semibold text-white transition disabled:opacity-50 ${editingProduct ? "bg-amber-600 hover:bg-amber-500" : "bg-teal-600 hover:bg-teal-500"}`}>
+                  {isSubmittingProduct
+                    ? (editingProduct ? "Saving…" : "Saving...")
+                    : "Save details"}
                 </button>
-
-                {productStepIndex < productFormSteps.length - 1 ? (
-                  <button
-                    type="button"
-                    onClick={goToNextProductStep}
-                    disabled={!productStepValidation[productFormStep]}
-                    className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
-                  >
-                    Next →
-                  </button>
-                ) : (
-                  <button type="submit" disabled={isSubmittingProduct}
-                    className={`rounded-xl px-4 py-2.5 text-sm font-semibold text-white transition disabled:opacity-50 ${editingProduct ? "bg-amber-600 hover:bg-amber-500" : "bg-teal-600 hover:bg-teal-500"}`}>
-                    {isSubmittingProduct
-                      ? (editingProduct ? "Saving…" : "Adding...")
-                      : (editingProduct ? "💾 Save Changes" : "Add Product")}
-                  </button>
-                )}
               </div>
             </form>
           </article>
@@ -1052,7 +861,7 @@ export function DashboardPage() {
               {products.map(prod => (
                 <div key={prod._id} className={`rounded-2xl border p-3 ${prod.isActive ? "border-slate-200 bg-slate-50" : "border-slate-100 bg-slate-100 opacity-60"}`}>
                   <div className="flex items-start gap-2">
-                    {prod.imageUrl && <img src={prod.imageUrl} alt="" className="h-12 w-12 rounded-lg object-cover" />}
+                    {prod.imageUrl && <img src={normalizeImageUrl(prod.imageUrl)} alt="" className="h-12 w-12 rounded-lg object-cover" />}
                     <div className="flex-1 min-w-0">
                       <p className="font-semibold text-slate-800 truncate">{prod.title}</p>
                       {prod.category && <p className="text-xs text-slate-500">{prod.category}</p>}

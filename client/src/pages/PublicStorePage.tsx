@@ -23,7 +23,7 @@ type PolicyKey = "privacyPolicy" | "returnRefundPolicy" | "termsAndConditions";
 
 const SOCIAL_ICONS: Record<string, string> = {
   Instagram: "📸", Facebook: "👥", "Twitter/X": "🐦",
-  YouTube: "▶️", LinkedIn: "💼", Website: "🌐", Other: "🔗",
+  YouTube: "▶️", LinkedIn: "💼", Website: "🌐", "Google Location": "🗺️", Other: "🔗",
 };
 
 const PAYMENT_SUCCESS_STATUSES: OrderStatus[] = ["paid", "confirmed"];
@@ -34,12 +34,11 @@ function createTransactionRef() {
   return `ORD-${Date.now()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
 }
 
-function buildThankYouUrl(sellerSlug: string, orderIds: string[]) {
-  const params = new URLSearchParams({
-    sellerSlug,
-    orderIds: orderIds.join(","),
-  });
-  return `${window.location.origin}/thank-you?${params.toString()}`;
+function normalizeImageUrl(url: string) {
+  const trimmed = String(url || "").trim();
+  if (!trimmed) return "";
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  return `https://${trimmed}`;
 }
 
 function buildUpiLink(
@@ -47,17 +46,14 @@ function buildUpiLink(
   businessName: string,
   amount: number,
   transactionRef: string,
-  callbackUrl: string
 ) {
   const params = new URLSearchParams({
     pa: upiId,
     pn: businessName,
     am: amount.toFixed(2),
     cu: "INR",
-    tn: `Order ${transactionRef}`,
+    tn: `Order ${transactionRef}`.slice(0, 35),
     tr: transactionRef,
-    url: callbackUrl,
-    refUrl: callbackUrl,
   });
   return `upi://pay?${params.toString()}`;
 }
@@ -157,7 +153,7 @@ function BannerCarousel({ banners }: { banners: { imageUrl: string; title?: stri
   if (!banners.length) return null;
   return (
     <div className="relative overflow-hidden rounded-2xl">
-      <img src={banners[idx].imageUrl} alt={banners[idx].title || "Banner"} className="w-full h-48 object-cover sm:h-64" />
+      <img src={normalizeImageUrl(banners[idx].imageUrl)} alt={banners[idx].title || "Banner"} className="w-full h-48 object-cover sm:h-64" />
       {banners[idx].title && (
         <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent px-4 py-3">
           <p className="text-sm font-semibold text-white">{banners[idx].title}</p>
@@ -295,13 +291,11 @@ export function PublicStorePage() {
 
   const previewUpiLink = useMemo(() => {
     if (!seller?.upiId || grandTotal <= 0 || !isPrepaidCheckout) return "";
-    const callbackUrl = buildThankYouUrl(seller.slug, ["preview"]);
     return buildUpiLink(
       seller.upiId,
       seller.businessName,
       grandTotal,
       createTransactionRef(),
-      callbackUrl
     );
   }, [grandTotal, isPrepaidCheckout, seller]);
 
@@ -535,12 +529,11 @@ export function PublicStorePage() {
         }
 
         const transactionRef = createTransactionRef();
-        const callbackUrl = buildThankYouUrl(sellerSlug, ids);
         const nextSession: PaymentSession = {
           orderIds: ids,
           amount: grandTotal,
           transactionRef,
-          upiLink: buildUpiLink(seller.upiId, seller.businessName, grandTotal, transactionRef, callbackUrl),
+          upiLink: buildUpiLink(seller.upiId, seller.businessName, grandTotal, transactionRef),
           sellerSlug,
         };
 
@@ -763,7 +756,7 @@ export function PublicStorePage() {
                   className={`group overflow-hidden rounded-3xl border bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-slate-700 dark:bg-slate-900 ${isSelected ? "border-emerald-400 ring-2 ring-emerald-100" : "border-slate-200"}`}>
                   <div className="relative">
                     {product.imageUrl ? (
-                      <img src={product.imageUrl} alt={product.title} className="aspect-[4/3] w-full object-cover" />
+                      <img src={normalizeImageUrl(product.imageUrl)} alt={product.title} className="aspect-[4/3] w-full object-cover" />
                     ) : (
                       <div className="aspect-[4/3] w-full bg-slate-100 dark:bg-slate-800" />
                     )}
@@ -957,8 +950,16 @@ export function PublicStorePage() {
           </label>
           <label className="block space-y-1">
             <span className="text-sm font-semibold text-slate-700">Phone number *</span>
-            <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400"
-              value={customerPhone} onChange={e => setCustomerPhone(e.target.value)} required />
+            <input
+              type="tel"
+              inputMode="numeric"
+              pattern="[0-9]{10,15}"
+              maxLength={15}
+              className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400"
+              value={customerPhone}
+              onChange={e => setCustomerPhone(e.target.value.replace(/\D/g, ""))}
+              required
+            />
           </label>
           <label className="block space-y-1">
             <span className="text-sm font-semibold text-slate-700">Delivery address</span>
@@ -976,7 +977,7 @@ export function PublicStorePage() {
 
           <button type="submit" disabled={submitting || selectedItems.length === 0}
             className="w-full rounded-xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:bg-slate-400">
-            {submitting ? "Submitting..." : isPrepaidCheckout ? "Place Order & Continue to Pay" : "Place Order with Cash on Delivery"}
+            {submitting ? "Submitting..." : "Save details"}
           </button>
         </form>
         </div>

@@ -352,6 +352,10 @@ export function AdminPage() {
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/70">
+                <p className="text-xs uppercase tracking-wide text-slate-500">Business Name</p>
+                <p className="mt-1 font-semibold text-slate-900 dark:text-slate-100">{selectedSeller.businessName || "—"}</p>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/70">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Phone</p>
                 <p className="mt-1 font-semibold text-slate-900 dark:text-slate-100">{selectedSeller.phone}</p>
               </div>
@@ -359,9 +363,37 @@ export function AdminPage() {
                 <p className="text-xs uppercase tracking-wide text-slate-500">Email</p>
                 <p className="mt-1 font-semibold text-slate-900 dark:text-slate-100">{selectedSeller.businessEmail || "—"}</p>
               </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/70">
+                <p className="text-xs uppercase tracking-wide text-slate-500">Store Slug</p>
+                <p className="mt-1 font-semibold text-slate-900 dark:text-slate-100">{selectedSeller.slug || "—"}</p>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/70">
+                <p className="text-xs uppercase tracking-wide text-slate-500">UPI ID</p>
+                <p className="mt-1 font-semibold text-slate-900 dark:text-slate-100">{selectedSeller.upiId || "—"}</p>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/70">
+                <p className="text-xs uppercase tracking-wide text-slate-500">GST Number</p>
+                <p className="mt-1 font-semibold text-slate-900 dark:text-slate-100">{selectedSeller.businessGST || "—"}</p>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/70">
+                <p className="text-xs uppercase tracking-wide text-slate-500">WhatsApp</p>
+                <p className="mt-1 font-semibold text-slate-900 dark:text-slate-100">{selectedSeller.whatsappNumber || "—"}</p>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/70">
+                <p className="text-xs uppercase tracking-wide text-slate-500">Call Number</p>
+                <p className="mt-1 font-semibold text-slate-900 dark:text-slate-100">{selectedSeller.callNumber || "—"}</p>
+              </div>
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/70 sm:col-span-2">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Address</p>
                 <p className="mt-1 font-semibold text-slate-900 dark:text-slate-100">{selectedSeller.businessAddress || "—"}</p>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/70 sm:col-span-2">
+                <p className="text-xs uppercase tracking-wide text-slate-500">Business Logo</p>
+                <p className="mt-1 break-all font-semibold text-slate-900 dark:text-slate-100">{selectedSeller.businessLogo || "—"}</p>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/70 sm:col-span-2">
+                <p className="text-xs uppercase tracking-wide text-slate-500">Favicon</p>
+                <p className="mt-1 break-all font-semibold text-slate-900 dark:text-slate-100">{selectedSeller.favicon || "—"}</p>
               </div>
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/70">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Registered</p>
@@ -372,6 +404,16 @@ export function AdminPage() {
                 <span className={`mt-1 inline-block rounded-full border px-2.5 py-1 text-xs font-semibold capitalize ${statusBadge((selectedSeller.approvalStatus || status) as ApprovalStatus)}`}>
                   {selectedSeller.approvalStatus || status}
                 </span>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/70">
+                <p className="text-xs uppercase tracking-wide text-slate-500">Approved By</p>
+                <p className="mt-1 font-semibold text-slate-900 dark:text-slate-100">{selectedSeller.approvedBy || "—"}</p>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/70">
+                <p className="text-xs uppercase tracking-wide text-slate-500">Approved At</p>
+                <p className="mt-1 font-semibold text-slate-900 dark:text-slate-100">
+                  {selectedSeller.approvedAt ? new Date(selectedSeller.approvedAt).toLocaleString("en-IN") : "—"}
+                </p>
               </div>
             </div>
             <div className="flex flex-wrap gap-2">

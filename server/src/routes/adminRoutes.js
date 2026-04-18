@@ -54,7 +54,7 @@ router.get("/sellers", adminAuth, async (req, res) => {
 
     const sellers = await Seller.find(query)
       .select(
-        "businessName businessEmail phone approvalStatus createdAt updatedAt slug upiId businessAddress"
+        "businessName businessEmail phone approvalStatus createdAt updatedAt slug upiId businessAddress businessGST businessLogo favicon whatsappNumber callNumber approvedAt approvedBy"
       )
       .sort({ createdAt: -1 });
     return res.json({ sellers });
