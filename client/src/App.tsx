@@ -11,7 +11,7 @@ export default function App() {
   return (
     <BrowserRouter>
       <div className="min-h-screen">
-        <header className="border-b border-slate-200/80 bg-white/85 px-3 py-2 backdrop-blur dark:border-slate-700 dark:bg-slate-950/80 sm:px-4">
+        <header className="relative z-40 border-b border-slate-200/80 bg-white/85 px-3 py-2 backdrop-blur dark:border-slate-700 dark:bg-slate-950/80 sm:px-4">
           <div className="mx-auto flex w-full max-w-7xl items-center justify-between gap-3">
             <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-300">
               MyDukan

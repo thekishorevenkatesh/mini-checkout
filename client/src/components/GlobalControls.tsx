@@ -21,7 +21,7 @@ export function GlobalControls() {
   }, [open]);
 
   return (
-    <div ref={menuRef} className="relative">
+    <div ref={menuRef} className="relative z-50">
       {/* Desktop: inline utility controls */}
       <div className="hidden items-center gap-2 sm:flex">
         <button
@@ -57,7 +57,7 @@ export function GlobalControls() {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-[calc(100%+6px)] z-20 w-52 rounded-xl border border-slate-200 bg-white p-2 shadow-lg sm:hidden dark:border-slate-700 dark:bg-slate-900">
+        <div className="absolute right-0 top-[calc(100%+6px)] z-50 w-52 rounded-xl border border-slate-200 bg-white p-2 shadow-lg sm:hidden dark:border-slate-700 dark:bg-slate-900">
           <p className="px-2 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-300">
             {t("common.theme", "Theme")}
           </p>

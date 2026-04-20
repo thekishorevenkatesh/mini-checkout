@@ -152,8 +152,8 @@ function BannerCarousel({ banners }: { banners: { imageUrl: string; title?: stri
   }, [banners.length]);
   if (!banners.length) return null;
   return (
-    <div className="relative overflow-hidden rounded-2xl">
-      <img src={normalizeImageUrl(banners[idx].imageUrl)} alt={banners[idx].title || "Banner"} className="w-full h-48 object-cover sm:h-64" />
+    <div className="relative overflow-hidden rounded-2xl border border-white/60 shadow-md ring-1 ring-slate-200/50 dark:border-slate-700 dark:ring-slate-700/50">
+      <img src={normalizeImageUrl(banners[idx].imageUrl)} alt={banners[idx].title || "Banner"} className="h-48 w-full object-cover sm:h-64" />
       {banners[idx].title && (
         <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent px-4 py-3">
           <p className="text-sm font-semibold text-white">{banners[idx].title}</p>
@@ -607,40 +607,40 @@ export function PublicStorePage() {
 
   return (
     <>
-    <main className="mx-auto grid min-h-screen w-full max-w-7xl gap-6 px-3 py-5 sm:px-4 sm:py-8 lg:grid-cols-3">
+    <main className="mx-auto grid min-h-screen w-full max-w-7xl gap-7 px-3 py-6 sm:px-5 sm:py-10 lg:grid-cols-3 lg:gap-8">
 
       {/* ── LEFT: Store + Products ─────────────────────────── */}
-      <section className="space-y-5 lg:col-span-2">
+      <section className="space-y-6 lg:col-span-2">
         {/* Store Header */}
-        <div className="rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card sm:p-6">
-          <div className="flex items-center gap-4">
+        <div className="rounded-3xl border border-white/80 bg-white/95 p-5 shadow-card ring-1 ring-slate-200/60 backdrop-blur-sm sm:p-7 dark:bg-slate-900/80 dark:ring-slate-700/50">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:gap-5">
             {seller.businessLogo && (
-              <img src={seller.businessLogo} alt="logo" className="h-16 w-16 rounded-2xl object-contain border border-slate-200" />
+              <img src={seller.businessLogo} alt="" className="h-20 w-20 shrink-0 rounded-2xl border border-slate-200/80 bg-white object-contain p-1 shadow-sm dark:border-slate-600 dark:bg-slate-800" />
             )}
-            <div>
-              <p className="inline-flex rounded-full border border-teal-200 bg-teal-50 px-3 py-0.5 text-xs font-bold uppercase tracking-[0.18em] text-teal-700">🛍️ MyDukan</p>
-              <h1 className="mt-1 font-heading text-2xl font-bold text-slate-900 sm:text-3xl">{seller.businessName}</h1>
-              {seller.businessAddress && <p className="text-xs text-slate-500 mt-0.5">📍 {seller.businessAddress}</p>}
+            <div className="min-w-0 flex-1">
+              <p className="inline-flex rounded-full border border-teal-200/80 bg-teal-50 px-3 py-0.5 text-[11px] font-bold uppercase tracking-[0.2em] text-teal-700 dark:border-teal-800 dark:bg-teal-950/50 dark:text-teal-300">🛍️ MyDukan</p>
+              <h1 className="mt-2 font-heading text-2xl font-bold leading-tight tracking-tight text-slate-900 sm:text-3xl dark:text-slate-100">{seller.businessName}</h1>
+              {seller.businessAddress && <p className="mt-1.5 text-sm text-slate-500 dark:text-slate-400">📍 {seller.businessAddress}</p>}
             </div>
           </div>
 
           {/* Social + action buttons row */}
-          <div className="mt-4 flex flex-wrap gap-2">
+          <div className="mt-5 flex flex-wrap gap-2">
             {seller.whatsappNumber && (
               <a href={`https://wa.me/${seller.whatsappNumber.replace(/\D/g, "")}`} target="_blank" rel="noreferrer"
-                className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500 transition">
+                className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-600">
                 💬 WhatsApp
               </a>
             )}
             {seller.callNumber && (
               <a href={`tel:${seller.callNumber}`}
-                className="inline-flex items-center gap-1.5 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500 transition">
+                className="inline-flex items-center gap-1.5 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600">
                 📞 Call Us
               </a>
             )}
             {seller.socialLinks?.map((s, i) => (
               <a key={i} href={s.url} target="_blank" rel="noreferrer"
-                className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:border-slate-400 transition">
+                className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-800 dark:text-slate-200">
                 {SOCIAL_ICONS[s.platform] || "🔗"} {s.platform}
               </a>
             ))}
@@ -653,14 +653,17 @@ export function PublicStorePage() {
         )}
 
         {/* Discovery controls */}
-        <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-900/90">
+        <div className="rounded-2xl border border-slate-200/90 bg-white p-4 shadow-sm ring-1 ring-slate-100 dark:border-slate-700 dark:bg-slate-900/90 dark:ring-slate-800">
           <div className="flex flex-wrap items-center gap-2">
-            <input
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search products, categories..."
-              className="min-w-[220px] flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-teal-400 dark:border-slate-700 dark:bg-slate-900"
-            />
+            <label className="relative min-w-[220px] flex-1">
+              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">🔍</span>
+              <input
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search products, categories..."
+                className="w-full rounded-xl border border-slate-200 py-2.5 pl-10 pr-3 text-sm outline-none transition placeholder:text-slate-400 focus:border-teal-400 focus:ring-2 focus:ring-teal-400/20 dark:border-slate-700 dark:bg-slate-900"
+              />
+            </label>
             <button
               type="button"
               onClick={() => setShowMobileFilters((prev) => !prev)}
@@ -708,10 +711,10 @@ export function PublicStorePage() {
 
           {/* Category Tabs */}
           {categoryTabs.length > 1 && (
-            <div className="mt-3 flex flex-wrap gap-2">
+            <div className="mt-4 flex gap-2 overflow-x-auto pb-1 pt-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               {categoryTabs.map(c => (
-                <button key={c} onClick={() => setActiveCategory(c)}
-                  className={`rounded-full px-4 py-1.5 text-sm font-semibold transition ${activeCategory === c ? "bg-slate-900 text-white" : "border border-slate-200 bg-white text-slate-600 hover:border-slate-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"}`}>
+                <button key={c} type="button" onClick={() => setActiveCategory(c)}
+                  className={`shrink-0 rounded-full px-4 py-2 text-sm font-semibold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900 ${activeCategory === c ? "bg-slate-900 text-white shadow-md dark:bg-slate-100 dark:text-slate-900" : "border border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"}`}>
                   {c}
                 </button>
               ))}
@@ -753,12 +756,12 @@ export function PublicStorePage() {
 
               return (
                 <article key={product._id}
-                  className={`group overflow-hidden rounded-3xl border bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-slate-700 dark:bg-slate-900 ${isSelected ? "border-emerald-400 ring-2 ring-emerald-100" : "border-slate-200"}`}>
-                  <div className="relative">
+                  className={`group overflow-hidden rounded-3xl border bg-white shadow-sm transition duration-200 hover:-translate-y-1 hover:shadow-lg dark:border-slate-700 dark:bg-slate-900 ${isSelected ? "border-emerald-400 ring-2 ring-emerald-100/80 dark:ring-emerald-900/40" : "border-slate-200/90"}`}>
+                  <div className="relative overflow-hidden bg-slate-100 dark:bg-slate-800">
                     {product.imageUrl ? (
-                      <img src={normalizeImageUrl(product.imageUrl)} alt={product.title} className="aspect-[4/3] w-full object-cover" />
+                      <img src={normalizeImageUrl(product.imageUrl)} alt={product.title} className="aspect-[4/3] w-full object-cover transition duration-300 group-hover:scale-[1.02]" />
                     ) : (
-                      <div className="aspect-[4/3] w-full bg-slate-100 dark:bg-slate-800" />
+                      <div className="aspect-[4/3] w-full bg-gradient-to-br from-slate-100 to-slate-200 dark:from-slate-800 dark:to-slate-900" />
                     )}
                     <div className="absolute left-2 top-2 flex flex-wrap gap-1">
                       {isNewProduct && <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-bold text-sky-700">NEW</span>}
@@ -871,15 +874,18 @@ export function PublicStorePage() {
       </section>
 
       {/* ── RIGHT: Checkout ────────────────────────────────── */}
-      <section className="space-y-4 rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card sm:p-6 lg:sticky lg:top-6 lg:self-start">
-        <h2 className="font-heading text-2xl font-bold text-slate-900">{t("store.checkout", "Checkout")}</h2>
+      <section className="space-y-5 rounded-[1.75rem] border border-white/80 bg-white/95 p-5 shadow-card ring-1 ring-slate-200/50 backdrop-blur-sm sm:p-7 lg:sticky lg:top-6 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto lg:self-start dark:border-slate-700/80 dark:bg-slate-900/90 dark:ring-slate-700/40">
+        <div>
+          <h2 className="font-heading text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100">{t("store.checkout", "Checkout")}</h2>
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Review your cart, enter delivery details, then pay.</p>
+        </div>
 
         {/* Order summary */}
         {selectedItems.length === 0 ? (
           <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">Add one or more products to cart.</p>
         ) : (
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Order Summary</p>
+          <div className="rounded-2xl border border-slate-200/90 bg-gradient-to-b from-slate-50 to-white p-4 space-y-2 dark:border-slate-700 dark:from-slate-900 dark:to-slate-900">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">Order Summary</p>
             {selectedItems.map(p => (
               <div key={p._id} className="flex items-center justify-between gap-2 text-sm text-slate-700">
                 <span className="max-w-[65%] break-words">{p.title} × {cart[p._id]?.quantity}</span>
@@ -907,10 +913,13 @@ export function PublicStorePage() {
           </div>
         )}
 
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 space-y-4">
-        <div className="space-y-1">
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Customer Details</p>
-          <p className="text-sm text-slate-600">Fill your details and choose how you want to pay before placing the order.</p>
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 space-y-4 shadow-sm dark:border-slate-700 dark:bg-slate-900/50">
+        <div className="flex items-start gap-3">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-teal-100 text-sm font-bold text-teal-800 dark:bg-teal-950 dark:text-teal-200">1</span>
+          <div className="space-y-1 pt-0.5">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">Customer Details</p>
+            <p className="text-sm text-slate-600 dark:text-slate-300">Fill your details and choose how you want to pay before placing the order.</p>
+          </div>
         </div>
 
         {(supportsPrepaid || supportsCod) && (
@@ -976,24 +985,27 @@ export function PublicStorePage() {
           {successMessage && <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{successMessage}</p>}
 
           <button type="submit" disabled={submitting || selectedItems.length === 0}
-            className="w-full rounded-xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:bg-slate-400">
-            {submitting ? "Submitting..." : "Save details"}
+            className="w-full rounded-xl bg-slate-900 px-4 py-3.5 text-sm font-semibold text-white shadow-md transition hover:bg-slate-800 disabled:bg-slate-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900 dark:hover:bg-slate-700">
+            {submitting ? "Placing order…" : "Place order"}
           </button>
         </form>
         </div>
 
         {/* UPI payment */}
         {(supportsPrepaid && isPrepaidCheckout && seller.upiId && activeAmount > 0 && (selectedItems.length > 0 || Boolean(paymentSession))) && (
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-3">
-            <div className="space-y-1">
-              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Step 2: UPI Payment</p>
-              <p className="text-sm text-slate-600">After placing the order, pay the exact amount below using any UPI app.</p>
+          <div className="rounded-2xl border border-teal-200/60 bg-gradient-to-b from-teal-50/80 to-slate-50 p-4 space-y-3 dark:border-teal-900/40 dark:from-teal-950/30 dark:to-slate-900/50">
+            <div className="flex items-start gap-3">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-teal-600 text-sm font-bold text-white dark:bg-teal-700">2</span>
+              <div className="space-y-1 pt-0.5">
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-teal-800 dark:text-teal-300">UPI Payment</p>
+                <p className="text-sm text-slate-600 dark:text-slate-300">After you place the order, pay the exact amount below using any UPI app.</p>
+              </div>
             </div>
-            <p className="text-sm text-slate-700">UPI: <span className="font-semibold text-slate-900">{seller.upiId}</span></p>
+            <p className="text-sm text-slate-700 dark:text-slate-300">UPI ID: <span className="font-semibold text-slate-900 dark:text-slate-100">{seller.upiId}</span></p>
             {paymentSession && (
-              <div className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-800">
-                <p className="font-semibold">Transaction Ref: {paymentSession.transactionRef}</p>
-                <p className="mt-1">This page is checking your order status every few seconds and will move to the thank you page automatically after payment confirmation.</p>
+              <div className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2.5 text-xs leading-relaxed text-sky-900 dark:border-sky-900/50 dark:bg-sky-950/40 dark:text-sky-100">
+                <p className="font-semibold">Transaction ref: {paymentSession.transactionRef}</p>
+                <p className="mt-1.5 text-sky-800 dark:text-sky-200/90">We check payment status automatically. When your payment is confirmed, this tab will switch to the thank-you screen — you do not need to open it yourself.</p>
               </div>
             )}
             <div className="inline-flex rounded-xl bg-white p-3">
@@ -1010,22 +1022,13 @@ export function PublicStorePage() {
               </button>
             </div>
             {paymentSession && (
-              <div className="flex flex-col gap-2 sm:flex-row">
-                <button
-                  type="button"
-                  onClick={() => void checkPaymentStatus()}
-                  className="flex-1 rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-400"
-                >
-                  {checkingPayment ? "Checking..." : "Already paid? Check status"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => navigate(thankYouPath)}
-                  className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-400"
-                >
-                  Open Thank You Page
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={() => void checkPaymentStatus()}
+                className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-slate-400 hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-800 dark:text-slate-200"
+              >
+                {checkingPayment ? "Checking…" : "Already paid? Refresh status"}
+              </button>
             )}
             {paymentSession && placedOrderIds.length > 0 && (
               <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
@@ -1040,10 +1043,10 @@ export function PublicStorePage() {
               </div>
             )}
             {intentFeedback && <p className="text-xs text-sky-700 bg-sky-50 border border-sky-200 rounded-lg px-2.5 py-1.5">{intentFeedback}</p>}
-            <p className="text-xs text-slate-400">
+            <p className="text-xs text-slate-500 dark:text-slate-400">
               {paymentSession
-                ? "If your UPI app does not return automatically, come back to this tab or use the Thank You page button."
-                : "Scan QR or tap Pay button on mobile with a UPI app."}
+                ? "If your UPI app opened in another app, return to this browser tab and wait — or tap refresh status after paying."
+                : "Scan the QR or tap Pay on your phone to open your UPI app."}
             </p>
           </div>
         )}
@@ -1086,7 +1089,7 @@ export function PublicStorePage() {
       </p>
     </footer>
     {activePolicy && (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 px-4 py-6">
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 px-4 py-6 backdrop-blur-[2px]">
         <div className="max-h-[85vh] w-full max-w-2xl overflow-hidden rounded-3xl border border-white/70 bg-white shadow-card">
           <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
             <div>
