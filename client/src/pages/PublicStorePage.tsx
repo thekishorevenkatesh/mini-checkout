@@ -29,6 +29,7 @@ const SOCIAL_ICONS: Record<string, string> = {
 const PAYMENT_SUCCESS_STATUSES: OrderStatus[] = ["paid", "confirmed"];
 const POLL_INTERVAL_MS = 3000;
 const UPI_SESSION_STORAGE_KEY = "mini-checkout-upi-session";
+const DEFAULT_APP_FAVICON = "/favicon.svg";
 
 function createTransactionRef() {
   return `ORD-${Date.now()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
@@ -335,6 +336,20 @@ export function PublicStorePage() {
 
     setPaymentMethod("prepaid");
   }, [seller]);
+
+  useEffect(() => {
+    const faviconElement = document.querySelector<HTMLLinkElement>("link[rel='icon']");
+    if (!faviconElement) return;
+
+    const previousHref = faviconElement.getAttribute("href") || DEFAULT_APP_FAVICON;
+    const nextHref = seller?.favicon ? normalizeImageUrl(seller.favicon) : DEFAULT_APP_FAVICON;
+
+    faviconElement.setAttribute("href", nextHref);
+
+    return () => {
+      faviconElement.setAttribute("href", previousHref);
+    };
+  }, [seller?.favicon]);
 
   function getItem(productId: string): CartItem {
     return cart[productId] || { quantity: 0, variants: {} };
