@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { useAuth } from "../context/AuthContext";
 import { useI18n } from "../context/I18nContext";
+import { DEFAULT_POLICY_CONTENT } from "../constants/policyDefaults";
 import { Alert } from "../components/ui/Alert";
 import { Button } from "../components/ui/Button";
 
@@ -32,6 +33,8 @@ export function LoginPage() {
   const [businessLogo, setBusinessLogo] = useState("");
   const [whatsappNumber, setWhatsappNumber] = useState("");
   const [callNumber, setCallNumber] = useState("");
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [showTermsModal, setShowTermsModal] = useState(false);
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -56,9 +59,9 @@ export function LoginPage() {
   const canSendOtp =
     phoneDigits.length === 10 &&
     !emailError &&
-    (mode !== "register" || businessName.trim().length >= 3);
+    (mode !== "register" || (businessName.trim().length >= 3 && termsAccepted));
   const canVerifyOtp = otp.length === 6;
-  const canCompleteProfile = businessName.trim().length >= 3;
+  const canCompleteProfile = businessName.trim().length >= 3 && termsAccepted;
 
   function errMsg(err: unknown, fallback: string) {
     if (axios.isAxiosError(err)) {
@@ -77,6 +80,7 @@ export function LoginPage() {
     setInfo("");
     setOtp("");
     setDevOtp("");
+    setTermsAccepted(false);
   }
 
   // ── Step 1: Send OTP ─────────────────────────────────────────────────────
@@ -88,6 +92,10 @@ export function LoginPage() {
     if (emailError) { setError(emailError); return; }
     if (mode === "register" && !businessName.trim()) {
       setError("Business name is required.");
+      return;
+    }
+    if (mode === "register" && !termsAccepted) {
+      setError("Please accept Terms & Conditions to continue.");
       return;
     }
     setSubmitting(true);
@@ -124,6 +132,7 @@ export function LoginPage() {
         // Auto-complete registration with pre-filled data from Step 1
         await register({
           businessName: businessName.trim(),
+          termsAccepted,
           businessEmail: businessEmail.trim() || undefined,
           businessAddress: businessAddress.trim() || undefined,
           businessGST: businessGST.trim() || undefined,
@@ -160,10 +169,12 @@ export function LoginPage() {
     setError("");
     if (!businessName.trim()) { setError("Business name is required."); return; }
     if (businessName.trim().length < 3) { setError("Business name should be at least 3 characters."); return; }
+    if (!termsAccepted) { setError("Please accept Terms & Conditions to continue."); return; }
     setSubmitting(true);
     try {
       await register({
         businessName: businessName.trim(),
+        termsAccepted,
         businessEmail: businessEmail.trim() || undefined,
         businessAddress: businessAddress.trim() || undefined,
         businessGST: businessGST.trim() || undefined,
@@ -400,6 +411,29 @@ export function LoginPage() {
                   </label>
                 </>
               )}
+              {mode === "register" && (
+                <div className="sm:col-span-2 space-y-1">
+                  <label className="inline-flex items-start gap-2 text-sm text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={termsAccepted}
+                      onChange={(e) => setTermsAccepted(e.target.checked)}
+                      className="mt-0.5 h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
+                    />
+                    <span>
+                      I accept the{" "}
+                      <button
+                        type="button"
+                        onClick={() => setShowTermsModal(true)}
+                        className="font-semibold text-teal-700 underline underline-offset-2"
+                      >
+                        Terms & Conditions
+                      </button>
+                      .
+                    </span>
+                  </label>
+                </div>
+              )}
 
               {error && (
                 <Alert tone="error" className={mode === "register" ? "sm:col-span-2" : ""}>
@@ -588,6 +622,27 @@ export function LoginPage() {
                   onChange={(e) => setCallNumber(e.target.value)}
                 />
               </label>
+              <div className="sm:col-span-2 space-y-1">
+                <label className="inline-flex items-start gap-2 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={termsAccepted}
+                    onChange={(e) => setTermsAccepted(e.target.checked)}
+                    className="mt-0.5 h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
+                  />
+                  <span>
+                    I accept the{" "}
+                    <button
+                      type="button"
+                      onClick={() => setShowTermsModal(true)}
+                      className="font-semibold text-teal-700 underline underline-offset-2"
+                    >
+                      Terms & Conditions
+                    </button>
+                    .
+                  </span>
+                </label>
+              </div>
 
               {businessNameError && <span className="text-xs text-rose-600 sm:col-span-2">{businessNameError}</span>}
               {error && (
@@ -613,6 +668,27 @@ export function LoginPage() {
     <footer className="pb-2 text-center text-xs text-slate-400">
       <span className="font-semibold text-slate-500">🛍️ MyDukan</span> — Your Store. Your Link. Your Sales.
     </footer>
+    {showTermsModal && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 px-4 py-6 backdrop-blur-[2px]">
+        <div className="max-h-[85vh] w-full max-w-2xl overflow-hidden rounded-3xl border border-white/70 bg-white shadow-card">
+          <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
+            <h3 className="font-heading text-xl font-bold text-slate-900">Terms & Conditions</h3>
+            <button
+              type="button"
+              onClick={() => setShowTermsModal(false)}
+              className="rounded-xl border border-slate-200 px-3 py-1.5 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+            >
+              Close
+            </button>
+          </div>
+          <div className="max-h-[calc(85vh-88px)] overflow-y-auto px-5 py-4">
+            <p className="whitespace-pre-line text-sm leading-6 text-slate-700">
+              {DEFAULT_POLICY_CONTENT.termsAndConditions}
+            </p>
+          </div>
+        </div>
+      </div>
+    )}
     </>
   );
 }

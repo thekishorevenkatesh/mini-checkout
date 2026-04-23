@@ -44,6 +44,7 @@ export interface Seller {
   approvalStatus: "pending" | "approved" | "rejected";
   approvedAt?: string | null;
   approvedBy?: string;
+  termsAcceptedAt?: string | null;
   createdAt?: string;
 }
 
@@ -54,6 +55,7 @@ export interface Product {
   category: string;
   description: string;
   imageUrl: string;
+  imageUrls?: string[];
   notes: string;
   mrp: number;
   price: number; // selling price

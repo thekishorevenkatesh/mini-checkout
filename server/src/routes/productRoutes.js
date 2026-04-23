@@ -58,6 +58,18 @@ function normalizeVariantQuantities(input) {
   }, {});
 }
 
+function normalizeImageUrls(imageUrls, fallbackImageUrl = "") {
+  const list = Array.isArray(imageUrls) ? imageUrls : [];
+  const cleaned = list
+    .map((url) => String(url || "").trim())
+    .filter(Boolean);
+
+  if (cleaned.length > 0) return cleaned;
+
+  const fallback = String(fallbackImageUrl || "").trim();
+  return fallback ? [fallback] : [];
+}
+
 // ─── POST /products — Create product (auth) ───────────────────────────────
 router.post("/", auth, async (req, res) => {
   try {
@@ -65,6 +77,7 @@ router.post("/", auth, async (req, res) => {
       title,
       description,
       imageUrl,
+      imageUrls,
       notes,
       price,
       mrp,
@@ -85,6 +98,11 @@ router.post("/", auth, async (req, res) => {
 
     if (!title) {
       return res.status(400).json({ message: "Title is required" });
+    }
+
+    const normalizedImageUrls = normalizeImageUrls(imageUrls, imageUrl);
+    if (normalizedImageUrls.length === 0) {
+      return res.status(400).json({ message: "At least one product image is required." });
     }
 
     if (!hasBasePrice && !hasVariantOptions) {
@@ -131,7 +149,8 @@ router.post("/", auth, async (req, res) => {
       seller: seller._id,
       title: String(title).trim(),
       description: description ? String(description).trim() : "",
-      imageUrl: imageUrl ? String(imageUrl).trim() : "",
+      imageUrl: normalizedImageUrls[0],
+      imageUrls: normalizedImageUrls,
       notes: notes ? String(notes).trim() : "",
       price: hasBasePrice ? Number(price) : 0,
       mrp: mrp ? Number(mrp) : 0,
@@ -227,6 +246,7 @@ router.put("/:productId", auth, async (req, res) => {
       title,
       description,
       imageUrl,
+      imageUrls,
       notes,
       price,
       mrp,
@@ -270,9 +290,19 @@ router.put("/:productId", auth, async (req, res) => {
       });
     }
 
+    const normalizedImageUrls =
+      imageUrls !== undefined || imageUrl !== undefined
+        ? normalizeImageUrls(imageUrls, imageUrl)
+        : normalizeImageUrls(product.imageUrls, product.imageUrl);
+
+    if (normalizedImageUrls.length === 0) {
+      return res.status(400).json({ message: "At least one product image is required." });
+    }
+
     if (title) product.title = String(title).trim();
     if (description !== undefined) product.description = String(description).trim();
-    if (imageUrl !== undefined) product.imageUrl = String(imageUrl).trim();
+    product.imageUrls = normalizedImageUrls;
+    product.imageUrl = normalizedImageUrls[0];
     if (notes !== undefined) product.notes = String(notes).trim();
     if (price !== undefined) product.price = Number(price) || 0;
     if (mrp !== undefined) product.mrp = Number(mrp);

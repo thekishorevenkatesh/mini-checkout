@@ -22,6 +22,7 @@ interface VerifyOtpInput {
 
 interface RegisterInput {
   businessName: string;
+  termsAccepted: boolean;
   businessEmail?: string;
   businessAddress?: string;
   businessGST?: string;

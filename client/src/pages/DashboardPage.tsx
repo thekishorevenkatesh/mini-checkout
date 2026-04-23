@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { QRCodeCanvas } from "qrcode.react";
 import { api } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import { useI18n } from "../context/I18nContext";
@@ -13,12 +14,12 @@ type ProductFormVariant = {
 
 type ProductForm = {
   title: string; description: string; price: string; mrp: string;
-  imageUrl: string; notes: string; category: string;
+  imageUrls: string[]; notes: string; category: string;
   variants: ProductFormVariant[];
 };
 const emptyProductForm: ProductForm = {
   title: "", description: "", price: "", mrp: "",
-  imageUrl: "", notes: "", category: "", variants: [],
+  imageUrls: [""], notes: "", category: "", variants: [],
 };
 
 const statusClasses: Record<OrderStatus, string> = {
@@ -117,6 +118,14 @@ function normalizeImageUrl(url: string) {
   return `https://${trimmed}`;
 }
 
+function getProductImages(product: Product): string[] {
+  const list = Array.isArray(product.imageUrls) ? product.imageUrls : [];
+  const cleaned = list.map(normalizeImageUrl).filter(Boolean);
+  if (cleaned.length > 0) return cleaned;
+  const fallback = normalizeImageUrl(product.imageUrl || "");
+  return fallback ? [fallback] : [];
+}
+
 // ─── DashboardPage ────────────────────────────────────────────────────────────
 export function DashboardPage() {
   const { seller, logout, updateProfile, refreshProfile } = useAuth();
@@ -183,6 +192,8 @@ export function DashboardPage() {
   const [, forceTickUpdate] = useState(0); // triggers re-render for "X ago" display
 
   const [copyFeedback, setCopyFeedback] = useState("");
+  const [showStoreQrActions, setShowStoreQrActions] = useState(false);
+  const storeQrCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // Sync seller into local form state
   useEffect(() => {
@@ -288,6 +299,35 @@ export function DashboardPage() {
     setCopyFeedback("Store link copied!"); window.setTimeout(() => setCopyFeedback(""), 2000);
   }
 
+  async function shareStoreLink() {
+    if (!storeUrl) return;
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: seller?.businessName || "Store",
+          text: `Check out ${seller?.businessName || "this store"}`,
+          url: storeUrl,
+        });
+        return;
+      } catch {
+        // Fallback to copy link.
+      }
+    }
+    await navigator.clipboard.writeText(storeUrl);
+    setCopyFeedback("Store link copied!");
+    window.setTimeout(() => setCopyFeedback(""), 2000);
+  }
+
+  function downloadStoreQrCode() {
+    const canvas = storeQrCanvasRef.current;
+    if (!canvas) return;
+    const dataUrl = canvas.toDataURL("image/png");
+    const link = document.createElement("a");
+    link.href = dataUrl;
+    link.download = `${seller?.slug || "store"}-qr.png`;
+    link.click();
+  }
+
   // ── Profile save
   async function handleProfileSave(e: FormEvent) {
     e.preventDefault(); setIsSavingProfile(true); setError(""); setSuccess("");
@@ -364,7 +404,7 @@ export function DashboardPage() {
       description: prod.description || "",
       price: String(prod.price),
       mrp: String(prod.mrp || ""),
-      imageUrl: prod.imageUrl || "",
+      imageUrls: getProductImages(prod).length > 0 ? getProductImages(prod) : [""],
       notes: prod.notes || "",
       category: prod.category || "",
       variants: variantRows,
@@ -407,13 +447,22 @@ export function DashboardPage() {
         setIsSubmittingProduct(false);
         return;
       }
+      const normalizedImages = productForm.imageUrls
+        .map(normalizeImageUrl)
+        .filter(Boolean);
+      if (normalizedImages.length === 0) {
+        setError("At least 1 product image is required.");
+        setIsSubmittingProduct(false);
+        return;
+      }
 
       const payload = {
         title: productForm.title.trim(),
         description: productForm.description.trim(),
         price: Number.isFinite(baseSellingPrice) ? baseSellingPrice : 0,
         mrp: Number(productForm.mrp) || 0,
-        imageUrl: normalizeImageUrl(productForm.imageUrl),
+        imageUrl: normalizedImages[0],
+        imageUrls: normalizedImages,
         notes: productForm.notes.trim(),
         category: productForm.category.trim(),
         variants: hasVariants ? [{ label: "Variant", options: variantPayload.map(v => v.option) }] : [],
@@ -482,10 +531,64 @@ export function DashboardPage() {
             <h1 className="font-heading text-xl font-bold text-slate-900 sm:text-2xl">{seller?.businessName || "My Dukan"}</h1>
           </div>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <button onClick={copyStoreLink} disabled={!storeUrl} className="rounded-xl bg-teal-600 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-500 disabled:bg-slate-300 disabled:text-slate-500 transition">Copy Store Link</button>
+        <div className="flex w-full flex-wrap gap-2 sm:w-auto">
+          <button
+            onClick={copyStoreLink}
+            disabled={!storeUrl}
+            aria-label="Copy public store link"
+            className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-teal-200 bg-teal-50 px-4 py-2 text-sm font-semibold text-teal-700 hover:bg-teal-100 disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 transition sm:flex-none"
+          >
+            {copyFeedback ? "✅ Copied" : "🔗 Copy Store Link"}
+          </button>
           {storeUrl && (
-            <a href={storeUrl} target="_blank" rel="noreferrer" className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700 transition">Open Store</a>
+            <a
+              href={storeUrl}
+              target="_blank"
+              rel="noreferrer"
+              aria-label="Open public store in new tab"
+              className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700 transition sm:flex-none"
+            >
+              🌐 Open Store
+            </a>
+          )}
+          {storeUrl && (
+            <div
+              className="relative"
+              onMouseEnter={() => setShowStoreQrActions(true)}
+              onMouseLeave={() => setShowStoreQrActions(false)}
+            >
+              <button
+                type="button"
+                onClick={() => setShowStoreQrActions((prev) => !prev)}
+                className="rounded-xl border border-slate-200 bg-white p-1.5 shadow-sm"
+                aria-label="Store QR options"
+              >
+                <QRCodeCanvas
+                  value={storeUrl}
+                  size={32}
+                  ref={storeQrCanvasRef}
+                  includeMargin
+                  bgColor="#ffffff"
+                  fgColor="#0f172a"
+                />
+              </button>
+              <div className={`absolute right-0 top-full z-20 mt-2 w-40 rounded-xl border border-slate-200 bg-white p-2 shadow-lg transition ${showStoreQrActions ? "opacity-100" : "pointer-events-none opacity-0"}`}>
+                <button
+                  type="button"
+                  onClick={() => void shareStoreLink()}
+                  className="w-full rounded-lg px-3 py-2 text-left text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                >
+                  Share
+                </button>
+                <button
+                  type="button"
+                  onClick={downloadStoreQrCode}
+                  className="mt-1 w-full rounded-lg px-3 py-2 text-left text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                >
+                  Download PNG
+                </button>
+              </div>
+            </div>
           )}
           <button onClick={logout} className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:border-slate-400 transition">Logout</button>
         </div>
@@ -787,18 +890,50 @@ export function DashboardPage() {
                 </div>
               <div className="grid gap-3 sm:grid-cols-2 rounded-2xl border border-slate-200 bg-slate-50 p-4">
                   <label className="block space-y-1 sm:col-span-2">
-                    <span className="text-sm font-semibold text-slate-700">Product Image</span>
-                    <ImageUploadField
-                      value={productForm.imageUrl}
-                      onChange={url => setProductForm(p => ({ ...p, imageUrl: url }))}
-                      placeholder="https://..."
-                    />
-                  </label>
-                  {productForm.imageUrl && (
-                    <div className="sm:col-span-2">
-                      <img src={normalizeImageUrl(productForm.imageUrl)} alt="preview" className="h-24 w-24 rounded-xl object-cover border border-slate-200" />
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-sm font-semibold text-slate-700">Product Images *</span>
+                      <button
+                        type="button"
+                        onClick={() => setProductForm(p => ({ ...p, imageUrls: [...p.imageUrls, ""] }))}
+                        className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+                      >
+                        + Add image
+                      </button>
                     </div>
-                  )}
+                  </label>
+                  <div className="sm:col-span-2 space-y-2">
+                    {productForm.imageUrls.map((url, index) => (
+                      <div key={index} className="rounded-xl border border-slate-200 bg-white p-2">
+                        <div className="flex flex-col gap-2 sm:flex-row">
+                          <div className="flex-1">
+                            <ImageUploadField
+                              value={url}
+                              onChange={(nextUrl) => setProductForm((p) => {
+                                const next = [...p.imageUrls];
+                                next[index] = nextUrl;
+                                return { ...p, imageUrls: next };
+                              })}
+                              placeholder="https://..."
+                            />
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setProductForm((p) => ({
+                              ...p,
+                              imageUrls: p.imageUrls.length > 1 ? p.imageUrls.filter((_, i) => i !== index) : [""],
+                            }))}
+                            className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                        {normalizeImageUrl(url) && (
+                          <img src={normalizeImageUrl(url)} alt={`preview-${index + 1}`} className="mt-2 h-24 w-24 rounded-xl object-cover border border-slate-200" />
+                        )}
+                      </div>
+                    ))}
+                    <p className="text-xs text-slate-500">Add at least one image. First image is used as default thumbnail.</p>
+                  </div>
                   <label className="block space-y-1 sm:col-span-2">
                     <span className="text-sm font-semibold text-slate-700">Description</span>
                     <textarea
@@ -861,7 +996,7 @@ export function DashboardPage() {
               {products.map(prod => (
                 <div key={prod._id} className={`rounded-2xl border p-3 ${prod.isActive ? "border-slate-200 bg-slate-50" : "border-slate-100 bg-slate-100 opacity-60"}`}>
                   <div className="flex items-start gap-2">
-                    {prod.imageUrl && <img src={normalizeImageUrl(prod.imageUrl)} alt="" className="h-12 w-12 rounded-lg object-cover" />}
+                    {getProductImages(prod)[0] && <img src={getProductImages(prod)[0]} alt="" className="h-12 w-12 rounded-lg object-cover" />}
                     <div className="flex-1 min-w-0">
                       <p className="font-semibold text-slate-800 truncate">{prod.title}</p>
                       {prod.category && <p className="text-xs text-slate-500">{prod.category}</p>}

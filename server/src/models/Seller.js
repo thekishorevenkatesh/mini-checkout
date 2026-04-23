@@ -145,6 +145,10 @@ const sellerSchema = new mongoose.Schema(
       trim: true,
       default: "",
     },
+    termsAcceptedAt: {
+      type: Date,
+      default: null,
+    },
     // OTP fields (transient — cleared after verification)
     otp: {
       type: String,

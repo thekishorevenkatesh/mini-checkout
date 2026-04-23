@@ -179,6 +179,7 @@ router.post("/register", auth, async (req, res) => {
       businessLogo,
       whatsappNumber,
       callNumber,
+      termsAccepted,
       privacyPolicy,
       returnRefundPolicy,
       termsAndConditions,
@@ -186,6 +187,10 @@ router.post("/register", auth, async (req, res) => {
 
     if (!businessName) {
       return res.status(400).json({ message: "Business name is required" });
+    }
+
+    if (!termsAccepted) {
+      return res.status(400).json({ message: "You must accept Terms & Conditions." });
     }
 
     const seller = await Seller.findById(req.sellerId);
@@ -212,6 +217,7 @@ router.post("/register", auth, async (req, res) => {
     seller.approvalStatus = "pending";
     seller.approvedAt = null;
     seller.approvedBy = "";
+    seller.termsAcceptedAt = new Date();
 
     await seller.save();
     return res.json({ seller: withPolicyDefaults(seller) });

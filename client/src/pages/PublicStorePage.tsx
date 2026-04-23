@@ -42,6 +42,14 @@ function normalizeImageUrl(url: string) {
   return `https://${trimmed}`;
 }
 
+function getProductImages(product: Product) {
+  const images = Array.isArray(product.imageUrls) ? product.imageUrls : [];
+  const normalized = images.map(normalizeImageUrl).filter(Boolean);
+  if (normalized.length > 0) return normalized;
+  const fallback = normalizeImageUrl(product.imageUrl || "");
+  return fallback ? [fallback] : [];
+}
+
 function buildUpiLink(
   upiId: string,
   businessName: string,
@@ -209,6 +217,7 @@ export function PublicStorePage() {
   const [orderStatuses, setOrderStatuses] = useState<Record<string, OrderStatus>>({});
   const [checkingPayment, setCheckingPayment] = useState(false);
   const [activePolicy, setActivePolicy] = useState<PolicyKey | null>(null);
+  const [activeProductImageIndex, setActiveProductImageIndex] = useState<Record<string, number>>({});
 
   useEffect(() => {
     async function fetchStore() {
@@ -588,6 +597,7 @@ export function PublicStorePage() {
     window.setTimeout(() => setIntentFeedback(""), 2200);
   }
 
+
   if (loading) {
     return (
       <main className="mx-auto min-h-screen w-full max-w-7xl px-4 py-8">
@@ -643,20 +653,26 @@ export function PublicStorePage() {
           <div className="mt-5 flex flex-wrap gap-2">
             {seller.whatsappNumber && (
               <a href={`https://wa.me/${seller.whatsappNumber.replace(/\D/g, "")}`} target="_blank" rel="noreferrer"
-                className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-600">
-                💬 WhatsApp
+                title="Chat on WhatsApp"
+                aria-label="Chat on WhatsApp"
+                className="inline-flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-600 text-xl text-white shadow-sm transition hover:bg-emerald-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-600">
+                💬
               </a>
             )}
             {seller.callNumber && (
               <a href={`tel:${seller.callNumber}`}
-                className="inline-flex items-center gap-1.5 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600">
-                📞 Call Us
+                title="Call Seller"
+                aria-label="Call Seller"
+                className="inline-flex h-11 w-11 items-center justify-center rounded-xl bg-blue-600 text-xl text-white shadow-sm transition hover:bg-blue-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600">
+                📞
               </a>
             )}
-            {seller.socialLinks?.map((s, i) => (
+            {seller.socialLinks?.filter((s) => String(s.url || "").trim()).map((s, i) => (
               <a key={i} href={s.url} target="_blank" rel="noreferrer"
-                className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-800 dark:text-slate-200">
-                {SOCIAL_ICONS[s.platform] || "🔗"} {s.platform}
+                title={s.platform}
+                aria-label={s.platform}
+                className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-slate-200 bg-white text-xl text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-800 dark:text-slate-200">
+                {SOCIAL_ICONS[s.platform] || "🔗"}
               </a>
             ))}
           </div>
@@ -768,13 +784,19 @@ export function PublicStorePage() {
                   : 0;
               const isOutOfStock = selectedStock !== null && selectedStock <= 0;
               const isNewProduct = Date.now() - new Date(product.createdAt).getTime() < 1000 * 60 * 60 * 24 * 7;
+              const productImages = getProductImages(product);
+              const activeImageIndex = Math.min(
+                activeProductImageIndex[product._id] || 0,
+                Math.max(productImages.length - 1, 0)
+              );
+              const activeImage = productImages[activeImageIndex] || "";
 
               return (
                 <article key={product._id}
                   className={`group overflow-hidden rounded-3xl border bg-white shadow-sm transition duration-200 hover:-translate-y-1 hover:shadow-lg dark:border-slate-700 dark:bg-slate-900 ${isSelected ? "border-emerald-400 ring-2 ring-emerald-100/80 dark:ring-emerald-900/40" : "border-slate-200/90"}`}>
                   <div className="relative overflow-hidden bg-slate-100 dark:bg-slate-800">
-                    {product.imageUrl ? (
-                      <img src={normalizeImageUrl(product.imageUrl)} alt={product.title} className="aspect-[4/3] w-full object-cover transition duration-300 group-hover:scale-[1.02]" />
+                    {activeImage ? (
+                      <img src={activeImage} alt={product.title} className="aspect-[4/3] w-full object-cover transition duration-300 group-hover:scale-[1.02]" />
                     ) : (
                       <div className="aspect-[4/3] w-full bg-gradient-to-br from-slate-100 to-slate-200 dark:from-slate-800 dark:to-slate-900" />
                     )}
@@ -784,6 +806,21 @@ export function PublicStorePage() {
                       {isOutOfStock && <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-bold text-rose-700">OUT OF STOCK</span>}
                     </div>
                   </div>
+                  {productImages.length > 1 && (
+                    <div className="flex gap-1 overflow-x-auto px-3 pt-2">
+                      {productImages.map((url, idx) => (
+                        <button
+                          key={`${product._id}-${idx}`}
+                          type="button"
+                          onClick={() => setActiveProductImageIndex((prev) => ({ ...prev, [product._id]: idx }))}
+                          className={`h-12 w-12 shrink-0 overflow-hidden rounded-lg border ${idx === activeImageIndex ? "border-teal-500" : "border-slate-200"}`}
+                          aria-label={`View image ${idx + 1}`}
+                        >
+                          <img src={url} alt="" className="h-full w-full object-cover" />
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   <div className="space-y-3 p-4">
                     {product.category && (
                       <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">{product.category}</span>

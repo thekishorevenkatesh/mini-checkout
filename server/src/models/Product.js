@@ -36,6 +36,10 @@ const productSchema = new mongoose.Schema(
       trim: true,
       default: "",
     },
+    imageUrls: {
+      type: [String],
+      default: [],
+    },
     notes: {
       type: String,
       trim: true,
