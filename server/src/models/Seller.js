@@ -31,6 +31,11 @@ const sellerSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
+    businessCategory: {
+      type: String,
+      trim: true,
+      default: "",
+    },
     phone: {
       type: String,
       required: true,

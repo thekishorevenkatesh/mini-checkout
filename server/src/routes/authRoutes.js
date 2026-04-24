@@ -172,6 +172,7 @@ router.post("/register", auth, async (req, res) => {
   try {
     const {
       businessName,
+      businessCategory,
       businessEmail,
       businessAddress,
       businessGST,
@@ -199,6 +200,7 @@ router.post("/register", auth, async (req, res) => {
     }
 
     seller.businessName = String(businessName).trim();
+    if (businessCategory) seller.businessCategory = String(businessCategory).trim();
     seller.slug = await createUniqueSellerSlug(
       seller.businessName,
       seller._id.toString()
@@ -255,6 +257,7 @@ router.put("/me", auth, async (req, res) => {
   try {
     const {
       businessName,
+      businessCategory,
       businessEmail,
       businessAddress,
       businessGST,
@@ -275,6 +278,7 @@ router.put("/me", auth, async (req, res) => {
     }
 
     if (businessName) seller.businessName = String(businessName).trim();
+    if (businessCategory !== undefined) seller.businessCategory = String(businessCategory).trim();
     if (businessEmail) seller.businessEmail = String(businessEmail).trim().toLowerCase();
     if (businessAddress !== undefined) seller.businessAddress = String(businessAddress).trim();
     if (businessGST !== undefined) seller.businessGST = String(businessGST).trim();

@@ -4,6 +4,14 @@ import { QRCodeSVG } from "qrcode.react";
 import { api } from "../api/client";
 import { DEFAULT_POLICY_CONTENT } from "../constants/policyDefaults";
 import { useI18n } from "../context/I18nContext";
+import {
+  DEFAULT_COUNTRY_CODE,
+  EMPTY_ADDRESS,
+  formatAddress,
+  formatPhone,
+  type AddressParts,
+  type PhoneParts,
+} from "../utils/contactFields";
 import type { OrderStatus, PaymentMethod, Product, Seller } from "../types";
 
 type CartItem = { quantity: number; variants: Record<string, string> };
@@ -26,7 +34,7 @@ const SOCIAL_ICONS: Record<string, string> = {
   YouTube: "▶️", LinkedIn: "💼", Website: "🌐", "Google Location": "🗺️", Other: "🔗",
 };
 
-const PAYMENT_SUCCESS_STATUSES: OrderStatus[] = ["paid", "confirmed"];
+const PAYMENT_SUCCESS_STATUSES: OrderStatus[] = ["paid", "delivered"];
 const POLL_INTERVAL_MS = 3000;
 const UPI_SESSION_STORAGE_KEY = "mini-checkout-upi-session";
 const DEFAULT_APP_FAVICON = "/favicon.svg";
@@ -200,8 +208,8 @@ export function PublicStorePage() {
 
   // Checkout fields
   const [customerName, setCustomerName] = useState("");
-  const [customerPhone, setCustomerPhone] = useState("");
-  const [deliveryAddress, setDeliveryAddress] = useState("");
+  const [customerPhone, setCustomerPhone] = useState<PhoneParts>({ countryCode: DEFAULT_COUNTRY_CODE, number: "" });
+  const [deliveryAddress, setDeliveryAddress] = useState<AddressParts>(EMPTY_ADDRESS);
   const [note, setNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
@@ -529,8 +537,8 @@ export function PublicStorePage() {
           productId: p._id,
           quantity: cart[p._id]?.quantity || 1,
           customerName: customerName.trim(),
-          customerPhone: customerPhone.trim(),
-          deliveryAddress: deliveryAddress.trim(),
+          customerPhone: formatPhone(customerPhone),
+          deliveryAddress: formatAddress(deliveryAddress),
           deliveryCharge,
           selectedVariants: cart[p._id]?.variants || {},
           note: note.trim(),
@@ -548,7 +556,11 @@ export function PublicStorePage() {
           setSuccessMessage(`Order placed successfully for ${ids.length} item(s). The seller will collect payment on delivery.`);
           setProofSuccess("");
           setIntentFeedback("");
-          setCustomerName(""); setCustomerPhone(""); setDeliveryAddress(""); setNote(""); setCart({});
+          setCustomerName("");
+          setCustomerPhone({ countryCode: DEFAULT_COUNTRY_CODE, number: "" });
+          setDeliveryAddress(EMPTY_ADDRESS);
+          setNote("");
+          setCart({});
           return;
         }
 
@@ -569,7 +581,11 @@ export function PublicStorePage() {
         setSuccessMessage(`Order placed for ${ids.length} item(s). Complete the payment in your UPI app and we will redirect you once the payment is marked successful.`);
         setProofSuccess("");
         setIntentFeedback("Opening your UPI app. If it does not open, use the button below.");
-        setCustomerName(""); setCustomerPhone(""); setDeliveryAddress(""); setNote(""); setCart({});
+        setCustomerName("");
+        setCustomerPhone({ countryCode: DEFAULT_COUNTRY_CODE, number: "" });
+        setDeliveryAddress(EMPTY_ADDRESS);
+        setNote("");
+        setCart({});
         window.setTimeout(() => openUpiIntent(nextSession.upiLink), 200);
       }
     } catch { setError("Could not submit order."); }
@@ -1011,22 +1027,46 @@ export function PublicStorePage() {
           </label>
           <label className="block space-y-1">
             <span className="text-sm font-semibold text-slate-700">Phone number *</span>
-            <input
-              type="tel"
-              inputMode="numeric"
-              pattern="[0-9]{10,15}"
-              maxLength={15}
-              className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400"
-              value={customerPhone}
-              onChange={e => setCustomerPhone(e.target.value.replace(/\D/g, ""))}
-              required
-            />
+            <div className="flex gap-2">
+              <input className="w-24 rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400" value={customerPhone.countryCode} onChange={(e) => setCustomerPhone((prev) => ({ ...prev, countryCode: e.target.value }))} placeholder="+91" required />
+              <input
+                type="tel"
+                inputMode="numeric"
+                pattern="[0-9]{10,15}"
+                maxLength={15}
+                className="flex-1 rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400"
+                value={customerPhone.number}
+                onChange={e => setCustomerPhone((prev) => ({ ...prev, number: e.target.value.replace(/\D/g, "") }))}
+                required
+              />
+            </div>
           </label>
-          <label className="block space-y-1">
-            <span className="text-sm font-semibold text-slate-700">Delivery address</span>
-            <textarea className="min-h-16 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400"
-              placeholder="Full address for delivery" value={deliveryAddress} onChange={e => setDeliveryAddress(e.target.value)} />
-          </label>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="block space-y-1">
+              <span className="text-sm font-semibold text-slate-700">Address line 1</span>
+              <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400" value={deliveryAddress.line1} onChange={(e) => setDeliveryAddress((prev) => ({ ...prev, line1: e.target.value }))} />
+            </label>
+            <label className="block space-y-1">
+              <span className="text-sm font-semibold text-slate-700">Address line 2</span>
+              <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400" value={deliveryAddress.line2} onChange={(e) => setDeliveryAddress((prev) => ({ ...prev, line2: e.target.value }))} />
+            </label>
+            <label className="block space-y-1">
+              <span className="text-sm font-semibold text-slate-700">City</span>
+              <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400" value={deliveryAddress.city} onChange={(e) => setDeliveryAddress((prev) => ({ ...prev, city: e.target.value }))} />
+            </label>
+            <label className="block space-y-1">
+              <span className="text-sm font-semibold text-slate-700">State</span>
+              <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400" value={deliveryAddress.state} onChange={(e) => setDeliveryAddress((prev) => ({ ...prev, state: e.target.value }))} />
+            </label>
+            <label className="block space-y-1">
+              <span className="text-sm font-semibold text-slate-700">Country</span>
+              <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400" value={deliveryAddress.country} onChange={(e) => setDeliveryAddress((prev) => ({ ...prev, country: e.target.value }))} />
+            </label>
+            <label className="block space-y-1">
+              <span className="text-sm font-semibold text-slate-700">Landmark</span>
+              <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400" value={deliveryAddress.landmark} onChange={(e) => setDeliveryAddress((prev) => ({ ...prev, landmark: e.target.value }))} />
+            </label>
+          </div>
           <label className="block space-y-1">
             <span className="text-sm font-semibold text-slate-700">Note (optional)</span>
             <textarea className="min-h-12 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400"

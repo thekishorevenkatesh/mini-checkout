@@ -4,11 +4,33 @@ import axios from "axios";
 import { useAuth } from "../context/AuthContext";
 import { useI18n } from "../context/I18nContext";
 import { DEFAULT_POLICY_CONTENT } from "../constants/policyDefaults";
+import { DEFAULT_VENDOR_POLICY_POINTS } from "../constants/vendorPolicyDefaults";
 import { Alert } from "../components/ui/Alert";
 import { Button } from "../components/ui/Button";
+import {
+  DEFAULT_COUNTRY_CODE,
+  EMPTY_ADDRESS,
+  formatAddress,
+  formatPhone,
+  type AddressParts,
+  type PhoneParts,
+} from "../utils/contactFields";
 
 type Mode = "login" | "register";
 type Step = "contact" | "otp" | "profile";
+
+const BUSINESS_CATEGORY_OPTIONS = [
+  "Fashion",
+  "Groceries",
+  "Food & Beverages",
+  "Electronics",
+  "Home & Kitchen",
+  "Beauty & Personal Care",
+  "Health & Wellness",
+  "Books & Stationery",
+  "Services",
+  "Other",
+] as const;
 
 export function LoginPage() {
   const navigate = useNavigate();
@@ -19,30 +41,40 @@ export function LoginPage() {
   const [step, setStep] = useState<Step>("contact");
 
   // Shared fields
-  const [phone, setPhone] = useState("");
+  const [phone, setPhone] = useState<PhoneParts>({ countryCode: DEFAULT_COUNTRY_CODE, number: "" });
   const [email, setEmail] = useState("");
   const [otp, setOtp] = useState("");
   const [devOtp, setDevOtp] = useState("");
 
   // Business / onboarding fields (Register mode Step 1 + Login mode Step 3)
   const [businessName, setBusinessName] = useState("");
+  const [businessCategory, setBusinessCategory] = useState<(typeof BUSINESS_CATEGORY_OPTIONS)[number]>("Fashion");
+  const [businessCategoryOther, setBusinessCategoryOther] = useState("");
   const [businessEmail, setBusinessEmail] = useState("");
-  const [businessAddress, setBusinessAddress] = useState("");
+  const [businessAddress, setBusinessAddress] = useState<AddressParts>(EMPTY_ADDRESS);
   const [businessGST, setBusinessGST] = useState("");
   const [upiId, setUpiId] = useState("");
   const [businessLogo, setBusinessLogo] = useState("");
-  const [whatsappNumber, setWhatsappNumber] = useState("");
-  const [callNumber, setCallNumber] = useState("");
-  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [idProofUrl, setIdProofUrl] = useState("");
+  const [addressProofUrl, setAddressProofUrl] = useState("");
+  const [whatsappNumber, setWhatsappNumber] = useState<PhoneParts>({ countryCode: DEFAULT_COUNTRY_CODE, number: "" });
+  const [callNumber, setCallNumber] = useState<PhoneParts>({ countryCode: DEFAULT_COUNTRY_CODE, number: "" });
+  const [policyChecks, setPolicyChecks] = useState<Record<string, boolean>>(
+    () => Object.fromEntries(DEFAULT_VENDOR_POLICY_POINTS.map((_, index) => [String(index), false]))
+  );
   const [showTermsModal, setShowTermsModal] = useState(false);
+  const selectedBusinessCategory = businessCategory === "Other"
+    ? businessCategoryOther.trim()
+    : businessCategory;
+  const allPoliciesAccepted = Object.values(policyChecks).every(Boolean);
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
 
-  const phoneDigits = phone.replace(/\D/g, "");
+  const phoneDigits = phone.number.replace(/\D/g, "");
   const phoneError =
-    phone.length > 0 && phoneDigits.length !== 10
+    phone.number.length > 0 && phoneDigits.length !== 10
       ? "Enter a valid 10-digit phone number."
       : "";
   const emailError =
@@ -59,9 +91,9 @@ export function LoginPage() {
   const canSendOtp =
     phoneDigits.length === 10 &&
     !emailError &&
-    (mode !== "register" || (businessName.trim().length >= 3 && termsAccepted));
+    (mode !== "register" || (businessName.trim().length >= 3 && allPoliciesAccepted));
   const canVerifyOtp = otp.length === 6;
-  const canCompleteProfile = businessName.trim().length >= 3 && termsAccepted;
+  const canCompleteProfile = businessName.trim().length >= 3 && allPoliciesAccepted;
 
   function errMsg(err: unknown, fallback: string) {
     if (axios.isAxiosError(err)) {
@@ -80,22 +112,32 @@ export function LoginPage() {
     setInfo("");
     setOtp("");
     setDevOtp("");
-    setTermsAccepted(false);
+    setBusinessCategory("Fashion");
+    setBusinessCategoryOther("");
+    setPolicyChecks(Object.fromEntries(DEFAULT_VENDOR_POLICY_POINTS.map((_, index) => [String(index), false])));
+    setPhone({ countryCode: DEFAULT_COUNTRY_CODE, number: "" });
+    setWhatsappNumber({ countryCode: DEFAULT_COUNTRY_CODE, number: "" });
+    setCallNumber({ countryCode: DEFAULT_COUNTRY_CODE, number: "" });
+    setBusinessAddress(EMPTY_ADDRESS);
   }
 
   // ── Step 1: Send OTP ─────────────────────────────────────────────────────
   async function handleSendOtp(e: FormEvent) {
     e.preventDefault();
     setError("");
-    if (!phone.trim()) { setError("Phone number is required."); return; }
+    if (!phone.number.trim()) { setError("Phone number is required."); return; }
     if (phoneDigits.length !== 10) { setError("Enter a valid 10-digit phone number."); return; }
     if (emailError) { setError(emailError); return; }
     if (mode === "register" && !businessName.trim()) {
       setError("Business name is required.");
       return;
     }
-    if (mode === "register" && !termsAccepted) {
-      setError("Please accept Terms & Conditions to continue.");
+    if (mode === "register" && !selectedBusinessCategory) {
+      setError("Please select business category.");
+      return;
+    }
+    if (mode === "register" && !allPoliciesAccepted) {
+      setError("Please accept all vendor policy checklist items to continue.");
       return;
     }
     setSubmitting(true);
@@ -132,14 +174,17 @@ export function LoginPage() {
         // Auto-complete registration with pre-filled data from Step 1
         await register({
           businessName: businessName.trim(),
-          termsAccepted,
+          businessCategory: selectedBusinessCategory || undefined,
+          termsAccepted: allPoliciesAccepted,
           businessEmail: businessEmail.trim() || undefined,
-          businessAddress: businessAddress.trim() || undefined,
+          businessAddress: formatAddress(businessAddress) || undefined,
           businessGST: businessGST.trim() || undefined,
           upiId: upiId.trim() || undefined,
           businessLogo: businessLogo.trim() || undefined,
-          whatsappNumber: whatsappNumber.trim() || undefined,
-          callNumber: callNumber.trim() || undefined,
+          idProofUrl: idProofUrl.trim() || undefined,
+          addressProofUrl: addressProofUrl.trim() || undefined,
+          whatsappNumber: formatPhone(whatsappNumber) || undefined,
+          callNumber: formatPhone(callNumber) || undefined,
         });
         navigate("/dashboard", { replace: true });
       } else {
@@ -169,19 +214,23 @@ export function LoginPage() {
     setError("");
     if (!businessName.trim()) { setError("Business name is required."); return; }
     if (businessName.trim().length < 3) { setError("Business name should be at least 3 characters."); return; }
-    if (!termsAccepted) { setError("Please accept Terms & Conditions to continue."); return; }
+    if (!selectedBusinessCategory) { setError("Please select business category."); return; }
+    if (!allPoliciesAccepted) { setError("Please accept all vendor policy checklist items to continue."); return; }
     setSubmitting(true);
     try {
       await register({
         businessName: businessName.trim(),
-        termsAccepted,
+        businessCategory: selectedBusinessCategory || undefined,
+        termsAccepted: allPoliciesAccepted,
         businessEmail: businessEmail.trim() || undefined,
-        businessAddress: businessAddress.trim() || undefined,
+        businessAddress: formatAddress(businessAddress) || undefined,
         businessGST: businessGST.trim() || undefined,
         upiId: upiId.trim() || undefined,
         businessLogo: businessLogo.trim() || undefined,
-        whatsappNumber: whatsappNumber.trim() || undefined,
-        callNumber: callNumber.trim() || undefined,
+        idProofUrl: idProofUrl.trim() || undefined,
+        addressProofUrl: addressProofUrl.trim() || undefined,
+        whatsappNumber: formatPhone(whatsappNumber) || undefined,
+        callNumber: formatPhone(callNumber) || undefined,
       });
       logout();
       setMode("login");
@@ -304,13 +353,22 @@ export function LoginPage() {
               {/* Phone */}
               <label className={`block space-y-1 ${mode === "register" ? "" : ""}`}>
                 <span className="text-sm font-semibold text-slate-700">Phone number *</span>
-                <input
-                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-base text-slate-900 outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50 sm:text-sm"
-                  placeholder="9876543210"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
-                  required
-                />
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-[96px_minmax(0,1fr)]">
+                  <input
+                    className="min-w-0 rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-900 outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50"
+                    value={phone.countryCode}
+                    onChange={(e) => setPhone((prev) => ({ ...prev, countryCode: e.target.value }))}
+                    placeholder="+91"
+                    required
+                  />
+                  <input
+                    className="min-w-0 rounded-xl border border-slate-200 bg-white px-4 py-3 text-base text-slate-900 outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50 sm:text-sm"
+                    placeholder="9876543210"
+                    value={phone.number}
+                    onChange={(e) => setPhone((prev) => ({ ...prev, number: e.target.value.replace(/\D/g, "").slice(0, 15) }))}
+                    required
+                  />
+                </div>
                 {phoneError && <span className="text-xs text-rose-600">{phoneError}</span>}
               </label>
 
@@ -353,6 +411,31 @@ export function LoginPage() {
                     />
                     {businessNameError && <span className="text-xs text-rose-600">{businessNameError}</span>}
                   </label>
+                  <label className="block space-y-1 sm:col-span-2">
+                    <span className="text-sm font-semibold text-slate-700">Business category *</span>
+                    <select
+                      className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50"
+                      value={businessCategory}
+                      onChange={(e) => setBusinessCategory(e.target.value as (typeof BUSINESS_CATEGORY_OPTIONS)[number])}
+                      required
+                    >
+                      {BUSINESS_CATEGORY_OPTIONS.map((option) => (
+                        <option key={option} value={option}>{option}</option>
+                      ))}
+                    </select>
+                  </label>
+                  {businessCategory === "Other" && (
+                    <label className="block space-y-1 sm:col-span-2">
+                      <span className="text-sm font-semibold text-slate-700">Enter business category *</span>
+                      <input
+                        className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50"
+                        value={businessCategoryOther}
+                        onChange={(e) => setBusinessCategoryOther(e.target.value)}
+                        placeholder="Type your business category"
+                        required
+                      />
+                    </label>
+                  )}
 
                   {/* Business Email */}
                   <label className="block space-y-1">
@@ -378,25 +461,40 @@ export function LoginPage() {
                   </label>
 
                   {/* Business Address */}
-                  <label className="block space-y-1 sm:col-span-2">
-                    <span className="text-sm font-semibold text-slate-700">Business address</span>
-                    <input
-                      className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50"
-                      placeholder="123 Main St, Chennai"
-                      value={businessAddress}
-                      onChange={(e) => setBusinessAddress(e.target.value)}
-                    />
-                  </label>
+                  <div className="sm:col-span-2 grid gap-3 sm:grid-cols-2">
+                    <label className="block space-y-1">
+                      <span className="text-sm font-semibold text-slate-700">Address line 1</span>
+                      <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50" value={businessAddress.line1} onChange={(e) => setBusinessAddress((prev) => ({ ...prev, line1: e.target.value }))} />
+                    </label>
+                    <label className="block space-y-1">
+                      <span className="text-sm font-semibold text-slate-700">Address line 2</span>
+                      <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50" value={businessAddress.line2} onChange={(e) => setBusinessAddress((prev) => ({ ...prev, line2: e.target.value }))} />
+                    </label>
+                    <label className="block space-y-1">
+                      <span className="text-sm font-semibold text-slate-700">City</span>
+                      <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50" value={businessAddress.city} onChange={(e) => setBusinessAddress((prev) => ({ ...prev, city: e.target.value }))} />
+                    </label>
+                    <label className="block space-y-1">
+                      <span className="text-sm font-semibold text-slate-700">State</span>
+                      <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50" value={businessAddress.state} onChange={(e) => setBusinessAddress((prev) => ({ ...prev, state: e.target.value }))} />
+                    </label>
+                    <label className="block space-y-1">
+                      <span className="text-sm font-semibold text-slate-700">Country</span>
+                      <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50" value={businessAddress.country} onChange={(e) => setBusinessAddress((prev) => ({ ...prev, country: e.target.value }))} />
+                    </label>
+                    <label className="block space-y-1">
+                      <span className="text-sm font-semibold text-slate-700">Landmark</span>
+                      <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50" value={businessAddress.landmark} onChange={(e) => setBusinessAddress((prev) => ({ ...prev, landmark: e.target.value }))} />
+                    </label>
+                  </div>
 
                   {/* WhatsApp */}
                   <label className="block space-y-1">
                     <span className="text-sm font-semibold text-slate-700">WhatsApp number</span>
-                    <input
-                      className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50"
-                      placeholder="9876543210"
-                      value={whatsappNumber}
-                      onChange={(e) => setWhatsappNumber(e.target.value)}
-                    />
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-[96px_minmax(0,1fr)]">
+                      <input className="min-w-0 rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50" value={whatsappNumber.countryCode} onChange={(e) => setWhatsappNumber((prev) => ({ ...prev, countryCode: e.target.value }))} placeholder="+91" />
+                      <input className="min-w-0 rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50" placeholder="9876543210" value={whatsappNumber.number} onChange={(e) => setWhatsappNumber((prev) => ({ ...prev, number: e.target.value.replace(/\D/g, "").slice(0, 15) }))} />
+                    </div>
                   </label>
 
                   {/* GST */}
@@ -409,29 +507,57 @@ export function LoginPage() {
                       onChange={(e) => setBusinessGST(e.target.value)}
                     />
                   </label>
+                  {/* KYC Documents */}
+                  <div className="sm:col-span-2 flex items-center gap-3 pt-1">
+                    <div className="h-px flex-1 bg-slate-200" />
+                    <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">KYC Documents</span>
+                    <div className="h-px flex-1 bg-slate-200" />
+                  </div>
+                  <label className="block space-y-1 sm:col-span-2">
+                    <span className="text-sm font-semibold text-slate-700">ID Proof <span className="text-rose-500">*</span></span>
+                    <p className="text-xs text-slate-400">Aadhaar, PAN, Passport, Voter ID, Driving Licence</p>
+                    <input
+                      className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50"
+                      placeholder="Paste image URL of your ID proof…"
+                      value={idProofUrl}
+                      onChange={e => setIdProofUrl(e.target.value)}
+                      required
+                    />
+                  </label>
+                  <label className="block space-y-1 sm:col-span-2">
+                    <span className="text-sm font-semibold text-slate-700">Address Proof <span className="text-rose-500">*</span></span>
+                    <p className="text-xs text-slate-400">Utility bill, Bank statement, Rental agreement (≤3 months old)</p>
+                    <input
+                      className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50"
+                      placeholder="Paste image URL of your address proof…"
+                      value={addressProofUrl}
+                      onChange={e => setAddressProofUrl(e.target.value)}
+                      required
+                    />
+                  </label>
                 </>
               )}
               {mode === "register" && (
-                <div className="sm:col-span-2 space-y-1">
-                  <label className="inline-flex items-start gap-2 text-sm text-slate-700">
-                    <input
-                      type="checkbox"
-                      checked={termsAccepted}
-                      onChange={(e) => setTermsAccepted(e.target.checked)}
-                      className="mt-0.5 h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
-                    />
-                    <span>
-                      I accept the{" "}
-                      <button
-                        type="button"
-                        onClick={() => setShowTermsModal(true)}
-                        className="font-semibold text-teal-700 underline underline-offset-2"
-                      >
-                        Terms & Conditions
-                      </button>
-                      .
-                    </span>
-                  </label>
+                <div className="sm:col-span-2 space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <p className="text-sm font-semibold text-slate-700">Vendor policy checklist (required)</p>
+                  {DEFAULT_VENDOR_POLICY_POINTS.map((item, index) => (
+                    <label key={index} className="flex items-start gap-2 text-sm text-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(policyChecks[String(index)])}
+                        onChange={(e) => setPolicyChecks((prev) => ({ ...prev, [String(index)]: e.target.checked }))}
+                        className="mt-0.5 h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
+                      />
+                      <span>{item}</span>
+                    </label>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => setShowTermsModal(true)}
+                    className="text-left text-sm font-semibold text-teal-700 underline underline-offset-2"
+                  >
+                    View full Terms & Conditions
+                  </button>
                 </div>
               )}
 
@@ -462,7 +588,7 @@ export function LoginPage() {
             <h2 className="font-heading text-2xl font-bold text-slate-900">Verify OTP</h2>
             <p className="mt-1.5 text-sm text-slate-500">
               Enter the 6-digit code sent to{" "}
-              <span className="font-semibold text-slate-700">{phone}</span>.
+              <span className="font-semibold text-slate-700">{formatPhone(phone)}</span>.
             </p>
             {info && (
               <p className="mt-3 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-700">
@@ -551,6 +677,31 @@ export function LoginPage() {
                   required
                 />
               </label>
+              <label className="block space-y-1 sm:col-span-2">
+                <span className="text-sm font-semibold text-slate-700">Business category *</span>
+                <select
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50"
+                  value={businessCategory}
+                  onChange={(e) => setBusinessCategory(e.target.value as (typeof BUSINESS_CATEGORY_OPTIONS)[number])}
+                  required
+                >
+                  {BUSINESS_CATEGORY_OPTIONS.map((option) => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
+                </select>
+              </label>
+              {businessCategory === "Other" && (
+                <label className="block space-y-1 sm:col-span-2">
+                  <span className="text-sm font-semibold text-slate-700">Enter business category *</span>
+                  <input
+                    className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50"
+                    value={businessCategoryOther}
+                    onChange={(e) => setBusinessCategoryOther(e.target.value)}
+                    placeholder="Type your business category"
+                    required
+                  />
+                </label>
+              )}
               {/* Business Email */}
               <label className="block space-y-1">
                 <span className="text-sm font-semibold text-slate-700">Business email</span>
@@ -573,15 +724,32 @@ export function LoginPage() {
                 />
               </label>
               {/* Business Address */}
-              <label className="block space-y-1 sm:col-span-2">
-                <span className="text-sm font-semibold text-slate-700">Business address</span>
-                <input
-                  className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50"
-                  placeholder="123 Main St, Chennai"
-                  value={businessAddress}
-                  onChange={(e) => setBusinessAddress(e.target.value)}
-                />
-              </label>
+              <div className="sm:col-span-2 grid gap-3 sm:grid-cols-2">
+                <label className="block space-y-1">
+                  <span className="text-sm font-semibold text-slate-700">Address line 1</span>
+                  <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50" value={businessAddress.line1} onChange={(e) => setBusinessAddress((prev) => ({ ...prev, line1: e.target.value }))} />
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-sm font-semibold text-slate-700">Address line 2</span>
+                  <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50" value={businessAddress.line2} onChange={(e) => setBusinessAddress((prev) => ({ ...prev, line2: e.target.value }))} />
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-sm font-semibold text-slate-700">City</span>
+                  <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50" value={businessAddress.city} onChange={(e) => setBusinessAddress((prev) => ({ ...prev, city: e.target.value }))} />
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-sm font-semibold text-slate-700">State</span>
+                  <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50" value={businessAddress.state} onChange={(e) => setBusinessAddress((prev) => ({ ...prev, state: e.target.value }))} />
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-sm font-semibold text-slate-700">Country</span>
+                  <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50" value={businessAddress.country} onChange={(e) => setBusinessAddress((prev) => ({ ...prev, country: e.target.value }))} />
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-sm font-semibold text-slate-700">Landmark</span>
+                  <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50" value={businessAddress.landmark} onChange={(e) => setBusinessAddress((prev) => ({ ...prev, landmark: e.target.value }))} />
+                </label>
+              </div>
               {/* GST */}
               <label className="block space-y-1">
                 <span className="text-sm font-semibold text-slate-700">GST number (optional)</span>
@@ -605,43 +773,39 @@ export function LoginPage() {
               {/* WhatsApp */}
               <label className="block space-y-1">
                 <span className="text-sm font-semibold text-slate-700">WhatsApp number</span>
-                <input
-                  className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50"
-                  placeholder="9876543210"
-                  value={whatsappNumber}
-                  onChange={(e) => setWhatsappNumber(e.target.value)}
-                />
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-[96px_minmax(0,1fr)]">
+                  <input className="min-w-0 rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50" value={whatsappNumber.countryCode} onChange={(e) => setWhatsappNumber((prev) => ({ ...prev, countryCode: e.target.value }))} placeholder="+91" />
+                  <input className="min-w-0 rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50" placeholder="9876543210" value={whatsappNumber.number} onChange={(e) => setWhatsappNumber((prev) => ({ ...prev, number: e.target.value.replace(/\D/g, "").slice(0, 15) }))} />
+                </div>
               </label>
               {/* Call number */}
               <label className="block space-y-1">
                 <span className="text-sm font-semibold text-slate-700">Call number</span>
-                <input
-                  className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50"
-                  placeholder="9876543210"
-                  value={callNumber}
-                  onChange={(e) => setCallNumber(e.target.value)}
-                />
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-[96px_minmax(0,1fr)]">
+                  <input className="min-w-0 rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50" value={callNumber.countryCode} onChange={(e) => setCallNumber((prev) => ({ ...prev, countryCode: e.target.value }))} placeholder="+91" />
+                  <input className="min-w-0 rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50" placeholder="9876543210" value={callNumber.number} onChange={(e) => setCallNumber((prev) => ({ ...prev, number: e.target.value.replace(/\D/g, "").slice(0, 15) }))} />
+                </div>
               </label>
-              <div className="sm:col-span-2 space-y-1">
-                <label className="inline-flex items-start gap-2 text-sm text-slate-700">
-                  <input
-                    type="checkbox"
-                    checked={termsAccepted}
-                    onChange={(e) => setTermsAccepted(e.target.checked)}
-                    className="mt-0.5 h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
-                  />
-                  <span>
-                    I accept the{" "}
-                    <button
-                      type="button"
-                      onClick={() => setShowTermsModal(true)}
-                      className="font-semibold text-teal-700 underline underline-offset-2"
-                    >
-                      Terms & Conditions
-                    </button>
-                    .
-                  </span>
-                </label>
+              <div className="sm:col-span-2 space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                <p className="text-sm font-semibold text-slate-700">Vendor policy checklist (required)</p>
+                {DEFAULT_VENDOR_POLICY_POINTS.map((item, index) => (
+                  <label key={index} className="flex items-start gap-2 text-sm text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(policyChecks[String(index)])}
+                      onChange={(e) => setPolicyChecks((prev) => ({ ...prev, [String(index)]: e.target.checked }))}
+                      className="mt-0.5 h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
+                    />
+                    <span>{item}</span>
+                  </label>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => setShowTermsModal(true)}
+                  className="text-left text-sm font-semibold text-teal-700 underline underline-offset-2"
+                >
+                  View full Terms & Conditions
+                </button>
               </div>
 
               {businessNameError && <span className="text-xs text-rose-600 sm:col-span-2">{businessNameError}</span>}
@@ -682,9 +846,22 @@ export function LoginPage() {
             </button>
           </div>
           <div className="max-h-[calc(85vh-88px)] overflow-y-auto px-5 py-4">
-            <p className="whitespace-pre-line text-sm leading-6 text-slate-700">
-              {DEFAULT_POLICY_CONTENT.termsAndConditions}
-            </p>
+            <div className="space-y-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Vendor Policy Checklist</p>
+                <ul className="mt-2 list-disc space-y-1 pl-5 text-sm leading-6 text-slate-700">
+                  {DEFAULT_VENDOR_POLICY_POINTS.map((point, index) => (
+                    <li key={index}>{point}</li>
+                  ))}
+                </ul>
+              </div>
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">General Terms & Conditions</p>
+                <p className="mt-2 whitespace-pre-line text-sm leading-6 text-slate-700">
+                  {DEFAULT_POLICY_CONTENT.termsAndConditions}
+                </p>
+              </div>
+            </div>
           </div>
         </div>
       </div>

@@ -11,7 +11,7 @@ type PublicOrderStatus = {
   paymentStatus: OrderStatus;
 };
 
-const SUCCESS_STATUSES: OrderStatus[] = ["paid", "confirmed"];
+const SUCCESS_STATUSES: OrderStatus[] = ["paid", "delivered"];
 const POLL_INTERVAL_MS = 3000;
 
 export function ThankYouPage() {

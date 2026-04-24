@@ -1,4 +1,4 @@
-export type OrderStatus = "pending" | "paid" | "confirmed" | "cancelled";
+export type OrderStatus = "pending" | "paid" | "delivered" | "cancelled";
 export type PaymentMode = "prepaid_only" | "cod_only" | "both";
 export type PaymentMethod = "prepaid" | "cod";
 
@@ -21,6 +21,7 @@ export interface Seller {
   _id: string;
   slug: string;
   businessName: string;
+  businessCategory?: string;
   phone: string;
   businessEmail: string;
   upiId: string;
@@ -46,6 +47,8 @@ export interface Seller {
   approvedBy?: string;
   termsAcceptedAt?: string | null;
   createdAt?: string;
+  idProofUrl?: string;
+  addressProofUrl?: string;
 }
 
 export interface Product {
