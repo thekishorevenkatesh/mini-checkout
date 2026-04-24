@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { QRCodeSVG } from "qrcode.react";
 import { api } from "../api/client";
 import { DEFAULT_POLICY_CONTENT } from "../constants/policyDefaults";
@@ -38,6 +38,7 @@ const PAYMENT_SUCCESS_STATUSES: OrderStatus[] = ["paid", "delivered"];
 const POLL_INTERVAL_MS = 3000;
 const UPI_SESSION_STORAGE_KEY = "mini-checkout-upi-session";
 const DEFAULT_APP_FAVICON = "/favicon.svg";
+const ADMIN_TOKEN_KEY = "mydukan_admin_token";
 
 function createTransactionRef() {
   return `ORD-${Date.now()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
@@ -192,6 +193,7 @@ export function PublicStorePage() {
   const { t } = useI18n();
   const navigate = useNavigate();
   const { sellerSlug } = useParams<{ sellerSlug: string }>();
+  const [searchParams] = useSearchParams();
   const [seller, setSeller] = useState<Seller | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
   const [cart, setCart] = useState<CartMap>({});
@@ -231,14 +233,19 @@ export function PublicStorePage() {
     async function fetchStore() {
       if (!sellerSlug) { setError("Invalid store link."); setLoading(false); return; }
       try {
-        const r = await api.get<{ seller: Seller; products: Product[] }>(`/products/public/${sellerSlug}`);
+        const isAdminPreview = searchParams.get("preview") === "admin";
+        const adminToken = typeof window !== "undefined" ? localStorage.getItem(ADMIN_TOKEN_KEY) : null;
+        const r = await api.get<{ seller: Seller; products: Product[] }>(`/products/public/${sellerSlug}`, {
+          params: isAdminPreview ? { preview: "admin" } : undefined,
+          headers: isAdminPreview && adminToken ? { Authorization: `Bearer ${adminToken}` } : undefined,
+        });
         setSeller(r.data.seller);
         setProducts(r.data.products);
       } catch { setError("Seller store unavailable."); }
       finally { setLoading(false); }
     }
     void fetchStore();
-  }, [sellerSlug]);
+  }, [searchParams, sellerSlug]);
 
   // Derived: category list
   const categoryTabs = useMemo(() => {

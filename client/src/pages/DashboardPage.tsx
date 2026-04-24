@@ -199,6 +199,7 @@ export function DashboardPage() {
   const [newSocialPlatform, setNewSocialPlatform] = useState("Instagram");
   const [newSocialUrl, setNewSocialUrl] = useState("");
   const [isSavingStore, setIsSavingStore] = useState(false);
+  const [isPublishingStore, setIsPublishingStore] = useState(false);
 
   // ── Categories
   const [categories, setCategories] = useState<string[]>(seller?.categories || []);
@@ -331,12 +332,6 @@ export function DashboardPage() {
     return `${window.location.origin}/store/${seller.slug}`;
   }, [seller?.slug]);
 
-  async function copyStoreLink() {
-    if (!storeUrl) return;
-    await navigator.clipboard.writeText(storeUrl);
-    setCopyFeedback("Store link copied!"); window.setTimeout(() => setCopyFeedback(""), 2000);
-  }
-
   async function shareStoreLink() {
     if (!storeUrl) return;
     if (navigator.share) {
@@ -364,6 +359,35 @@ export function DashboardPage() {
     link.href = dataUrl;
     link.download = `${seller?.slug || "store"}-qr.png`;
     link.click();
+  }
+
+  const isStoreApproved = seller?.approvalStatus === "approved" && Boolean(seller?.storePublished);
+  const isPublishPending = seller?.approvalStatus === "pending";
+  const isPublishRejected = seller?.approvalStatus === "rejected";
+  const isStoreDraft = !seller || seller.approvalStatus === "draft";
+
+  async function handlePublishStore() {
+    setIsPublishingStore(true); setError(""); setSuccess("");
+    try {
+      await api.post("/store/publish");
+      await refreshProfile();
+      setSuccess("Store sent to admin for approval.");
+    } catch { setError("Could not send store for approval."); }
+    finally { setIsPublishingStore(false); }
+  }
+
+  function getApprovalBadgeClasses() {
+    if (seller?.approvalStatus === "approved") return "border-emerald-200 bg-emerald-50 text-emerald-700";
+    if (seller?.approvalStatus === "rejected") return "border-rose-200 bg-rose-50 text-rose-700";
+    if (seller?.approvalStatus === "pending") return "border-amber-200 bg-amber-50 text-amber-700";
+    return "border-slate-200 bg-slate-50 text-slate-700";
+  }
+
+  function getApprovalLabel() {
+    if (seller?.approvalStatus === "approved") return "\u2713 Approved";
+    if (seller?.approvalStatus === "rejected") return "\u2715 Rejected";
+    if (seller?.approvalStatus === "pending") return "\u23f3 Pending Approval";
+    return "Draft";
   }
 
   // ── Profile save
@@ -607,15 +631,7 @@ export function DashboardPage() {
           </div>
         </div>
         <div className="flex w-full flex-wrap gap-2 sm:w-auto">
-          <button
-            onClick={copyStoreLink}
-            disabled={!storeUrl}
-            aria-label="Copy public store link"
-            className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-teal-200 bg-teal-50 px-4 py-2 text-sm font-semibold text-teal-700 hover:bg-teal-100 disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 transition sm:flex-none"
-          >
-            {copyFeedback ? "✅ Copied" : "🔗 Copy Store Link"}
-          </button>
-          {storeUrl && (
+          {isStoreApproved ? (
             <a
               href={storeUrl}
               target="_blank"
@@ -623,8 +639,18 @@ export function DashboardPage() {
               aria-label="Open public store in new tab"
               className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700 transition sm:flex-none"
             >
-              🌐 Open Store
+              Open Store
             </a>
+          ) : (
+            <button
+              type="button"
+              onClick={() => void handlePublishStore()}
+              disabled={isPublishingStore || isPublishPending}
+              aria-label="Publish store for approval"
+              className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700 disabled:bg-slate-400 transition sm:flex-none"
+            >
+              {isPublishingStore ? "Sending..." : isPublishPending ? "Pending Approval" : isPublishRejected ? "Publish Store Again" : "Publish Store"}
+            </button>
           )}
           <button onClick={logout} className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:border-slate-400 transition">Logout</button>
         </div>
@@ -681,17 +707,17 @@ export function DashboardPage() {
           </div>
 
           {/* Row 3 — QR card */}
-          {storeUrl && (
+          {storeUrl && isStoreApproved && (
             <article className="rounded-2xl border border-white/70 bg-white/90 p-4 shadow-card">
               <div className="flex flex-col sm:flex-row items-center gap-5">
                 {/* QR */}
                 <div className="relative shrink-0">
-                  <button
+                  {/* <button
                     type="button"
                     onClick={() => setShowStoreQrActions(v => !v)}
                     className="block rounded-xl border-2 border-slate-200 p-1 hover:border-teal-400 transition"
                     title="Click for share / download options"
-                  >
+                  > */}
                     <QRCodeCanvas
                       value={storeUrl}
                       size={100}
@@ -700,13 +726,13 @@ export function DashboardPage() {
                       bgColor="#ffffff"
                       fgColor="#0f172a"
                     />
-                  </button>
-                  {showStoreQrActions && (
+                  {/* </button> */}
+                  {/* {showStoreQrActions && (
                     <div className="absolute left-0 top-full z-20 mt-2 w-40 rounded-xl border border-slate-200 bg-white p-2 shadow-lg">
                       <button type="button" onClick={() => void shareStoreLink()} className="w-full rounded-lg px-3 py-2 text-left text-sm font-semibold text-slate-700 hover:bg-slate-50">📤 Share</button>
                       <button type="button" onClick={downloadStoreQrCode} className="mt-1 w-full rounded-lg px-3 py-2 text-left text-sm font-semibold text-slate-700 hover:bg-slate-50">⬇ Download PNG</button>
                     </div>
-                  )}
+                  )} */}
                 </div>
                 {/* Info */}
                 <div className="flex-1 min-w-0 text-center sm:text-left">
@@ -723,14 +749,24 @@ export function DashboardPage() {
                       onClick={downloadStoreQrCode}
                       className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition"
                     >⬇ Download QR</button>
-                    <button
-                      type="button"
-                      onClick={() => void copyStoreLink()}
-                      className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition"
-                    >🔗 Copy Link</button>
                   </div>
                 </div>
               </div>
+            </article>
+          )}
+          {!isStoreApproved && (
+            <article className="rounded-2xl border border-white/70 bg-white/90 p-4 shadow-card">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Store Publishing</p>
+              <h3 className="mt-1 text-lg font-bold text-slate-900">
+                {isStoreDraft ? "Publish your store when you're ready" : isPublishPending ? "Your store is waiting for admin approval" : "Your store needs approval before it can open"}
+              </h3>
+              <p className="mt-2 text-sm text-slate-600">
+                {isStoreDraft
+                  ? "Save your details and products, then send the store to admin for review."
+                  : isPublishPending
+                    ? "You can keep using the dashboard while the approval request is under review."
+                    : "Make any updates you want and publish the store again to request approval."}
+              </p>
             </article>
           )}
         </div>
@@ -1636,12 +1672,8 @@ export function DashboardPage() {
               <p className="text-sm font-semibold text-teal-700 truncate">{storeUrl}</p>
             </div>
             <span className="text-xs text-slate-500">Slug: <span className="font-semibold text-slate-700">{seller?.slug}</span></span>
-            <span className={`rounded-full border px-2.5 py-0.5 text-xs font-semibold ${
-              seller?.approvalStatus === "approved" ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-              : seller?.approvalStatus === "rejected" ? "border-rose-200 bg-rose-50 text-rose-700"
-              : "border-amber-200 bg-amber-50 text-amber-700"
-            }`}>
-              {seller?.approvalStatus === "approved" ? "\u2713 Approved" : seller?.approvalStatus === "rejected" ? "\u2715 Rejected" : "\u23f3 Pending"}
+            <span className={`rounded-full border px-2.5 py-0.5 text-xs font-semibold ${getApprovalBadgeClasses()}`}>
+              {getApprovalLabel()}
             </span>
           </div>
 

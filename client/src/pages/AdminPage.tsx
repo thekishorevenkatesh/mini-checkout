@@ -138,6 +138,11 @@ export function AdminPage() {
     });
   }, [search, sellers, sortBy]);
 
+  function getAdminPreviewUrl(seller: Seller) {
+    if (!seller.slug) return "";
+    return `${window.location.origin}/store/${seller.slug}?preview=admin`;
+  }
+
   if (!token) {
     const usernameError = username.trim().length === 0 ? "Username is required." : "";
     const passwordError = password.trim().length === 0 ? "Password is required." : "";
@@ -342,7 +347,7 @@ export function AdminPage() {
       {/* Seller detail modal */}
       {selectedSeller ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 px-4">
-          <Card className="w-full max-w-xl space-y-4">
+          <Card className="w-full max-w-6xl space-y-4">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="text-xs font-bold uppercase tracking-[0.14em] text-teal-700 dark:text-teal-300">Seller Details</p>
@@ -350,7 +355,7 @@ export function AdminPage() {
               </div>
               <Button variant="secondary" onClick={() => setSelectedSeller(null)}>Close</Button>
             </div>
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/70">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Business Name</p>
                 <p className="mt-1 font-semibold text-slate-900 dark:text-slate-100">{selectedSeller.businessName || "—"}</p>
@@ -366,6 +371,16 @@ export function AdminPage() {
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/70">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Store Slug</p>
                 <p className="mt-1 font-semibold text-slate-900 dark:text-slate-100">{selectedSeller.slug || "—"}</p>
+                {selectedSeller.slug ? (
+                  <a
+                    href={getAdminPreviewUrl(selectedSeller)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-2 inline-flex rounded-lg border border-teal-200 bg-teal-50 px-3 py-1.5 text-xs font-semibold text-teal-700 hover:bg-teal-100"
+                  >
+                    Open Store
+                  </a>
+                ) : null}
               </div>
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/70">
                 <p className="text-xs uppercase tracking-wide text-slate-500">UPI ID</p>
@@ -383,17 +398,49 @@ export function AdminPage() {
                 <p className="text-xs uppercase tracking-wide text-slate-500">Call Number</p>
                 <p className="mt-1 font-semibold text-slate-900 dark:text-slate-100">{selectedSeller.callNumber || "—"}</p>
               </div>
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/70 sm:col-span-2">
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/70 md:col-span-2 xl:col-span-3">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Address</p>
                 <p className="mt-1 font-semibold text-slate-900 dark:text-slate-100">{selectedSeller.businessAddress || "—"}</p>
               </div>
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/70 sm:col-span-2">
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/70">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Business Logo</p>
-                <p className="mt-1 break-all font-semibold text-slate-900 dark:text-slate-100">{selectedSeller.businessLogo || "—"}</p>
+                {selectedSeller.businessLogo ? (
+                  <a href={selectedSeller.businessLogo} target="_blank" rel="noreferrer" className="mt-2 block">
+                    <img src={selectedSeller.businessLogo} alt="Business Logo" className="h-28 w-full rounded-xl border border-slate-200 bg-white object-contain" />
+                  </a>
+                ) : (
+                  <p className="mt-1 font-semibold text-slate-900 dark:text-slate-100">-</p>
+                )}
               </div>
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/70 sm:col-span-2">
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/70">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Favicon</p>
-                <p className="mt-1 break-all font-semibold text-slate-900 dark:text-slate-100">{selectedSeller.favicon || "—"}</p>
+                {selectedSeller.favicon ? (
+                  <a href={selectedSeller.favicon} target="_blank" rel="noreferrer" className="mt-2 inline-block">
+                    <img src={selectedSeller.favicon} alt="Favicon" className="h-20 w-20 rounded-xl border border-slate-200 bg-white object-contain" />
+                  </a>
+                ) : (
+                  <p className="mt-1 font-semibold text-slate-900 dark:text-slate-100">-</p>
+                )}
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/70">
+                <p className="text-xs uppercase tracking-wide text-slate-500">ID Proof</p>
+                {selectedSeller.idProofUrl ? (
+                  <a href={selectedSeller.idProofUrl} target="_blank" rel="noreferrer" className="mt-2 block">
+                    <img src={selectedSeller.idProofUrl} alt="ID Proof" className="h-32 w-full rounded-xl border border-slate-200 object-cover" />
+                  </a>
+                ) : (
+                  <p className="mt-1 font-semibold text-slate-900 dark:text-slate-100">-</p>
+                )}
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/70">
+                <p className="text-xs uppercase tracking-wide text-slate-500">Address Proof</p>
+                {selectedSeller.addressProofUrl ? (
+                  <a href={selectedSeller.addressProofUrl} target="_blank" rel="noreferrer" className="mt-2 block">
+                    <img src={selectedSeller.addressProofUrl} alt="Address Proof" className="h-32 w-full rounded-xl border border-slate-200 object-cover" />
+                  </a>
+                ) : (
+                  <p className="mt-1 font-semibold text-slate-900 dark:text-slate-100">-</p>
+                )}
               </div>
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/70">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Registered</p>

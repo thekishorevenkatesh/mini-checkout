@@ -137,9 +137,17 @@ const sellerSchema = new mongoose.Schema(
     },
     approvalStatus: {
       type: String,
-      enum: ["pending", "approved", "rejected"],
-      default: "pending",
+      enum: ["draft", "pending", "approved", "rejected"],
+      default: "draft",
       index: true,
+    },
+    storePublished: {
+      type: Boolean,
+      default: false,
+    },
+    publishRequestedAt: {
+      type: Date,
+      default: null,
     },
     approvedAt: {
       type: Date,

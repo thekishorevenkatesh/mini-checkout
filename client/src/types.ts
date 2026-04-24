@@ -42,7 +42,9 @@ export interface Seller {
   privacyPolicy: string;
   returnRefundPolicy: string;
   termsAndConditions: string;
-  approvalStatus: "pending" | "approved" | "rejected";
+  approvalStatus: "draft" | "pending" | "approved" | "rejected";
+  storePublished?: boolean;
+  publishRequestedAt?: string | null;
   approvedAt?: string | null;
   approvedBy?: string;
   termsAcceptedAt?: string | null;

@@ -1,10 +1,26 @@
 const express = require("express");
+const jwt = require("jsonwebtoken");
 const Product = require("../models/Product");
 const Seller = require("../models/Seller");
 const auth = require("../middleware/auth");
 const { getPolicyContent } = require("../utils/policyDefaults");
 
 const router = express.Router();
+
+function isAdminPreviewRequest(req) {
+  if (String(req.query.preview || "") !== "admin") return false;
+
+  const header = req.headers.authorization || "";
+  const token = header.startsWith("Bearer ") ? header.slice(7) : "";
+  if (!token) return false;
+
+  try {
+    const payload = jwt.verify(token, process.env.JWT_SECRET || "dev_secret");
+    return payload?.role === "admin";
+  } catch (_error) {
+    return false;
+  }
+}
 
 function withPolicyDefaults(sellerDoc) {
   if (!sellerDoc) return sellerDoc;
@@ -190,6 +206,7 @@ router.get("/my", auth, async (req, res) => {
 // ─── GET /products/public/:sellerSlug — Public store (no auth) ───────────
 router.get("/public/:sellerSlug", async (req, res) => {
   try {
+    const isAdminPreview = isAdminPreviewRequest(req);
     const seller = await Seller.findOne({ slug: req.params.sellerSlug }).select(
       "-otp -otpExpiry"
     );
@@ -198,9 +215,13 @@ router.get("/public/:sellerSlug", async (req, res) => {
       return res.status(404).json({ message: "Seller not found" });
     }
 
+    if (!isAdminPreview && (!seller.storePublished || seller.approvalStatus !== "approved")) {
+      return res.status(404).json({ message: "Seller store unavailable" });
+    }
+
     const products = await Product.find({
       seller: seller._id,
-      isActive: true,
+      ...(isAdminPreview ? {} : { isActive: true }),
     }).sort({ createdAt: -1 });
 
     return res.json({ seller: withPolicyDefaults(seller), products });

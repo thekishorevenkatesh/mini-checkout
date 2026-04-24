@@ -148,16 +148,6 @@ router.post("/verify-otp", async (req, res) => {
       seller.businessName !== seller.phone // not a placeholder
     );
 
-    if (isProfileComplete && seller.approvalStatus !== "approved") {
-      return res.status(403).json({
-        message:
-          seller.approvalStatus === "rejected"
-            ? "Your seller account was rejected by admin. Please contact support."
-            : "Your account is pending admin approval. You can login after approval.",
-        approvalStatus: seller.approvalStatus,
-      });
-    }
-
     const token = issueToken(seller._id.toString());
     return res.json({ token, seller: withPolicyDefaults(seller), isProfileComplete });
   } catch (error) {
@@ -216,7 +206,9 @@ router.post("/register", auth, async (req, res) => {
     if (typeof privacyPolicy === "string") seller.privacyPolicy = privacyPolicy.trim();
     if (typeof returnRefundPolicy === "string") seller.returnRefundPolicy = returnRefundPolicy.trim();
     if (typeof termsAndConditions === "string") seller.termsAndConditions = termsAndConditions.trim();
-    seller.approvalStatus = "pending";
+    seller.approvalStatus = "draft";
+    seller.storePublished = false;
+    seller.publishRequestedAt = null;
     seller.approvedAt = null;
     seller.approvedBy = "";
     seller.termsAcceptedAt = new Date();

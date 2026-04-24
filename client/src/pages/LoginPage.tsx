@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { useAuth } from "../context/AuthContext";
@@ -32,9 +32,79 @@ const BUSINESS_CATEGORY_OPTIONS = [
   "Other",
 ] as const;
 
+const IMGBB_KEY = import.meta.env.VITE_IMGBB_API_KEY as string | undefined;
+
+function ImageUploadField({
+  value,
+  onChange,
+  placeholder,
+}: {
+  value: string;
+  onChange: (url: string) => void;
+  placeholder: string;
+}) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState("");
+
+  async function handleFile(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!IMGBB_KEY) {
+      setUploadError("Add VITE_IMGBB_API_KEY in client/.env to enable uploads.");
+      return;
+    }
+
+    setUploading(true);
+    setUploadError("");
+    try {
+      const form = new FormData();
+      form.append("image", file);
+      const response = await fetch(`https://api.imgbb.com/1/upload?key=${IMGBB_KEY}`, {
+        method: "POST",
+        body: form,
+      });
+      const data = await response.json() as { success: boolean; data?: { url: string } };
+      if (data.success && data.data?.url) {
+        onChange(data.data.url);
+      } else {
+        setUploadError("Upload failed. Check your ImgBB API key.");
+      }
+    } catch {
+      setUploadError("Upload failed. Check your internet connection.");
+    } finally {
+      setUploading(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex gap-2">
+        <input
+          className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50"
+          placeholder={placeholder}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+        />
+        <label className={`inline-flex cursor-pointer items-center rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100 ${uploading ? "pointer-events-none opacity-60" : ""}`}>
+          {uploading ? "Uploading..." : "Upload"}
+          <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
+        </label>
+      </div>
+      {value ? (
+        <a href={value} target="_blank" rel="noreferrer">
+          <img src={value} alt="Proof preview" className="h-28 w-full rounded-xl border border-slate-200 object-cover" />
+        </a>
+      ) : null}
+      {uploadError ? <p className="text-xs text-rose-600">{uploadError}</p> : null}
+    </div>
+  );
+}
+
 export function LoginPage() {
   const navigate = useNavigate();
-  const { sendOtp, verifyOtp, register, logout } = useAuth();
+  const { sendOtp, verifyOtp, register } = useAuth();
   const { t } = useI18n();
 
   const [mode, setMode] = useState<Mode>("login");
@@ -232,11 +302,7 @@ export function LoginPage() {
         whatsappNumber: formatPhone(whatsappNumber) || undefined,
         callNumber: formatPhone(callNumber) || undefined,
       });
-      logout();
-      setMode("login");
-      setStep("contact");
-      setInfo("Registration submitted. Wait for admin approval before logging in.");
-      setError("");
+      navigate("/dashboard", { replace: true });
     } catch (err) {
       setError(errMsg(err, "Could not complete registration. Try again."));
     } finally {
@@ -516,23 +582,19 @@ export function LoginPage() {
                   <label className="block space-y-1 sm:col-span-2">
                     <span className="text-sm font-semibold text-slate-700">ID Proof <span className="text-rose-500">*</span></span>
                     <p className="text-xs text-slate-400">Aadhaar, PAN, Passport, Voter ID, Driving Licence</p>
-                    <input
-                      className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50"
-                      placeholder="Paste image URL of your ID proof…"
+                    <ImageUploadField
                       value={idProofUrl}
-                      onChange={e => setIdProofUrl(e.target.value)}
-                      required
+                      onChange={setIdProofUrl}
+                      placeholder="Paste image URL of your ID proof..."
                     />
                   </label>
                   <label className="block space-y-1 sm:col-span-2">
                     <span className="text-sm font-semibold text-slate-700">Address Proof <span className="text-rose-500">*</span></span>
-                    <p className="text-xs text-slate-400">Utility bill, Bank statement, Rental agreement (≤3 months old)</p>
-                    <input
-                      className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50"
-                      placeholder="Paste image URL of your address proof…"
+                    <p className="text-xs text-slate-400">Utility bill, Bank statement, Rental agreement (up to 3 months old)</p>
+                    <ImageUploadField
                       value={addressProofUrl}
-                      onChange={e => setAddressProofUrl(e.target.value)}
-                      required
+                      onChange={setAddressProofUrl}
+                      placeholder="Paste image URL of your address proof..."
                     />
                   </label>
                 </>
