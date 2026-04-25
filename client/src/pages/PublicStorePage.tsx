@@ -1,7 +1,8 @@
-﻿import React, { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import React, { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { QRCodeSVG } from "qrcode.react";
 import { api } from "../api/client";
+import { AppIcon } from "../components/ui/AppIcon";
 import { DEFAULT_POLICY_CONTENT } from "../constants/policyDefaults";
 import { useI18n } from "../context/I18nContext";
 import {
@@ -12,31 +13,33 @@ import {
   type AddressParts,
   type PhoneParts,
 } from "../utils/contactFields";
-import type { OrderStatus, PaymentMethod, Product, Seller } from "../types";
+import type { PaymentMethod, Product, Seller } from "../types";
 
 type CartItem = { quantity: number; variants: Record<string, string> };
 type CartMap = Record<string, CartItem>;
-type PaymentSession = {
-  orderIds: string[];
-  amount: number;
-  transactionRef: string;
-  upiLink: string;
-  sellerSlug: string;
-};
-type PublicOrderStatus = {
-  _id: string;
-  paymentStatus: OrderStatus;
+type SavedCheckoutData = {
+  customerName: string;
+  customerPhone: PhoneParts;
+  deliveryAddress: AddressParts;
+  note: string;
+  paymentMethod: PaymentMethod;
+  cart: CartMap;
+  deliveryCharge: number;
+  grandTotal: number;
 };
 type PolicyKey = "privacyPolicy" | "returnRefundPolicy" | "termsAndConditions";
 
-const SOCIAL_ICONS: Record<string, string> = {
-  Instagram: "📸", Facebook: "👥", "Twitter/X": "🐦",
-  YouTube: "▶️", LinkedIn: "💼", Website: "🌐", "Google Location": "🗺️", Other: "🔗",
+const SOCIAL_ICONS: Record<string, Parameters<typeof AppIcon>[0]["name"]> = {
+  Instagram: "instagram",
+  Facebook: "facebook",
+  "Twitter/X": "twitter",
+  YouTube: "youtube",
+  LinkedIn: "linkedin",
+  Website: "website",
+  "Google Location": "location",
+  Other: "link",
 };
 
-const PAYMENT_SUCCESS_STATUSES: OrderStatus[] = ["paid", "delivered"];
-const POLL_INTERVAL_MS = 3000;
-const UPI_SESSION_STORAGE_KEY = "mini-checkout-upi-session";
 const DEFAULT_APP_FAVICON = "/favicon.svg";
 const ADMIN_TOKEN_KEY = "mydukan_admin_token";
 
@@ -189,7 +192,7 @@ function BannerCarousel({ banners }: { banners: { imageUrl: string; title?: stri
   );
 }
 
-// ── Horizontal scroll row per category ───────────────────────────────────────
+// -- Horizontal scroll row per category ---------------------------------------
 function CategoryScrollRow({
   title, onSeeAll, children,
 }: { title: string; onSeeAll: () => void; children: React.ReactNode }) {
@@ -203,12 +206,12 @@ function CategoryScrollRow({
         <h3 className="text-sm font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">{title}</h3>
         <div className="flex-1 border-t border-slate-200 dark:border-slate-700" />
         <button type="button" onClick={() => scroll(-1)}
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-lg font-bold text-slate-500 shadow-sm transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
-          ‹
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 shadow-sm transition hover:from-emerald-400 hover:to-teal-500 dark:from-teal-500 dark:to-sky-500">
+          <AppIcon name="chevronLeft" className="text-[10px]" />
         </button>
         <button type="button" onClick={() => scroll(1)}
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-lg font-bold text-slate-500 shadow-sm transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
-          ›
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 shadow-sm transition hover:from-emerald-400 hover:to-teal-500 dark:from-teal-500 dark:to-sky-500">
+          <AppIcon name="chevronRight" className="text-[10px]" />
         </button>
         <button type="button" onClick={onSeeAll}
           className="shrink-0 text-xs font-semibold text-teal-600 hover:underline">
@@ -237,11 +240,10 @@ export function PublicStorePage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [sortBy, setSortBy] = useState<"latest" | "price_low" | "price_high" | "discount">("latest");
   const [maxPriceFilter, setMaxPriceFilter] = useState<number | null>(null);
-  const [showMobileFilters, setShowMobileFilters] = useState(false);
   const [showFilterDropdown, setShowFilterDropdown] = useState(false);
   const [expandedProductId, setExpandedProductId] = useState<string | null>(null);
   const [cartFeedback, setCartFeedback] = useState("");
-  const [variantErrorProductId, setVariantErrorProductId] = useState<string | null>(null);
+  const [, setVariantErrorProductId] = useState<string | null>(null);
   const [showCart, setShowCart] = useState(false);
   const [variantPopupProductId, setVariantPopupProductId] = useState<string | null>(null);
   const [popupVariants, setPopupVariants] = useState<Record<string, string>>({});
@@ -262,11 +264,8 @@ export function PublicStorePage() {
   const [screenshotPreview, setScreenshotPreview] = useState("");
   const [uploadingProof, setUploadingProof] = useState(false);
   const [proofSuccess, setProofSuccess] = useState("");
-
-  const [intentFeedback, setIntentFeedback] = useState("");
-  const [paymentSession, setPaymentSession] = useState<PaymentSession | null>(null);
-  const [orderStatuses, setOrderStatuses] = useState<Record<string, OrderStatus>>({});
-  const [checkingPayment, setCheckingPayment] = useState(false);
+  const [savedProofUrl, setSavedProofUrl] = useState("");
+  const [savedCheckoutData, setSavedCheckoutData] = useState<SavedCheckoutData | null>(null);
   const [activePolicy, setActivePolicy] = useState<PolicyKey | null>(null);
   const [activeProductImageIndex, setActiveProductImageIndex] = useState<Record<string, number>>({});
 
@@ -366,17 +365,6 @@ export function PublicStorePage() {
     );
   }, [grandTotal, isPrepaidCheckout, seller]);
 
-  const activeUpiLink = paymentSession?.upiLink || previewUpiLink;
-  const activeAmount = paymentSession?.amount ?? grandTotal;
-  const placedOrderIds = paymentSession?.orderIds || [];
-  const thankYouPath = useMemo(() => {
-    if (!paymentSession) return "";
-    const params = new URLSearchParams({
-      sellerSlug: paymentSession.sellerSlug,
-      orderIds: paymentSession.orderIds.join(","),
-    });
-    return `/thank-you?${params.toString()}`;
-  }, [paymentSession]);
   const policyMeta: Record<PolicyKey, { title: string; content: string }> = useMemo(() => ({
     privacyPolicy: {
       title: "Privacy Policy",
@@ -422,6 +410,7 @@ export function PublicStorePage() {
   }
 
   function addProduct(productId: string) {
+    resetSavedProgress();
     setCart(prev => {
       if (prev[productId]?.quantity) return prev;
       const product = products.find((p) => p._id === productId);
@@ -449,6 +438,7 @@ export function PublicStorePage() {
   }
 
   function removeProduct(productId: string) {
+    resetSavedProgress();
     setCart(prev => { const n = { ...prev }; delete n[productId]; return n; });
   }
 
@@ -459,110 +449,48 @@ export function PublicStorePage() {
     const item = getItem(productId);
     const availableStock = getProductAvailableStock(product, item.variants);
     const safeQty = availableStock !== null ? Math.min(q, availableStock) : q;
+    resetSavedProgress();
     setCart(prev => ({ ...prev, [productId]: { ...getItem(productId), quantity: Math.max(1, safeQty) } }));
-  }
-
-  function setVariant(productId: string, label: string, value: string) {
-    setVariantErrorProductId((prev) => (prev === productId ? null : prev));
-    setCart(prev => ({
-      ...prev,
-      [productId]: { ...getItem(productId), variants: { ...getItem(productId).variants, [label]: value } },
-    }));
   }
 
   function openUpiIntent(link: string) {
     window.location.href = link;
   }
 
-  const checkPaymentStatus = useCallback(async () => {
-    if (!paymentSession || !sellerSlug) return false;
+  function resetSavedProgress() {
+    setSavedCheckoutData(null);
+    setSavedProofUrl("");
+    setProofSuccess("");
+  }
 
-    setCheckingPayment(true);
+  function validateCheckout() {
+    setError("");
+    setSuccessMessage("");
 
-    try {
-      const response = await api.get<{ orders: PublicOrderStatus[] }>("/orders/public/status", {
-        params: {
-          ids: paymentSession.orderIds.join(","),
-          sellerSlug,
-        },
-      });
-
-      const nextStatuses = response.data.orders.reduce<Record<string, OrderStatus>>((acc, order) => {
-        acc[order._id] = order.paymentStatus;
-        return acc;
-      }, {});
-
-      setOrderStatuses(nextStatuses);
-
-      const allPaid =
-        response.data.orders.length === paymentSession.orderIds.length &&
-        response.data.orders.every(order => PAYMENT_SUCCESS_STATUSES.includes(order.paymentStatus));
-
-      if (allPaid) {
-        localStorage.removeItem(UPI_SESSION_STORAGE_KEY);
-        navigate(thankYouPath, { replace: true });
-        return true;
-      }
-    } catch {
-      setIntentFeedback("We could not refresh payment status right now. Please try again.");
-    } finally {
-      setCheckingPayment(false);
+    if (selectedItems.length === 0) {
+      setError("Select at least one product.");
+      return null;
     }
-
-    return false;
-  }, [navigate, paymentSession, sellerSlug, thankYouPath]);
-
-  useEffect(() => {
-    if (!sellerSlug || paymentSession) return;
-
-    const rawSession = localStorage.getItem(UPI_SESSION_STORAGE_KEY);
-    if (!rawSession) return;
-
-    try {
-      const parsed = JSON.parse(rawSession) as PaymentSession;
-      if (parsed.sellerSlug === sellerSlug && parsed.orderIds.length > 0) {
-        setPaymentSession(parsed);
-      }
-    } catch {
-      localStorage.removeItem(UPI_SESSION_STORAGE_KEY);
+    if (!sellerSlug) {
+      setError("Store link is invalid.");
+      return null;
     }
-  }, [paymentSession, sellerSlug]);
-
-  useEffect(() => {
-    if (!paymentSession) return;
-    localStorage.setItem(UPI_SESSION_STORAGE_KEY, JSON.stringify(paymentSession));
-  }, [paymentSession]);
-
-  useEffect(() => {
-    if (!paymentSession) return;
-
-    void checkPaymentStatus();
-    const poller = window.setInterval(() => {
-      void checkPaymentStatus();
-    }, POLL_INTERVAL_MS);
-
-    const handleVisibilityChange = () => {
-      if (!document.hidden) {
-        void checkPaymentStatus();
-      }
-    };
-
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-
-    return () => {
-      window.clearInterval(poller);
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-    };
-  }, [checkPaymentStatus, paymentSession]);
-
-  // ── Place order
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault();
-    setError(""); setSuccessMessage("");
-    if (selectedItems.length === 0) { setError("Select at least one product."); return; }
-    if (!sellerSlug) { setError("Store link is invalid."); return; }
-    if (!seller) { setError("Seller store unavailable."); return; }
-    if (isPrepaidCheckout && !seller.upiId) { setError("UPI is not configured for this store."); return; }
+    if (!seller) {
+      setError("Seller store unavailable.");
+      return null;
+    }
+    if (!customerName.trim()) {
+      setError("Enter your name.");
+      return null;
+    }
+    if (!customerPhone.number.trim()) {
+      setError("Enter your phone number.");
+      return null;
+    }
+    if (isPrepaidCheckout && !seller.upiId) {
+      setError("UPI is not configured for this store.");
+      return null;
+    }
 
     for (const product of selectedItems) {
       const item = cart[product._id];
@@ -570,80 +498,122 @@ export function PublicStorePage() {
         if (!variant.options?.length) continue;
         if (!item?.variants?.[variant.label]) {
           setError(`Please select ${variant.label} for ${product.title}.`);
-          return;
+          return null;
         }
       }
       const selectedStock = getProductAvailableStock(product, item?.variants || {});
       if (selectedStock !== null && item.quantity > selectedStock) {
         setError(`Only ${selectedStock} quantity left for selected options in ${product.title}.`);
-        return;
+        return null;
       }
     }
+
+    return {
+      customerName: customerName.trim(),
+      customerPhone,
+      deliveryAddress,
+      note: note.trim(),
+      paymentMethod,
+      cart: JSON.parse(JSON.stringify(cart)) as CartMap,
+      deliveryCharge,
+      grandTotal,
+    } satisfies SavedCheckoutData;
+  }
+
+  function handleSaveDetails(e: FormEvent) {
+    e.preventDefault();
+    const nextDraft = validateCheckout();
+    if (!nextDraft) return;
+
+    setSavedCheckoutData(nextDraft);
+    setSavedProofUrl("");
+    setProofSuccess("");
+    setSuccessMessage(
+      nextDraft.paymentMethod === "prepaid"
+        ? "Details saved. Complete the payment and upload your screenshot before placing the order."
+        : "Details saved. You can place the order now."
+    );
+  }
+
+  // -- Place order
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    setError("");
+    setSuccessMessage("");
+    if (!savedCheckoutData) {
+      setError("Save your details before placing the order.");
+      return;
+    }
+    if (savedCheckoutData.paymentMethod === "prepaid" && !savedProofUrl) {
+      setError("Upload and save your payment screenshot before placing the order.");
+      return;
+    }
+
+    const stagedItems = products.filter((product) => (savedCheckoutData.cart[product._id]?.quantity || 0) > 0);
+    if (stagedItems.length === 0) {
+      setError("Your saved cart is empty. Save your details again.");
+      return;
+    }
+
     setSubmitting(true);
     try {
-      const reqs = selectedItems.map(p =>
+      const reqs = stagedItems.map((p) =>
         api.post<{ order: { _id: string } }>("/orders", {
           productId: p._id,
-          quantity: cart[p._id]?.quantity || 1,
-          customerName: customerName.trim(),
-          customerPhone: formatPhone(customerPhone),
-          deliveryAddress: formatAddress(deliveryAddress),
-          deliveryCharge,
-          selectedVariants: cart[p._id]?.variants || {},
-          note: note.trim(),
-          paymentMethod,
+          quantity: savedCheckoutData.cart[p._id]?.quantity || 1,
+          customerName: savedCheckoutData.customerName,
+          customerPhone: formatPhone(savedCheckoutData.customerPhone),
+          deliveryAddress: formatAddress(savedCheckoutData.deliveryAddress),
+          deliveryCharge: savedCheckoutData.deliveryCharge,
+          selectedVariants: savedCheckoutData.cart[p._id]?.variants || {},
+          note: savedCheckoutData.note,
+          paymentMethod: savedCheckoutData.paymentMethod,
+          paymentScreenshotUrl: savedCheckoutData.paymentMethod === "prepaid" ? savedProofUrl : "",
         })
       );
       const results = await Promise.allSettled(reqs);
       const ids = results.filter(r => r.status === "fulfilled").map(r => (r as PromiseFulfilledResult<{ data: { order: { _id: string } } }>).value.data.order._id);
       if (ids.length === 0) { setError("Could not place order. Please retry."); }
       else {
-        if (isCodCheckout) {
-          localStorage.removeItem(UPI_SESSION_STORAGE_KEY);
-          setPaymentSession(null);
-          setOrderStatuses({});
+        if (savedCheckoutData.paymentMethod === "cod") {
           setSuccessMessage(`Order placed successfully for ${ids.length} item(s). The seller will collect payment on delivery.`);
-          setProofSuccess("");
-          setIntentFeedback("");
           setCustomerName("");
           setCustomerPhone({ countryCode: DEFAULT_COUNTRY_CODE, number: "" });
           setDeliveryAddress(EMPTY_ADDRESS);
           setNote("");
           setCart({});
+          setScreenshotUrl("");
+          setScreenshotFile(null);
+          setScreenshotPreview("");
+          resetSavedProgress();
           return;
         }
 
-        const transactionRef = createTransactionRef();
-        const nextSession: PaymentSession = {
-          orderIds: ids,
-          amount: grandTotal,
-          transactionRef,
-          upiLink: buildUpiLink(seller.upiId, seller.businessName, grandTotal, transactionRef),
-          sellerSlug,
-        };
-
-        setPaymentSession(nextSession);
-        setOrderStatuses(ids.reduce<Record<string, OrderStatus>>((acc, id) => {
-          acc[id] = "pending";
-          return acc;
-        }, {}));
-        setSuccessMessage(`Order placed for ${ids.length} item(s). Complete the payment in your UPI app and we will redirect you once the payment is marked successful.`);
-        setProofSuccess("");
-        setIntentFeedback("Opening your UPI app. If it does not open, use the button below.");
         setCustomerName("");
         setCustomerPhone({ countryCode: DEFAULT_COUNTRY_CODE, number: "" });
         setDeliveryAddress(EMPTY_ADDRESS);
         setNote("");
         setCart({});
-        window.setTimeout(() => openUpiIntent(nextSession.upiLink), 200);
+        setScreenshotUrl("");
+        setScreenshotFile(null);
+        setScreenshotPreview("");
+        resetSavedProgress();
+
+        const params = new URLSearchParams();
+        if (sellerSlug) params.set("sellerSlug", sellerSlug);
+        params.set("orderIds", ids.join(","));
+        navigate(`/thank-you?${params.toString()}`, { replace: true });
       }
     } catch { setError("Could not submit order."); }
     finally { setSubmitting(false); }
   }
 
-  // ── Submit payment proof
+  // -- Submit payment proof
   async function handleProofSubmit() {
-    if (placedOrderIds.length === 0) return;
+    if (!savedCheckoutData || savedCheckoutData.paymentMethod !== "prepaid") {
+      setError("Save your details before uploading a screenshot.");
+      return;
+    }
     let proofUrl = screenshotUrl.trim();
     if (screenshotFile) {
       proofUrl = await new Promise<string>((resolve) => {
@@ -655,11 +625,8 @@ export function PublicStorePage() {
     if (!proofUrl) return;
     setUploadingProof(true);
     try {
-      await Promise.all(placedOrderIds.map(id =>
-        api.patch(`/orders/${id}/payment-screenshot`, { paymentScreenshotUrl: proofUrl })
-      ));
-      setProofSuccess("Payment proof submitted! The seller will confirm your order shortly.");
-      setScreenshotUrl(""); setScreenshotFile(null); setScreenshotPreview("");
+      setSavedProofUrl(proofUrl);
+      setProofSuccess("Screenshot saved. You can place the order now.");
     } catch { setError("Could not submit proof."); }
     finally { setUploadingProof(false); }
   }
@@ -677,6 +644,7 @@ export function PublicStorePage() {
     const product = products.find(p => p._id === variantPopupProductId);
     if (!product) return;
     if (!hasCompleteVariantSelection(product, popupVariants)) { setPopupVariantError("Please select all options."); return; }
+    resetSavedProgress();
     setCart(prev => ({ ...prev, [variantPopupProductId]: { quantity: 1, variants: popupVariants } }));
     setCartFeedback(`${product.title} added to cart`);
     window.setTimeout(() => setCartFeedback(""), 1800);
@@ -684,10 +652,10 @@ export function PublicStorePage() {
   }
 
   async function copyIntentLink() {
-    if (!activeUpiLink) return;
-    await navigator.clipboard.writeText(activeUpiLink);
-    setIntentFeedback("UPI intent link copied.");
-    window.setTimeout(() => setIntentFeedback(""), 2200);
+    if (!previewUpiLink) return;
+    await navigator.clipboard.writeText(previewUpiLink);
+    setSuccessMessage("UPI intent link copied.");
+    window.setTimeout(() => setSuccessMessage(""), 2200);
   }
 
 
@@ -714,10 +682,15 @@ export function PublicStorePage() {
     return (
       <main className="mx-auto flex min-h-screen w-full max-w-4xl items-center justify-center px-4 py-10">
         <div className="rounded-3xl border border-rose-200 bg-white p-8 text-center shadow-card">
-          <p className="mb-3 text-xs font-bold uppercase tracking-widest text-teal-600">🛍️ MyDukan</p>
+          <p className="mb-3 inline-flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-teal-600">
+            <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-teal-600">
+              <AppIcon name="brand" className="text-[11px]" />
+            </span>
+            MyDukan
+          </p>
           <h1 className="font-heading text-2xl font-bold text-slate-900">Store Not Found</h1>
           <p className="mt-2 text-sm text-slate-600">{error || "This seller link is unavailable."}</p>
-          <Link to="/login" className="mt-5 inline-flex rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white">Sign In to MyDukan</Link>
+          <Link to="/login" className="mt-5 inline-flex rounded-xl bg-gradient-to-r from-emerald-500 via-teal-500 to-sky-500 px-4 py-2 text-sm font-semibold text-white shadow-md transition hover:from-emerald-400 hover:via-teal-400 hover:to-sky-400">Sign In to MyDukan</Link>
         </div>
       </main>
     );
@@ -727,10 +700,10 @@ export function PublicStorePage() {
     <>
     <main className="mx-auto min-h-screen w-full max-w-7xl px-3 py-6 sm:px-5 sm:py-10">
 
-      {/* ── LEFT: Store + Products ─────────────────────────── */}
+      {/* -- LEFT: Store + Products --------------------------- */}
       <section className="space-y-6">
         {/* Store Header */}
-        <div className="rounded-3xl border border-white/80 bg-white/95 p-4 shadow-card ring-1 ring-slate-200/60 backdrop-blur-sm sm:p-5 dark:bg-slate-900/80 dark:ring-slate-700/50">
+        <div className="rounded-3xl border border-white/80 bg-gradient-to-br from-white via-emerald-50/70 to-sky-50/80 p-4 shadow-card ring-1 ring-emerald-100/80 backdrop-blur-sm sm:p-5 dark:border-teal-900/50 dark:bg-gradient-to-br dark:from-slate-950/95 dark:via-slate-900/90 dark:to-slate-900/95 dark:ring-teal-900/30">
           <div className="flex items-center gap-3">
             {/* Logo + Name */}
             <div className="flex min-w-0 flex-1 items-center gap-3">
@@ -746,36 +719,41 @@ export function PublicStorePage() {
                   {seller.businessName}
                 </h1>
                 {seller.businessAddress && (
-                  <p className="truncate text-xs text-slate-500 dark:text-slate-400">📍 {seller.businessAddress}</p>
+                  <p className="flex items-center gap-1.5 truncate text-xs text-slate-500 dark:text-slate-400">
+                    <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 dark:from-teal-500 dark:to-sky-500">
+                      <AppIcon name="location" className="text-[10px]" />
+                    </span>
+                    <span className="truncate">{seller.businessAddress}</span>
+                  </p>
                 )}
               </div>
             </div>
-            {/* Social + contact icons — right side */}
+            {/* Social + contact icons � right side */}
             <div className="flex shrink-0 items-center gap-1.5">
               {seller.whatsappNumber && (
                 <a href={`https://wa.me/${seller.whatsappNumber.replace(/\D/g, "")}`} target="_blank" rel="noreferrer"
                   title="Chat on WhatsApp" aria-label="Chat on WhatsApp"
                   className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-600 text-base text-white shadow-sm transition hover:bg-emerald-500">
-                  💬
+                  <AppIcon name="whatsapp" className="text-sm" />
                 </a>
               )}
               {seller.callNumber && (
                 <a href={`tel:${seller.callNumber}`} title="Call Seller" aria-label="Call Seller"
                   className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-blue-600 text-base text-white shadow-sm transition hover:bg-blue-500">
-                  📞
+                  <AppIcon name="phone" className="text-sm" />
                 </a>
               )}
               {seller.socialLinks?.filter((s) => String(s.url || "").trim()).map((s, i) => (
                 <a key={i} href={s.url} target="_blank" rel="noreferrer"
                   title={s.platform} aria-label={s.platform}
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-base text-slate-700 shadow-sm transition hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200">
-                  {SOCIAL_ICONS[s.platform] || "🔗"}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-sky-500 to-cyan-600 text-base shadow-sm transition hover:from-sky-400 hover:to-cyan-500 dark:from-cyan-500 dark:to-blue-500">
+                  <AppIcon name={SOCIAL_ICONS[s.platform] || "link"} className="text-sm" />
                 </a>
               ))}
               {/* Cart button */}
               <button type="button" onClick={() => setShowCart(true)} aria-label="Open cart"
                 className="relative inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-600 text-base text-white shadow-sm transition hover:bg-emerald-500">
-                🛒
+                <AppIcon name="cart" className="text-sm" />
                 {cartCount > 0 && (
                   <span className="absolute -right-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-rose-500 text-[9px] font-bold text-white leading-none">
                     {cartCount > 9 ? "9+" : cartCount}
@@ -793,11 +771,13 @@ export function PublicStorePage() {
         )}
 
         {/* Discovery controls */}
-        <div className="rounded-2xl border border-slate-200/90 bg-white shadow-sm ring-1 ring-slate-100 dark:border-slate-700 dark:bg-slate-900/90 dark:ring-slate-800">
+        <div className="rounded-2xl border border-emerald-100/90 bg-gradient-to-br from-white to-emerald-50/70 shadow-sm ring-1 ring-emerald-100/70 dark:border-teal-900/40 dark:bg-gradient-to-br dark:from-slate-950/95 dark:to-slate-900/90 dark:ring-teal-900/20">
           {/* Smart search bar */}
           <div className="relative">
             <div className="flex items-center gap-2 px-3 py-2.5">
-              <span className="shrink-0 text-slate-400 text-sm">🔍</span>
+              <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 dark:from-teal-500 dark:to-sky-500">
+                <AppIcon name="search" className="text-[11px]" />
+              </span>
               <input
                 value={searchQuery}
                 onChange={(e) => { setSearchQuery(e.target.value); setShowFilterDropdown(false); }}
@@ -808,19 +788,19 @@ export function PublicStorePage() {
               {activeCategory !== "All" && (
                 <button type="button" onClick={() => setActiveCategory("All")}
                   className="flex items-center gap-1 rounded-full border border-teal-200 bg-teal-50 px-2 py-0.5 text-xs font-semibold text-teal-700 hover:bg-teal-100 transition dark:border-teal-800 dark:bg-teal-950 dark:text-teal-300">
-                  <span className="max-w-[72px] truncate">{activeCategory}</span><span>✕</span>
+                  <span className="max-w-[72px] truncate">{activeCategory}</span><AppIcon name="close" className="text-[8px]" />
                 </button>
               )}
               {sortBy !== "latest" && (
                 <button type="button" onClick={() => setSortBy("latest")}
                   className="flex items-center gap-1 rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-xs font-semibold text-violet-700 hover:bg-violet-100 transition dark:border-violet-800 dark:bg-violet-950 dark:text-violet-300">
-                  <span className="max-w-[72px] truncate">{sortBy === "price_low" ? "Price ↑" : sortBy === "price_high" ? "Price ↓" : "Discount"}</span><span>✕</span>
+                  <span className="max-w-[72px] truncate">{sortBy === "price_low" ? "Price ?" : sortBy === "price_high" ? "Price ?" : "Discount"}</span><AppIcon name="close" className="text-[8px]" />
                 </button>
               )}
               {maxPriceFilter !== null && (
                 <button type="button" onClick={() => setMaxPriceFilter(null)}
                   className="flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-700 hover:bg-amber-100 transition dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300">
-                  <span>≤₹{maxPriceFilter}</span><span>✕</span>
+                  <span>=?{maxPriceFilter}</span><AppIcon name="close" className="text-[8px]" />
                 </button>
               )}
               {/* Filter icon */}
@@ -828,14 +808,16 @@ export function PublicStorePage() {
                 className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border transition ${
                   (activeCategory !== "All" || sortBy !== "latest" || maxPriceFilter !== null)
                     ? "border-teal-300 bg-teal-100 text-teal-700 dark:border-teal-700 dark:bg-teal-900 dark:text-teal-300"
-                    : "border-slate-200 bg-white text-slate-400 hover:border-slate-300 hover:text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400"
+                    : "border-emerald-100 bg-white/90 text-slate-400 hover:border-emerald-200 hover:text-slate-600 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-400"
                 }`} title="Filters">
-                <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2 4h12M4 8h8M6 12h4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></svg>
+                <span className={`inline-flex h-5 w-5 items-center justify-center rounded-full ${activeCategory !== "All" || sortBy !== "latest" || maxPriceFilter !== null ? "bg-teal-600 dark:bg-teal-500" : "bg-gradient-to-br from-sky-500 to-cyan-600 dark:from-cyan-500 dark:to-blue-500"}`}>
+                  <AppIcon name="filter" className="text-[10px]" />
+                </span>
               </button>
             </div>
             {/* Filter dropdown */}
             {showFilterDropdown && (
-              <div className="absolute right-0 z-40 mt-1 w-60 rounded-2xl border border-slate-200 bg-white shadow-xl overflow-hidden dark:border-slate-700 dark:bg-slate-900">
+              <div className="absolute right-0 z-40 mt-1 w-60 rounded-2xl border border-slate-200 bg-white shadow-xl overflow-hidden dark:border-teal-900/40 dark:bg-slate-950">
                 {/* Sort */}
                 <p className="px-3 pt-3 pb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">Sort by</p>
                 {(["latest", "price_low", "price_high", "discount"] as const).map(opt => (
@@ -845,7 +827,7 @@ export function PublicStorePage() {
                       sortBy === opt ? "bg-teal-50 font-semibold text-teal-800 dark:bg-teal-950 dark:text-teal-200" : "text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800"
                     }`}>
                     <span className={`h-3 w-3 rounded-full border flex-shrink-0 ${sortBy === opt ? "border-teal-500 bg-teal-500" : "border-slate-300"}`} />
-                    {opt === "latest" ? "Latest" : opt === "price_low" ? "Price: Low → High" : opt === "price_high" ? "Price: High → Low" : "Best Discount"}
+                    {opt === "latest" ? "Latest" : opt === "price_low" ? "Price: Low ? High" : opt === "price_high" ? "Price: High ? Low" : "Best Discount"}
                   </button>
                 ))}
                 {/* Price */}
@@ -857,7 +839,7 @@ export function PublicStorePage() {
                       maxPriceFilter === v ? "bg-teal-50 font-semibold text-teal-800 dark:bg-teal-950 dark:text-teal-200" : "text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800"
                     }`}>
                     <span className={`h-3 w-3 rounded-full border flex-shrink-0 ${maxPriceFilter === v ? "border-teal-500 bg-teal-500" : "border-slate-300"}`} />
-                    {v === null ? "All prices" : `Under ₹${v}`}
+                    {v === null ? "All prices" : `Under ?${v}`}
                   </button>
                 ))}
                 {/* Category */}
@@ -981,7 +963,7 @@ export function PublicStorePage() {
                     ) : (
                       <div className="flex items-center justify-between rounded-xl bg-emerald-600 px-2 py-1">
                         <button type="button" onClick={() => setQty(product._id, item.quantity - 1)}
-                          className="flex h-7 w-7 items-center justify-center rounded-lg bg-white/20 text-lg font-bold text-white hover:bg-white/30">−</button>
+                          className="flex h-7 w-7 items-center justify-center rounded-lg bg-white/20 text-lg font-bold text-white hover:bg-white/30">-</button>
                         <span className="text-sm font-bold text-white">{item.quantity}</span>
                         <button type="button" onClick={() => setQty(product._id, item.quantity + 1)}
                           className="flex h-7 w-7 items-center justify-center rounded-lg bg-white/20 text-lg font-bold text-white hover:bg-white/30">+</button>
@@ -1041,15 +1023,17 @@ export function PublicStorePage() {
     {/* Backdrop */}
     {showCart && <div className="fixed inset-0 z-40 bg-black/40 backdrop-blur-[1px]" onClick={() => setShowCart(false)} />}
 
-    {/* Cart Drawer — bottom on mobile/tablet, right on desktop */}
-    <div className={`fixed z-50 overflow-y-auto bg-white dark:bg-slate-900 transition-transform duration-300 ease-in-out bottom-0 left-0 right-0 max-h-[88vh] rounded-t-3xl shadow-2xl lg:bottom-0 lg:left-auto lg:top-0 lg:h-screen lg:w-[460px] lg:rounded-none lg:rounded-l-3xl ${showCart ? "translate-y-0 lg:translate-x-0 lg:translate-y-0" : "translate-y-full lg:translate-x-full lg:translate-y-0"}`}>
+    {/* Cart Drawer � bottom on mobile/tablet, right on desktop */}
+    <div className={`fixed z-50 overflow-y-auto bg-white transition-transform duration-300 ease-in-out bottom-0 left-0 right-0 max-h-[88vh] rounded-t-3xl shadow-2xl dark:border-l dark:border-teal-900/40 dark:bg-gradient-to-b dark:from-slate-950 dark:to-slate-900 lg:bottom-0 lg:left-auto lg:top-0 lg:h-screen lg:w-[460px] lg:rounded-none lg:rounded-l-3xl ${showCart ? "translate-y-0 lg:translate-x-0 lg:translate-y-0" : "translate-y-full lg:translate-x-full lg:translate-y-0"}`}>
       <div className="mx-auto mt-3 h-1 w-10 rounded-full bg-slate-300 dark:bg-slate-600 lg:hidden" />
-      <div className="sticky top-0 z-10 flex items-center justify-between bg-white dark:bg-slate-900 px-5 py-4 border-b border-slate-200 dark:border-slate-700">
+      <div className="sticky top-0 z-10 flex items-center justify-between bg-white/95 px-5 py-4 border-b border-slate-200 backdrop-blur dark:border-teal-900/30 dark:bg-slate-950/95">
         <div>
           <h2 className="font-heading text-xl font-bold text-slate-900 dark:text-slate-100">{t("store.checkout", "Checkout")}</h2>
-          {selectedItems.length > 0 && <p className="text-xs text-slate-500 dark:text-slate-400">{cartCount} item{cartCount !== 1 ? "s" : ""} · ₹{grandTotal}</p>}
+          {selectedItems.length > 0 && <p className="text-xs text-slate-500 dark:text-slate-400">{cartCount} item{cartCount !== 1 ? "s" : ""} � ?{grandTotal}</p>}
         </div>
-        <button type="button" onClick={() => setShowCart(false)} className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 dark:border-slate-700 text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800">✕</button>
+        <button type="button" onClick={() => setShowCart(false)} className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 dark:from-teal-500 dark:to-sky-500">
+          <AppIcon name="close" className="text-[11px]" />
+        </button>
       </div>
       <div className="space-y-5 p-5">
 <div>
@@ -1065,32 +1049,32 @@ export function PublicStorePage() {
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">Order Summary</p>
             {selectedItems.map(p => (
               <div key={p._id} className="flex items-center justify-between gap-2 text-sm text-slate-700">
-                <span className="max-w-[65%] break-words">{p.title} × {cart[p._id]?.quantity}</span>
-                <span className="font-semibold text-slate-900">₹{getProductUnitPricing(p, cart[p._id]?.variants || {}).price * (cart[p._id]?.quantity || 1)}</span>
+                <span className="max-w-[65%] break-words">{p.title} � {cart[p._id]?.quantity}</span>
+                <span className="font-semibold text-slate-900">?{getProductUnitPricing(p, cart[p._id]?.variants || {}).price * (cart[p._id]?.quantity || 1)}</span>
               </div>
             ))}
             <div className="border-t border-slate-200 pt-2 space-y-1">
               <div className="flex justify-between text-sm text-slate-600">
-                <span>Items total</span><span>₹{itemsTotal}</span>
+                <span>Items total</span><span>?{itemsTotal}</span>
               </div>
               <div className="flex items-center justify-between text-sm text-slate-600">
                 <span>
                   {seller?.deliveryMode === "flat_rate"
-                    ? `Delivery charge${seller.freeDeliveryThreshold > 0 ? ` (Free above ₹${seller.freeDeliveryThreshold})` : ""}`
+                    ? `Delivery charge${seller.freeDeliveryThreshold > 0 ? ` (Free above ?${seller.freeDeliveryThreshold})` : ""}`
                     : "Delivery charge"}
                 </span>
                 <span className="font-semibold text-slate-800">
-                  {deliveryCharge === 0 ? "Free" : `₹${deliveryCharge}`}
+                  {deliveryCharge === 0 ? "Free" : `?${deliveryCharge}`}
                 </span>
               </div>
               <div className="flex justify-between font-bold text-slate-900 pt-1 border-t border-slate-200 text-sm">
-                <span>Total Payable</span><span>₹{grandTotal}</span>
+                <span>Total Payable</span><span>?{grandTotal}</span>
               </div>
             </div>
           </div>
         )}
 
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 space-y-4 shadow-sm dark:border-slate-700 dark:bg-slate-900/50">
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 space-y-4 shadow-sm dark:border-teal-900/30 dark:bg-slate-950/70">
         <div className="flex items-start gap-3">
           <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-teal-100 text-sm font-bold text-teal-800 dark:bg-teal-950 dark:text-teal-200">1</span>
           <div className="space-y-1 pt-0.5">
@@ -1106,17 +1090,23 @@ export function PublicStorePage() {
               {supportsPrepaid && (
                 <button
                   type="button"
-                  onClick={() => setPaymentMethod("prepaid")}
+                  onClick={() => {
+                    setPaymentMethod("prepaid");
+                    resetSavedProgress();
+                  }}
                   className={`rounded-xl border px-4 py-3 text-left transition ${isPrepaidCheckout ? "border-teal-500 bg-teal-50" : "border-slate-200 bg-slate-50 hover:border-slate-300"}`}
                 >
                   <p className="text-sm font-semibold text-slate-900">Pay Before Order</p>
-                  <p className="text-xs text-slate-500">Pay now using UPI and continue automatically after payment.</p>
+                  <p className="text-xs text-slate-500">Save details, pay by UPI, upload screenshot, then place the order.</p>
                 </button>
               )}
               {supportsCod && (
                 <button
                   type="button"
-                  onClick={() => setPaymentMethod("cod")}
+                  onClick={() => {
+                    setPaymentMethod("cod");
+                    resetSavedProgress();
+                  }}
                   className={`rounded-xl border px-4 py-3 text-left transition ${isCodCheckout ? "border-teal-500 bg-teal-50" : "border-slate-200 bg-slate-50 hover:border-slate-300"}`}
                 >
                   <p className="text-sm font-semibold text-slate-900">Cash on Delivery</p>
@@ -1128,16 +1118,16 @@ export function PublicStorePage() {
         )}
 
         {/* Order form */}
-        <form className="space-y-3" onSubmit={handleSubmit}>
+        <form className="space-y-3" onSubmit={handleSaveDetails}>
           <label className="block space-y-1">
             <span className="text-sm font-semibold text-slate-700">Your name *</span>
             <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400"
-              value={customerName} onChange={e => setCustomerName(e.target.value)} required />
+              value={customerName} onChange={e => { setCustomerName(e.target.value); resetSavedProgress(); }} required />
           </label>
           <label className="block space-y-1">
             <span className="text-sm font-semibold text-slate-700">Phone number *</span>
             <div className="flex gap-2">
-              <input className="w-24 rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400" value={customerPhone.countryCode} onChange={(e) => setCustomerPhone((prev) => ({ ...prev, countryCode: e.target.value }))} placeholder="+91" required />
+              <input className="w-24 rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400" value={customerPhone.countryCode} onChange={(e) => { setCustomerPhone((prev) => ({ ...prev, countryCode: e.target.value })); resetSavedProgress(); }} placeholder="+91" required />
               <input
                 type="tel"
                 inputMode="numeric"
@@ -1145,7 +1135,7 @@ export function PublicStorePage() {
                 maxLength={15}
                 className="flex-1 rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400"
                 value={customerPhone.number}
-                onChange={e => setCustomerPhone((prev) => ({ ...prev, number: e.target.value.replace(/\D/g, "") }))}
+                onChange={e => { setCustomerPhone((prev) => ({ ...prev, number: e.target.value.replace(/\D/g, "") })); resetSavedProgress(); }}
                 required
               />
             </div>
@@ -1153,101 +1143,73 @@ export function PublicStorePage() {
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="block space-y-1">
               <span className="text-sm font-semibold text-slate-700">Address line 1</span>
-              <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400" value={deliveryAddress.line1} onChange={(e) => setDeliveryAddress((prev) => ({ ...prev, line1: e.target.value }))} />
+              <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400" value={deliveryAddress.line1} onChange={(e) => { setDeliveryAddress((prev) => ({ ...prev, line1: e.target.value })); resetSavedProgress(); }} />
             </label>
             <label className="block space-y-1">
               <span className="text-sm font-semibold text-slate-700">Address line 2</span>
-              <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400" value={deliveryAddress.line2} onChange={(e) => setDeliveryAddress((prev) => ({ ...prev, line2: e.target.value }))} />
+              <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400" value={deliveryAddress.line2} onChange={(e) => { setDeliveryAddress((prev) => ({ ...prev, line2: e.target.value })); resetSavedProgress(); }} />
             </label>
             <label className="block space-y-1">
               <span className="text-sm font-semibold text-slate-700">City</span>
-              <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400" value={deliveryAddress.city} onChange={(e) => setDeliveryAddress((prev) => ({ ...prev, city: e.target.value }))} />
+              <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400" value={deliveryAddress.city} onChange={(e) => { setDeliveryAddress((prev) => ({ ...prev, city: e.target.value })); resetSavedProgress(); }} />
             </label>
             <label className="block space-y-1">
               <span className="text-sm font-semibold text-slate-700">State</span>
-              <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400" value={deliveryAddress.state} onChange={(e) => setDeliveryAddress((prev) => ({ ...prev, state: e.target.value }))} />
+              <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400" value={deliveryAddress.state} onChange={(e) => { setDeliveryAddress((prev) => ({ ...prev, state: e.target.value })); resetSavedProgress(); }} />
             </label>
             <label className="block space-y-1">
               <span className="text-sm font-semibold text-slate-700">Country</span>
-              <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400" value={deliveryAddress.country} onChange={(e) => setDeliveryAddress((prev) => ({ ...prev, country: e.target.value }))} />
+              <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400" value={deliveryAddress.country} onChange={(e) => { setDeliveryAddress((prev) => ({ ...prev, country: e.target.value })); resetSavedProgress(); }} />
             </label>
             <label className="block space-y-1">
               <span className="text-sm font-semibold text-slate-700">Landmark</span>
-              <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400" value={deliveryAddress.landmark} onChange={(e) => setDeliveryAddress((prev) => ({ ...prev, landmark: e.target.value }))} />
+              <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400" value={deliveryAddress.landmark} onChange={(e) => { setDeliveryAddress((prev) => ({ ...prev, landmark: e.target.value })); resetSavedProgress(); }} />
             </label>
           </div>
           <label className="block space-y-1">
             <span className="text-sm font-semibold text-slate-700">Note (optional)</span>
             <textarea className="min-h-12 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400"
-              placeholder="Special instructions..." value={note} onChange={e => setNote(e.target.value)} />
+              placeholder="Special instructions..." value={note} onChange={e => { setNote(e.target.value); resetSavedProgress(); }} />
           </label>
 
           {error && <p className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p>}
           {successMessage && <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{successMessage}</p>}
 
           <button type="submit" disabled={submitting || selectedItems.length === 0}
-            className="w-full rounded-xl bg-slate-900 px-4 py-3.5 text-sm font-semibold text-white shadow-md transition hover:bg-slate-800 disabled:bg-slate-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900 dark:hover:bg-slate-700">
-            {submitting ? "Placing order…" : "Place order"}
+            className="w-full rounded-xl bg-gradient-to-r from-emerald-500 via-teal-500 to-sky-500 px-4 py-3.5 text-sm font-semibold text-white shadow-md transition hover:from-emerald-400 hover:via-teal-400 hover:to-sky-400 disabled:from-slate-300 disabled:via-slate-300 disabled:to-slate-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-500 dark:hover:from-emerald-500 dark:hover:via-teal-500 dark:hover:to-sky-500">
+            Save Details
           </button>
         </form>
         </div>
 
         {/* UPI payment */}
-        {(supportsPrepaid && isPrepaidCheckout && seller.upiId && activeAmount > 0 && (selectedItems.length > 0 || Boolean(paymentSession))) && (
+        {(supportsPrepaid && isPrepaidCheckout && seller.upiId && grandTotal > 0 && selectedItems.length > 0) && (
           <div className="rounded-2xl border border-teal-200/60 bg-gradient-to-b from-teal-50/80 to-slate-50 p-4 space-y-3 dark:border-teal-900/40 dark:from-teal-950/30 dark:to-slate-900/50">
             <div className="flex items-start gap-3">
               <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-teal-600 text-sm font-bold text-white dark:bg-teal-700">2</span>
               <div className="space-y-1 pt-0.5">
                 <p className="text-xs font-semibold uppercase tracking-[0.16em] text-teal-800 dark:text-teal-300">UPI Payment</p>
-                <p className="text-sm text-slate-600 dark:text-slate-300">After you place the order, pay the exact amount below using any UPI app.</p>
+                <p className="text-sm text-slate-600 dark:text-slate-300">After saving your details, pay the exact amount below using any UPI app.</p>
               </div>
             </div>
             <p className="text-sm text-slate-700 dark:text-slate-300">UPI ID: <span className="font-semibold text-slate-900 dark:text-slate-100">{seller.upiId}</span></p>
-            {paymentSession && (
-              <div className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2.5 text-xs leading-relaxed text-sky-900 dark:border-sky-900/50 dark:bg-sky-950/40 dark:text-sky-100">
-                <p className="font-semibold">Transaction ref: {paymentSession.transactionRef}</p>
-                <p className="mt-1.5 text-sky-800 dark:text-sky-200/90">We check payment status automatically. When your payment is confirmed, this tab will switch to the thank-you screen — you do not need to open it yourself.</p>
-              </div>
-            )}
             <div className="inline-flex rounded-xl bg-white p-3">
-              <QRCodeSVG value={activeUpiLink} size={128} />
+              <QRCodeSVG value={previewUpiLink} size={128} />
             </div>
             <div className="flex flex-col gap-2 sm:flex-row">
-              <button type="button" onClick={() => openUpiIntent(activeUpiLink)}
-                className="flex-1 rounded-xl bg-teal-600 px-4 py-2 text-center text-sm font-semibold text-white hover:bg-teal-500 transition">
-                Pay ₹{activeAmount} via UPI
+              <button type="button" onClick={() => openUpiIntent(previewUpiLink)} disabled={!savedCheckoutData}
+                className="flex-1 rounded-xl bg-teal-600 px-4 py-2 text-center text-sm font-semibold text-white hover:bg-teal-500 transition disabled:bg-teal-300">
+                Pay ?{grandTotal} via UPI
               </button>
               <button type="button" onClick={copyIntentLink}
                 className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:border-slate-400 transition">
                 Copy Link
               </button>
             </div>
-            {paymentSession && (
-              <button
-                type="button"
-                onClick={() => void checkPaymentStatus()}
-                className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-slate-400 hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-800 dark:text-slate-200"
-              >
-                {checkingPayment ? "Checking…" : "Already paid? Refresh status"}
-              </button>
-            )}
-            {paymentSession && placedOrderIds.length > 0 && (
-              <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
-                {placedOrderIds.map(id => (
-                  <div key={id} className="flex items-center justify-between gap-3 py-1">
-                    <span className="truncate">{id}</span>
-                    <span className="rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 font-semibold capitalize text-slate-700">
-                      {orderStatuses[id] || "pending"}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
-            {intentFeedback && <p className="text-xs text-sky-700 bg-sky-50 border border-sky-200 rounded-lg px-2.5 py-1.5">{intentFeedback}</p>}
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              {paymentSession
-                ? "If your UPI app opened in another app, return to this browser tab and wait — or tap refresh status after paying."
-                : "Scan the QR or tap Pay on your phone to open your UPI app."}
+              {savedCheckoutData
+                ? "Scan the QR or tap Pay on your phone to open your UPI app, then upload the screenshot below."
+                : "Save your details first to lock the payable amount, then continue with UPI payment."}
             </p>
           </div>
         )}
@@ -1257,28 +1219,41 @@ export function PublicStorePage() {
             <p className="text-sm text-emerald-900">No online payment is needed now. Your order will be placed first and the seller can collect payment at delivery.</p>
           </div>
         )}
-        {/* Payment proof — upload or URL */}
-        {isPrepaidCheckout && placedOrderIds.length > 0 && (
+        {/* Payment proof � upload or URL */}
+        {isPrepaidCheckout && selectedItems.length > 0 && (
           <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 space-y-3">
-            <p className="text-sm font-semibold text-amber-800">📸 Share Payment Screenshot</p>
-            <p className="text-xs text-amber-700">Upload your screenshot or paste its URL so the seller can confirm your order.</p>
+            <div className="flex items-start gap-3">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-amber-500 text-sm font-bold text-white">3</span>
+              <div className="space-y-1 pt-0.5">
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-amber-800">Payment Screenshot</p>
+                <p className="text-sm text-amber-900">Upload the payment screenshot before placing the order.</p>
+              </div>
+            </div>
             <label className="flex cursor-pointer flex-col items-center gap-2 rounded-xl border-2 border-dashed border-amber-300 bg-white px-4 py-3 text-center hover:border-amber-400 transition">
-              <span className="text-2xl">📁</span>
+              <span className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-amber-500">
+                <AppIcon name="upload" className="text-lg" />
+              </span>
               <span className="text-xs font-semibold text-amber-700">{screenshotFile ? screenshotFile.name : "Tap to upload image"}</span>
-              <input type="file" accept="image/*" className="sr-only" onChange={e => { const f = e.target.files?.[0] ?? null; setScreenshotFile(f); if (f) { setScreenshotPreview(URL.createObjectURL(f)); setScreenshotUrl(""); } }} />
+              <input type="file" accept="image/*" className="sr-only" onChange={e => { const f = e.target.files?.[0] ?? null; setScreenshotFile(f); setSavedProofUrl(""); setProofSuccess(""); if (f) { setScreenshotPreview(URL.createObjectURL(f)); setScreenshotUrl(""); } }} />
             </label>
             {screenshotPreview && <img src={screenshotPreview} alt="Preview" className="h-24 w-full rounded-xl object-cover border border-amber-200" />}
             <div className="flex items-center gap-2"><div className="flex-1 h-px bg-amber-200" /><span className="text-[10px] font-semibold text-amber-500 uppercase">or paste URL</span><div className="flex-1 h-px bg-amber-200" /></div>
             <input className="w-full rounded-xl border border-amber-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-amber-400"
               placeholder="https://drive.google.com/..." value={screenshotUrl}
-              onChange={e => { setScreenshotUrl(e.target.value); if (e.target.value) { setScreenshotFile(null); setScreenshotPreview(""); } }} />
+              onChange={e => { setScreenshotUrl(e.target.value); setSavedProofUrl(""); setProofSuccess(""); if (e.target.value) { setScreenshotFile(null); setScreenshotPreview(""); } }} />
             {proofSuccess && <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-2.5 py-1.5">{proofSuccess}</p>}
-            <button type="button" onClick={handleProofSubmit} disabled={uploadingProof || (!screenshotUrl.trim() && !screenshotFile)}
+            <button type="button" onClick={handleProofSubmit} disabled={uploadingProof || !savedCheckoutData || (!screenshotUrl.trim() && !screenshotFile)}
               className="w-full rounded-xl bg-amber-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-amber-500 disabled:bg-amber-300 transition">
-              {uploadingProof ? "Submitting..." : "Submit Payment Proof"}
+              {uploadingProof ? "Saving..." : "Save Screenshot"}
             </button>
           </div>
         )}
+        <form onSubmit={handleSubmit}>
+          <button type="submit" disabled={submitting || !savedCheckoutData || (savedCheckoutData.paymentMethod === "prepaid" && !savedProofUrl)}
+            className="w-full rounded-xl bg-gradient-to-r from-emerald-500 via-teal-500 to-sky-500 px-4 py-3.5 text-sm font-semibold text-white shadow-md transition hover:from-emerald-400 hover:via-teal-400 hover:to-sky-400 disabled:from-slate-300 disabled:via-slate-300 disabled:to-slate-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-500 dark:hover:from-emerald-500 dark:hover:via-teal-500 dark:hover:to-sky-500">
+            {submitting ? "Placing order�" : "Place Order"}
+          </button>
+        </form>
       </div>
     </div>
 
@@ -1289,11 +1264,13 @@ export function PublicStorePage() {
       const vgs = getNormalizedVariantGroups(product);
       return (
         <div className="fixed inset-0 z-[60] flex items-end justify-center sm:items-center bg-black/50 backdrop-blur-[2px] px-4 pb-4 sm:p-4">
-          <div className="w-full max-w-sm rounded-3xl bg-white dark:bg-slate-900 p-5 shadow-2xl">
+          <div className="w-full max-w-sm rounded-3xl bg-white p-5 shadow-2xl dark:border dark:border-teal-900/40 dark:bg-gradient-to-b dark:from-slate-950 dark:to-slate-900">
             <div className="mb-4 flex items-start justify-between gap-3">
               <div><p className="text-xs font-bold uppercase tracking-wider text-teal-600">Select Options</p>
                 <h3 className="mt-0.5 font-heading text-base font-bold text-slate-900 dark:text-slate-100 line-clamp-2">{product.title}</h3></div>
-              <button type="button" onClick={() => setVariantPopupProductId(null)} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-slate-200 dark:border-slate-700 text-slate-500 hover:bg-slate-50">✕</button>
+              <button type="button" onClick={() => setVariantPopupProductId(null)} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 dark:from-teal-500 dark:to-sky-500">
+                <AppIcon name="close" className="text-[10px]" />
+              </button>
             </div>
             <div className="space-y-3">
               {vgs.map(v => (
@@ -1307,7 +1284,7 @@ export function PublicStorePage() {
                       return (<button key={opt} type="button" disabled={optOut}
                         onClick={() => { setPopupVariants(prev => ({ ...prev, [v.label]: opt })); setPopupVariantError(""); }}
                         className={`rounded-xl border px-3 py-1.5 text-sm font-semibold transition disabled:opacity-40 ${popupVariants[v.label] === opt ? "border-emerald-500 bg-emerald-50 text-emerald-800" : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"}`}>
-                        {opt}{optPrice ? ` · ₹${optPrice}` : ""}
+                        {opt}{optPrice ? ` - ₹${optPrice}` : ""}
                       </button>);
                     })}
                   </div>
@@ -1333,7 +1310,7 @@ export function PublicStorePage() {
         </button>
       </div>
       <p>
-        Powered by <span className="font-semibold text-slate-500">🛍️ MyDukan</span>
+        Powered by <span className="inline-flex items-center gap-1 font-semibold text-slate-500"><span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-teal-600"><AppIcon name="brand" className="text-[9px]" /></span>MyDukan</span>
       </p>
     </footer>
     {activePolicy && (

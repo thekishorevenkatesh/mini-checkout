@@ -2,6 +2,7 @@ import { useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { useAuth } from "../context/AuthContext";
+import { AppIcon } from "../components/ui/AppIcon";
 import { useI18n } from "../context/I18nContext";
 import { DEFAULT_POLICY_CONTENT } from "../constants/policyDefaults";
 import { DEFAULT_VENDOR_POLICY_POINTS } from "../constants/vendorPolicyDefaults";
@@ -80,21 +81,21 @@ function ImageUploadField({
 
   return (
     <div className="space-y-2">
-      <div className="flex gap-2">
+      <div className="flex flex-col gap-2 sm:flex-row">
         <input
           className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50"
           placeholder={placeholder}
           value={value}
           onChange={(e) => onChange(e.target.value)}
         />
-        <label className={`inline-flex cursor-pointer items-center rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100 ${uploading ? "pointer-events-none opacity-60" : ""}`}>
+        <label className={`inline-flex w-full cursor-pointer items-center justify-center rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100 sm:w-auto ${uploading ? "pointer-events-none opacity-60" : ""}`}>
           {uploading ? "Uploading..." : "Upload"}
           <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
         </label>
       </div>
       {value ? (
         <a href={value} target="_blank" rel="noreferrer">
-          <img src={value} alt="Proof preview" className="h-28 w-full rounded-xl border border-slate-200 object-cover" />
+          <img src={value} alt="Proof preview" className="h-24 w-full rounded-xl border border-slate-200 object-cover sm:h-28" />
         </a>
       ) : null}
       {uploadError ? <p className="text-xs text-rose-600">{uploadError}</p> : null}
@@ -325,12 +326,15 @@ export function LoginPage() {
 
   return (
     <>
-    <main className="mx-auto grid min-h-[calc(100vh-52px)] w-full max-w-6xl items-center gap-6 px-4 py-4 sm:py-5 lg:grid-cols-2 lg:gap-8">
+    <main className="mx-auto grid min-h-[calc(100vh-52px)] w-full max-w-6xl items-start gap-5 px-3 py-4 sm:px-4 sm:py-5 lg:grid-cols-2 lg:items-center lg:gap-8">
 
       {/* ── Left: Hero ─────────────────────────────────────────────── */}
-      <section className="space-y-5 text-center lg:space-y-6 lg:text-left">
-        <p className="inline-flex rounded-full border border-teal-200 bg-teal-50 px-3 py-1 text-xs font-bold uppercase tracking-[0.18em] text-teal-700">
-          🛍️ MyDukan
+      <section className="order-2 space-y-5 text-center lg:order-1 lg:space-y-6 lg:text-left">
+        <p className="inline-flex items-center gap-2 rounded-full border border-teal-200 bg-teal-50 px-3 py-1 text-xs font-bold uppercase tracking-[0.18em] text-teal-700">
+          <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-teal-600">
+            <AppIcon name="brand" className="text-[10px]" />
+          </span>
+          MyDukan
         </p>
         <h1 className="font-heading text-3xl font-bold leading-tight text-slate-900 sm:text-4xl lg:text-5xl">
           {mode === "login"
@@ -344,7 +348,7 @@ export function LoginPage() {
         </p>
 
         {/* Step indicators */}
-        <div className="flex items-center justify-center gap-2 lg:justify-start">
+        <div className="flex flex-wrap items-start justify-center gap-2 lg:justify-start">
           {activeSteps.map((s, i) => (
             <div key={s.key} className="flex items-center gap-2">
               <div className="flex flex-col items-center gap-1">
@@ -357,7 +361,7 @@ export function LoginPage() {
                       : "bg-slate-100 text-slate-400"
                   }`}
                 >
-                  {i < currentStepIndex ? "✓" : String(i + 1)}
+                  {i < currentStepIndex ? <AppIcon name="check" className="text-[10px]" /> : String(i + 1)}
                 </div>
                 <span
                   className={`text-[10px] font-semibold tracking-wide ${
@@ -380,7 +384,7 @@ export function LoginPage() {
       </section>
 
       {/* ── Right: Form Card ───────────────────────────────────────── */}
-      <section className="mx-auto w-full max-w-xl rounded-3xl border border-white/80 bg-white/90 p-5 shadow-card backdrop-blur sm:p-6">
+      <section className="order-1 mx-auto w-full max-w-xl rounded-3xl border border-white/80 bg-white/90 p-4 shadow-card backdrop-blur sm:p-6 lg:order-2">
 
         {/* Mode Toggle Tabs */}
         <div className="mb-6 flex rounded-2xl border border-slate-200 bg-slate-50 p-1">
@@ -389,13 +393,15 @@ export function LoginPage() {
               key={m}
               type="button"
               onClick={() => switchMode(m)}
-              className={`flex-1 rounded-xl py-2.5 text-sm font-semibold transition-all duration-200 ${
+              className={`flex flex-1 items-center justify-center gap-1.5 rounded-xl px-2 py-2.5 text-center text-sm font-semibold transition-all duration-200 ${
                 mode === m
                   ? "bg-white text-slate-900 shadow-sm"
                   : "text-slate-500 hover:text-slate-700"
               }`}
             >
-              {m === "login" ? `🔑 ${t("auth.login", "Login")}` : `🚀 ${t("auth.register", "Register")}`}
+              {m === "login"
+                ? <><AppIcon name="login" className="text-[10px]" /> {t("auth.login", "Login")}</>
+                : <><AppIcon name="register" className="text-[10px]" /> {t("auth.register", "Register")}</>}
             </button>
           ))}
         </div>
@@ -674,7 +680,7 @@ export function LoginPage() {
 
               {devOtp && (
                 <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 space-y-1">
-                  <p className="text-xs font-bold text-amber-800">🛍️ MyDukan — Demo Mode</p>
+                  <p className="inline-flex items-center gap-2 text-xs font-bold text-amber-800"><span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-amber-500"><AppIcon name="brand" className="text-[9px]" /></span>MyDukan - Demo Mode</p>
                   <p className="text-xs text-amber-700">
                     Your OTP:{" "}
                     <strong className="text-lg tracking-widest">{devOtp}</strong>
@@ -695,7 +701,7 @@ export function LoginPage() {
                 fullWidth
               >
                 {mode === "register"
-                  ? "Verify & Create Store 🎉"
+                  ? <><AppIcon name="check" className="text-[10px]" /> Verify & Create Store</>
                   : "Verify OTP"}
               </Button>
 
@@ -710,7 +716,7 @@ export function LoginPage() {
                   setOtp("");
                 }}
               >
-                ← Back
+                <AppIcon name="chevronLeft" className="text-[10px]" /> Back
               </Button>
             </form>
           </>
@@ -884,20 +890,20 @@ export function LoginPage() {
                 fullWidth
                 className="sm:col-span-2"
               >
-                Complete Setup & Go to Dashboard 🚀
+                <AppIcon name="register" className="text-[10px]" /> Complete Setup & Go to Dashboard
               </Button>
             </form>
           </>
         )}
       </section>
     </main>
-    <footer className="pb-2 text-center text-xs text-slate-400">
-      <span className="font-semibold text-slate-500">🛍️ MyDukan</span> — Your Store. Your Link. Your Sales.
+    <footer className="px-3 pb-2 text-center text-xs text-slate-400 sm:px-4">
+      <span className="inline-flex items-center gap-1 font-semibold text-slate-500"><span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-slate-900"><AppIcon name="brand" className="text-[9px]" /></span>MyDukan</span> - Your Store. Your Link. Your Sales.
     </footer>
     {showTermsModal && (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 px-4 py-6 backdrop-blur-[2px]">
-        <div className="max-h-[85vh] w-full max-w-2xl overflow-hidden rounded-3xl border border-white/70 bg-white shadow-card">
-          <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
+      <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/50 px-3 py-3 backdrop-blur-[2px] sm:items-center sm:px-4 sm:py-6">
+        <div className="max-h-[90vh] w-full max-w-2xl overflow-hidden rounded-3xl border border-white/70 bg-white shadow-card">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-4 py-4 sm:px-5">
             <h3 className="font-heading text-xl font-bold text-slate-900">Terms & Conditions</h3>
             <button
               type="button"
@@ -907,7 +913,7 @@ export function LoginPage() {
               Close
             </button>
           </div>
-          <div className="max-h-[calc(85vh-88px)] overflow-y-auto px-5 py-4">
+          <div className="max-h-[calc(90vh-88px)] overflow-y-auto px-4 py-4 sm:px-5">
             <div className="space-y-4">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Vendor Policy Checklist</p>

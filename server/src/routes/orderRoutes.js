@@ -44,6 +44,7 @@ router.post("/", async (req, res) => {
       deliveryCharge = 0,
       selectedVariants = {},
       paymentMethod = "prepaid",
+      paymentScreenshotUrl = "",
     } = req.body;
 
     if (!productId || !customerName || !customerPhone) {
@@ -102,6 +103,7 @@ router.post("/", async (req, res) => {
       selectedVariants,
       paymentMethod: safePaymentMethod,
       paymentStatus: safePaymentMethod === "cod" ? "confirmed" : "pending",
+      paymentScreenshotUrl: safePaymentMethod === "prepaid" ? String(paymentScreenshotUrl || "").trim() : "",
     });
 
     // Decrease variant stock after successful order creation.

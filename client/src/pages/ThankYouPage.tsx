@@ -78,8 +78,8 @@ export function ThankYouPage() {
   }, [allSuccessful, anyCancelled, fetchStatuses, orderIds.length]);
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-3xl items-center justify-center px-4 py-10">
-      <Card className="w-full p-6 sm:p-8">
+    <main className="mx-auto flex min-h-screen w-full max-w-3xl items-center justify-center px-3 py-8 sm:px-4 sm:py-10">
+      <Card className="w-full p-5 sm:p-8">
         <p className="text-xs font-bold uppercase tracking-[0.18em] text-teal-700">Payment Status</p>
         <h1 className="mt-2 font-heading text-3xl font-bold text-slate-900">
           {allSuccessful ? "Thank you for your payment" : "We are checking your payment"}
@@ -96,14 +96,14 @@ export function ThankYouPage() {
         {error ? <Alert tone="error" className="mt-4">{error}</Alert> : null}
 
         <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-          <div className="flex items-center justify-between gap-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm font-semibold text-slate-900">Tracked orders</p>
             <Button
               type="button"
               onClick={() => void fetchStatuses()}
               variant="secondary"
               loading={loading}
-              className="px-3 py-1.5"
+              className="w-full px-3 py-1.5 sm:w-auto"
             >
               Check status
             </Button>
@@ -117,9 +117,9 @@ export function ThankYouPage() {
               return (
                 <div
                   key={orderId}
-                  className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2"
+                  className="flex flex-col items-start gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
                 >
-                  <span className="truncate text-xs text-slate-500">{orderId}</span>
+                  <span className="w-full break-all text-xs text-slate-500 sm:w-auto sm:truncate">{orderId}</span>
                   <span className="rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-xs font-semibold capitalize text-slate-700">
                     {status}
                   </span>

@@ -148,7 +148,7 @@ export function AdminPage() {
     const passwordError = password.trim().length === 0 ? "Password is required." : "";
     const formValid = !usernameError && !passwordError;
     return (
-      <main className="mx-auto flex min-h-screen w-full max-w-md items-center px-4 py-10">
+      <main className="mx-auto flex min-h-screen w-full max-w-md items-center px-3 py-8 sm:px-4 sm:py-10">
         <Card className="w-full space-y-5">
           <div className="space-y-1">
             <p className="text-xs font-bold uppercase tracking-[0.14em] text-teal-700 dark:text-teal-300">Admin</p>
@@ -186,13 +186,13 @@ export function AdminPage() {
   }
 
   return (
-    <main className="mx-auto w-full max-w-7xl space-y-4 px-4 py-8">
-      <header className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/70 bg-white/90 p-4 shadow-card dark:border-slate-700 dark:bg-slate-900/90">
+    <main className="mx-auto w-full max-w-7xl space-y-4 px-3 py-5 sm:px-4 sm:py-8">
+      <header className="flex flex-col items-stretch justify-between gap-3 rounded-2xl border border-white/70 bg-white/90 p-4 shadow-card dark:border-slate-700 dark:bg-slate-900/90 sm:flex-row sm:items-center">
         <div>
           <h1 className="font-heading text-2xl font-bold text-slate-900">{t("admin.title", "Seller Approvals")}</h1>
           <p className="text-sm text-slate-500 dark:text-slate-300">Search, review and approve seller onboarding requests quickly.</p>
         </div>
-        <Button onClick={logout} variant="secondary">
+        <Button onClick={logout} variant="secondary" className="w-full sm:w-auto">
           Logout
         </Button>
       </header>
@@ -231,9 +231,9 @@ export function AdminPage() {
             </select>
           </label>
         </div>
-        <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-300">
+        <div className="flex flex-col gap-2 text-xs text-slate-500 dark:text-slate-300 sm:flex-row sm:items-center sm:justify-between">
           <span>Total shown: {filteredSellers.length}</span>
-          <Button variant="secondary" onClick={() => void loadSellers(status)}>
+          <Button variant="secondary" onClick={() => void loadSellers(status)} className="w-full sm:w-auto">
             Refresh list
           </Button>
         </div>
@@ -346,14 +346,14 @@ export function AdminPage() {
 
       {/* Seller detail modal */}
       {selectedSeller ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 px-4">
-          <Card className="w-full max-w-6xl space-y-4">
-            <div className="flex items-start justify-between gap-3">
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/55 px-3 py-3 sm:items-center sm:px-4">
+          <Card className="w-full max-w-6xl space-y-4 max-h-[92vh] overflow-y-auto p-4 sm:p-5">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <p className="text-xs font-bold uppercase tracking-[0.14em] text-teal-700 dark:text-teal-300">Seller Details</p>
                 <h3 className="font-heading text-2xl font-bold text-slate-900 dark:text-slate-100">{selectedSeller.businessName}</h3>
               </div>
-              <Button variant="secondary" onClick={() => setSelectedSeller(null)}>Close</Button>
+              <Button variant="secondary" onClick={() => setSelectedSeller(null)} className="w-full sm:w-auto">Close</Button>
             </div>
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/70">
@@ -463,10 +463,10 @@ export function AdminPage() {
                 </p>
               </div>
             </div>
-            <div className="flex flex-wrap gap-2">
-              <Button variant="success" onClick={() => void updateApproval(selectedSeller._id, "approved")}>Approve</Button>
-              <Button variant="danger" onClick={() => void updateApproval(selectedSeller._id, "rejected")}>Reject</Button>
-              <Button variant="secondary" onClick={() => void updateApproval(selectedSeller._id, "pending")}>Move to Pending</Button>
+            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+              <Button variant="success" onClick={() => void updateApproval(selectedSeller._id, "approved")} className="w-full sm:w-auto">Approve</Button>
+              <Button variant="danger" onClick={() => void updateApproval(selectedSeller._id, "rejected")} className="w-full sm:w-auto">Reject</Button>
+              <Button variant="secondary" onClick={() => void updateApproval(selectedSeller._id, "pending")} className="w-full sm:w-auto">Move to Pending</Button>
             </div>
           </Card>
         </div>

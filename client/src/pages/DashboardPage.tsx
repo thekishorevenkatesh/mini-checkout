@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { QRCodeCanvas } from "qrcode.react";
 import { api } from "../api/client";
+import { AppIcon } from "../components/ui/AppIcon";
 import { useAuth } from "../context/AuthContext";
 import { useI18n } from "../context/I18nContext";
 import { DEFAULT_POLICY_CONTENT } from "../constants/policyDefaults";
@@ -110,9 +111,12 @@ function ImageUploadField({
           onChange={e => onChange(e.target.value)}
         />
         <label
-          className={`flex cursor-pointer items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 ${uploading ? "pointer-events-none opacity-50" : ""}`}
+          className={`flex cursor-pointer items-center gap-1.5 rounded-xl border border-emerald-100 bg-emerald-50/80 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-emerald-100 dark:border-teal-900/40 dark:bg-slate-900/80 dark:text-slate-200 dark:hover:bg-slate-800 ${uploading ? "pointer-events-none opacity-50" : ""}`}
         >
-          {uploading ? "⏳" : "📁"} {uploading ? "Uploading…" : "Upload"}
+          <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 dark:from-teal-500 dark:to-sky-500">
+            <AppIcon name={uploading ? "pending" : "upload"} className="text-[10px]" />
+          </span>
+          {uploading ? "Uploading..." : "Upload"}
           <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
         </label>
       </div>
@@ -226,7 +230,6 @@ export function DashboardPage() {
   const [viewingOrder, setViewingOrder] = useState<Order | null>(null);
 
   const [copyFeedback, setCopyFeedback] = useState("");
-  const [showStoreQrActions, setShowStoreQrActions] = useState(false);
   const storeQrCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // Sync seller into local form state
@@ -608,25 +611,30 @@ export function DashboardPage() {
     window.open(`${api.defaults.baseURL}/orders/my/export`, "_blank");
   }
 
-  const tabs: { key: Tab; label: string }[] = [
-    { key: "dashboard", label: `📊 ${t("nav.dashboard", "Dashboard")}` },
-    { key: "store", label: `🏪 ${t("nav.store", "Store Options")}` },
-    { key: "products", label: `📦 ${t("nav.products", "Products")}` },
-    { key: "orders", label: `🧾 ${t("nav.orders", "Orders")}` },
-    { key: "reports", label: `📈 ${t("nav.reports", "Reports")}` },
-    { key: "profile", label: `👤 ${t("nav.profile", "Profile")}` },
-    { key: "policies", label: `📄 ${t("nav.policies", "Policies")}` },
+  const tabs: { key: Tab; label: string; icon: Parameters<typeof AppIcon>[0]["name"] }[] = [
+    { key: "dashboard", label: t("nav.dashboard", "Dashboard"), icon: "dashboard" },
+    { key: "store", label: t("nav.store", "Store Options"), icon: "store" },
+    { key: "products", label: t("nav.products", "Products"), icon: "products" },
+    { key: "orders", label: t("nav.orders", "Orders"), icon: "orders" },
+    { key: "reports", label: t("nav.reports", "Reports"), icon: "reports" },
+    { key: "profile", label: t("nav.profile", "Profile"), icon: "profile" },
+    { key: "policies", label: t("nav.policies", "Policies"), icon: "policies" },
   ];
   return (
     <main className="mx-auto w-full max-w-7xl space-y-4 px-3 py-5 sm:px-4 sm:py-8">
       {/* Header */}
-      <header className="flex flex-col gap-3 rounded-3xl border border-white/70 bg-white/80 p-4 shadow-card backdrop-blur sm:flex-row sm:items-center sm:justify-between sm:p-6">
+      <header className="flex flex-col gap-3 rounded-3xl border border-white/70 bg-gradient-to-br from-white via-emerald-50/70 to-sky-50/80 p-4 shadow-card backdrop-blur sm:flex-row sm:items-center sm:justify-between sm:p-6 dark:border-teal-900/40 dark:bg-gradient-to-br dark:from-slate-950/95 dark:via-slate-900/90 dark:to-slate-900/95">
         <div className="flex items-center gap-3">
           {seller?.businessLogo && (
             <img src={seller.businessLogo} alt="logo" className="h-10 w-10 rounded-xl object-contain border border-slate-200" />
           )}
           <div>
-            <p className="text-xs font-bold uppercase tracking-[0.18em] text-teal-700">🛍️ MyDukan</p>
+            <p className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-teal-700">
+            <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-teal-600">
+              <AppIcon name="brand" className="text-[12px]" />
+            </span>
+            MyDukan
+          </p>
             <h1 className="font-heading text-xl font-bold text-slate-900 sm:text-2xl">{seller?.businessName || "My Dukan"}</h1>
           </div>
         </div>
@@ -637,9 +645,9 @@ export function DashboardPage() {
               target="_blank"
               rel="noreferrer"
               aria-label="Open public store in new tab"
-              className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700 transition sm:flex-none"
+              className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-emerald-500 via-teal-500 to-sky-500 px-4 py-2 text-sm font-semibold text-white shadow-md transition hover:from-emerald-400 hover:via-teal-400 hover:to-sky-400 sm:flex-none"
             >
-              Open Store
+              <AppIcon name="store" className="text-[11px]" /> Open Store
             </a>
           ) : (
             <button
@@ -647,12 +655,12 @@ export function DashboardPage() {
               onClick={() => void handlePublishStore()}
               disabled={isPublishingStore || isPublishPending}
               aria-label="Publish store for approval"
-              className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700 disabled:bg-slate-400 transition sm:flex-none"
+              className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-emerald-500 via-teal-500 to-sky-500 px-4 py-2 text-sm font-semibold text-white shadow-md hover:from-emerald-400 hover:via-teal-400 hover:to-sky-400 disabled:from-slate-300 disabled:via-slate-300 disabled:to-slate-300 transition sm:flex-none"
             >
-              {isPublishingStore ? "Sending..." : isPublishPending ? "Pending Approval" : isPublishRejected ? "Publish Store Again" : "Publish Store"}
+              {isPublishingStore ? <><AppIcon name="pending" className="text-[11px]" /> Sending...</> : isPublishPending ? <><AppIcon name="pending" className="text-[11px]" /> Pending Approval</> : <><AppIcon name="share" className="text-[11px]" /> {isPublishRejected ? "Publish Store Again" : "Publish Store"}</>}
             </button>
           )}
-          <button onClick={logout} className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:border-slate-400 transition">Logout</button>
+          <button onClick={logout} className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-slate-700 to-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-md transition hover:from-slate-600 hover:to-slate-800 dark:from-slate-800 dark:to-slate-950"><AppIcon name="logout" className="text-[11px]" />Logout</button>
         </div>
       </header>
 
@@ -662,10 +670,13 @@ export function DashboardPage() {
       {copyFeedback && <p className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-2 text-sm text-sky-700">{copyFeedback}</p>}
 
       {/* Tab nav */}
-      <nav className="flex flex-wrap gap-2">
+      <nav className="flex gap-2 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:flex-wrap">
         {tabs.map(t => (
           <button key={t.key} onClick={() => { setTab(t.key); setError(""); setSuccess(""); }}
-            className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${tab === t.key ? "bg-slate-900 text-white" : "bg-white border border-slate-200 text-slate-600 hover:border-slate-400"}`}>
+            className={`inline-flex shrink-0 items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition ${tab === t.key ? "bg-gradient-to-r from-emerald-500 via-teal-500 to-sky-500 text-white shadow-md" : "border border-emerald-100 bg-white/90 text-slate-600 hover:border-emerald-300 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-300 dark:hover:border-teal-700"}`}>
+            <span className={`inline-flex h-7 w-7 items-center justify-center rounded-full ${tab === t.key ? "bg-white/15" : "bg-gradient-to-br from-emerald-500 to-teal-600 dark:from-teal-500 dark:to-sky-500"}`}>
+              <AppIcon name={t.icon} className="text-[11px]" />
+            </span>
             {t.label}
           </button>
         ))}
@@ -677,17 +688,19 @@ export function DashboardPage() {
           {/* Row 1 — 6 stat cards */}
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
             {[
-              { label: "Total Products",    value: stats.totalProducts,    color: "text-slate-900",    icon: "📦" },
-              { label: "Active Products",   value: stats.activeProducts,   color: "text-emerald-600",  icon: "🟢" },
-              { label: "Inactive Products", value: stats.inactiveProducts, color: "text-rose-500",     icon: "🔴" },
-              { label: "Total Orders",      value: stats.totalOrders,      color: "text-slate-900",    icon: "🛒" },
-              { label: "Pending",           value: stats.pending,          color: "text-amber-600",    icon: "⏳" },
-              { label: "Delivered",         value: stats.delivered,        color: "text-teal-600",     icon: "✅" },
+              { label: "Total Products", value: stats.totalProducts, color: "text-slate-900", icon: "products" },
+              { label: "Active Products", value: stats.activeProducts, color: "text-emerald-600", icon: "active" },
+              { label: "Inactive Products", value: stats.inactiveProducts, color: "text-rose-500", icon: "inactive" },
+              { label: "Total Orders", value: stats.totalOrders, color: "text-slate-900", icon: "orders" },
+              { label: "Pending", value: stats.pending, color: "text-amber-600", icon: "pending" },
+              { label: "Delivered", value: stats.delivered, color: "text-teal-600", icon: "check" },
             ].map(s => (
-              <article key={s.label} className="rounded-2xl border border-white/70 bg-white/90 p-4 shadow-card flex flex-col gap-1">
+              <article key={s.label} className="rounded-2xl border border-white/70 bg-gradient-to-br from-white to-emerald-50/70 p-4 shadow-card flex flex-col gap-1 dark:border-teal-900/35 dark:bg-gradient-to-br dark:from-slate-950 dark:to-slate-900">
                 <div className="flex items-center justify-between">
                   <p className="text-xs uppercase tracking-[0.14em] text-slate-500">{s.label}</p>
-                  <span className="text-base">{s.icon}</span>
+                  <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 dark:from-teal-500 dark:to-sky-500">
+                    <AppIcon name={s.icon as Parameters<typeof AppIcon>[0]["name"]} className="text-[11px]" />
+                  </span>
                 </div>
                 <p className={`text-3xl font-bold ${s.color}`}>{s.value}</p>
               </article>
@@ -696,11 +709,11 @@ export function DashboardPage() {
 
           {/* Row 2 — Revenue cards */}
           <div className="grid gap-3 sm:grid-cols-2">
-            <article className="rounded-2xl border border-white/70 bg-white/90 p-4 shadow-card">
+            <article className="rounded-2xl border border-white/70 bg-gradient-to-br from-white to-emerald-50/70 p-4 shadow-card dark:border-teal-900/35 dark:bg-gradient-to-br dark:from-slate-950 dark:to-slate-900">
               <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Revenue — Last 7 Days</p>
               <p className="mt-1 text-3xl font-bold text-teal-700">₹{stats.value7d.toLocaleString("en-IN")}</p>
             </article>
-            <article className="rounded-2xl border border-white/70 bg-white/90 p-4 shadow-card">
+            <article className="rounded-2xl border border-white/70 bg-gradient-to-br from-white to-sky-50/70 p-4 shadow-card dark:border-teal-900/35 dark:bg-gradient-to-br dark:from-slate-950 dark:to-slate-900">
               <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Revenue — Last 30 Days</p>
               <p className="mt-1 text-3xl font-bold text-teal-700">₹{stats.value30d.toLocaleString("en-IN")}</p>
             </article>
@@ -708,7 +721,7 @@ export function DashboardPage() {
 
           {/* Row 3 — QR card */}
           {storeUrl && isStoreApproved && (
-            <article className="rounded-2xl border border-white/70 bg-white/90 p-4 shadow-card">
+            <article className="rounded-2xl border border-white/70 bg-gradient-to-br from-white via-emerald-50/60 to-sky-50/70 p-4 shadow-card dark:border-teal-900/35 dark:bg-gradient-to-br dark:from-slate-950 dark:to-slate-900">
               <div className="flex flex-col sm:flex-row items-center gap-5">
                 {/* QR */}
                 <div className="relative shrink-0">
@@ -742,20 +755,20 @@ export function DashboardPage() {
                     <button
                       type="button"
                       onClick={() => void shareStoreLink()}
-                      className="rounded-xl bg-teal-600 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-500 transition"
-                    >📤 Share Store</button>
+                      className="inline-flex items-center gap-2 rounded-xl bg-teal-600 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-500 transition"
+                    ><AppIcon name="share" className="text-[11px]" /> Share Store</button>
                     <button
                       type="button"
                       onClick={downloadStoreQrCode}
-                      className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition"
-                    >⬇ Download QR</button>
+                      className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-sky-500 to-cyan-600 px-4 py-2 text-sm font-semibold text-white hover:from-sky-400 hover:to-cyan-500 transition"
+                    ><AppIcon name="download" className="text-[11px]" /> Download QR</button>
                   </div>
                 </div>
               </div>
             </article>
           )}
           {!isStoreApproved && (
-            <article className="rounded-2xl border border-white/70 bg-white/90 p-4 shadow-card">
+            <article className="rounded-2xl border border-white/70 bg-white/90 p-4 shadow-card dark:border-teal-900/35 dark:bg-gradient-to-br dark:from-slate-950 dark:to-slate-900">
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Store Publishing</p>
               <h3 className="mt-1 text-lg font-bold text-slate-900">
                 {isStoreDraft ? "Publish your store when you're ready" : isPublishPending ? "Your store is waiting for admin approval" : "Your store needs approval before it can open"}
@@ -776,7 +789,7 @@ export function DashboardPage() {
       {tab === "store" && (
         <div className="grid gap-6 lg:grid-cols-2">
           {/* Branding */}
-          <article className="rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card space-y-4">
+          <article className="rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card space-y-4 dark:border-teal-900/35 dark:bg-gradient-to-br dark:from-slate-950 dark:to-slate-900">
             <h2 className="font-heading text-xl font-bold text-slate-900">Branding & Contact</h2>
             <label className="block space-y-1">
               <span className="text-sm font-semibold text-slate-700">Business Logo URL</span>
@@ -873,7 +886,7 @@ export function DashboardPage() {
                 <div key={i} className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2 text-sm">
                   <span className="font-semibold text-slate-700 w-24 shrink-0">{s.platform}</span>
                   <span className="flex-1 text-slate-500 truncate">{s.url}</span>
-                  <button onClick={() => setSocialLinks(prev => prev.filter((_, j) => j !== i))} className="text-rose-600 text-xs font-semibold px-2 py-1 rounded-lg border border-rose-200 bg-rose-50">✕</button>
+                  <button onClick={() => setSocialLinks(prev => prev.filter((_, j) => j !== i))} className="inline-flex items-center justify-center rounded-lg bg-rose-600 px-2 py-1 text-xs font-semibold text-white"><AppIcon name="close" className="text-[8px]" /></button>
                 </div>
               ))}
               <div className="flex gap-2">
@@ -883,14 +896,14 @@ export function DashboardPage() {
                 <input className="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-slate-400" placeholder="https://..." value={newSocialUrl} onChange={e => setNewSocialUrl(e.target.value)} />
                 <button
                   onClick={() => { if (newSocialUrl.trim()) { setSocialLinks(prev => [...prev, { platform: newSocialPlatform, url: newSocialUrl.trim() }]); setNewSocialUrl(""); } }}
-                  className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-700 transition"
+                  className="rounded-lg bg-gradient-to-r from-emerald-500 to-teal-600 px-3 py-2 text-sm font-semibold text-white hover:from-emerald-400 hover:to-teal-500 transition"
                 >Add</button>
               </div>
             </div>
           </article>
 
           {/* Banners — max 5 */}
-          <article className="rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card space-y-3">
+          <article className="rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card space-y-3 dark:border-teal-900/35 dark:bg-gradient-to-br dark:from-slate-950 dark:to-slate-900">
             <div className="flex items-center justify-between">
               <h2 className="font-heading text-xl font-bold text-slate-900">Store Banners</h2>
               <span className={`rounded-full px-3 py-1 text-xs font-bold border ${
@@ -926,7 +939,7 @@ export function DashboardPage() {
                       setNewBannerUrl(""); setNewBannerTitle("");
                     }
                   }}
-                  className="w-full rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-700 transition"
+                  className="w-full rounded-lg bg-gradient-to-r from-emerald-500 to-teal-600 px-3 py-2 text-sm font-semibold text-white hover:from-emerald-400 hover:to-teal-500 transition"
                 >+ Add Banner</button>
               </div>
             ) : (
@@ -951,7 +964,7 @@ export function DashboardPage() {
       {tab === "products" && (
         <div className="grid gap-6 lg:grid-cols-2 lg:items-stretch">
           {/* Add / Edit product form */}
-          <article className="rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card">
+          <article className="rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card dark:border-teal-900/35 dark:bg-gradient-to-br dark:from-slate-950 dark:to-slate-900">
             <div className="flex items-center justify-between gap-2">
               <h2 className="font-heading text-xl font-bold text-slate-900">
                 {editingProduct ? "✏️ Edit Product" : "Add New Product"}
@@ -962,7 +975,7 @@ export function DashboardPage() {
                   onClick={handleCancelEdit}
                   className="rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition"
                 >
-                  ✕ Cancel Edit
+                  <AppIcon name="close" className="text-[9px]" /> Cancel Edit
                 </button>
               )}
             </div>
@@ -1167,7 +1180,7 @@ export function DashboardPage() {
                   <p className="text-xs text-slate-500 mt-0.5">Each variant has a value, unit of measure (UOM) and price.</p>
                 </div>
                 {productForm.variants.length > 0 && (
-                  <div className="grid grid-cols-[1fr_80px_100px_32px] gap-1.5 px-1">
+                  <div className="hidden grid-cols-[1fr_80px_100px_32px] gap-1.5 px-1 sm:grid">
                     <span className="text-xs font-semibold text-slate-500">Value</span>
                     <span className="text-xs font-semibold text-slate-500">UOM</span>
                     <span className="text-xs font-semibold text-slate-500">Price (₹)</span>
@@ -1175,7 +1188,7 @@ export function DashboardPage() {
                   </div>
                 )}
                 {productForm.variants.map((v, i) => (
-                  <div key={i} className="grid grid-cols-[1fr_80px_100px_32px] gap-1.5 items-center">
+                  <div key={i} className="grid gap-2 rounded-xl border border-slate-200 bg-white p-3 sm:grid-cols-[1fr_80px_100px_32px] sm:items-center sm:gap-1.5 sm:rounded-none sm:border-0 sm:bg-transparent sm:p-0">
                     <input
                       className="rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm outline-none focus:border-slate-400"
                       placeholder="e.g. 500"
@@ -1198,8 +1211,8 @@ export function DashboardPage() {
                     <button
                       type="button"
                       onClick={() => setProductForm(p => ({ ...p, variants: p.variants.filter((_, j) => j !== i) }))}
-                      className="flex h-8 w-8 items-center justify-center rounded-lg border border-rose-200 bg-rose-50 text-rose-600 text-sm hover:bg-rose-100 transition"
-                    >✕</button>
+                      className="flex h-8 w-full items-center justify-center rounded-lg border border-rose-200 bg-rose-50 text-rose-600 text-sm hover:bg-rose-100 transition sm:w-8"
+                    ><AppIcon name="close" className="text-[9px]" /></button>
                   </div>
                 ))}
                 <button
@@ -1214,7 +1227,7 @@ export function DashboardPage() {
                   className={`w-full rounded-xl px-4 py-2.5 text-sm font-semibold text-white transition disabled:opacity-50 ${editingProduct ? "bg-amber-600 hover:bg-amber-500" : "bg-teal-600 hover:bg-teal-500"}`}>
                   {isSubmittingProduct
                     ? (editingProduct ? "Saving…" : "Saving...")
-                    : editingProduct ? "💾 Update Product" : "➕ Add Product"}
+                    : editingProduct ? <><AppIcon name="edit" className="text-[10px]" /> Update Product</> : <><AppIcon name="products" className="text-[10px]" /> Add Product</>}
                 </button>
               </div>
             </form>
@@ -1222,7 +1235,7 @@ export function DashboardPage() {
 
           {/* Product catalog */}
           <div className="h-full">
-          <article className="h-full flex flex-col rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card">
+          <article className="h-full flex flex-col rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card dark:border-teal-900/35 dark:bg-gradient-to-br dark:from-slate-950 dark:to-slate-900">
             {/* Catalog header + search */}
             <div className="flex items-center justify-between gap-2 mb-3">
               <h2 className="font-heading text-xl font-bold text-slate-900">Product Catalog</h2>
@@ -1230,8 +1243,8 @@ export function DashboardPage() {
             </div>
             {/* Search bar with filter icon */}
             <div className="relative">
-              <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-                <span className="text-slate-400 text-sm">🔍</span>
+              <div className="flex items-center gap-2 rounded-xl border border-emerald-100 bg-emerald-50/70 px-3 py-2 dark:border-slate-700 dark:bg-slate-900/75">
+                <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 dark:from-teal-500 dark:to-sky-500"><AppIcon name="search" className="text-[10px]" /></span>
                 <input
                   className="flex-1 bg-transparent text-sm outline-none placeholder:text-slate-400"
                   placeholder="Search products…"
@@ -1245,7 +1258,7 @@ export function DashboardPage() {
                     className="flex items-center gap-1 rounded-full border border-teal-200 bg-teal-50 px-2 py-0.5 text-xs font-semibold text-teal-700 hover:bg-teal-100 transition"
                   >
                     <span className="max-w-[80px] truncate">{catalogCategory}</span>
-                    <span>✕</span>
+                    <AppIcon name="close" className="text-[8px]" />
                   </button>
                 )}
                 <button
@@ -1254,18 +1267,16 @@ export function DashboardPage() {
                   className={`flex h-7 w-7 items-center justify-center rounded-lg border transition ${
                     catalogCategory
                       ? "border-teal-300 bg-teal-100 text-teal-700"
-                      : "border-slate-200 bg-white text-slate-400 hover:border-slate-300 hover:text-slate-600"
+                      : "border-emerald-100 bg-white text-slate-400 hover:border-emerald-200 hover:text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400"
                   }`}
                   title="Filter by category"
                 >
-                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M2 4h12M4 8h8M6 12h4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
-                  </svg>
+                  <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-br from-sky-500 to-cyan-600 dark:from-cyan-500 dark:to-blue-500"><AppIcon name="filter" className="text-[10px]" /></span>
                 </button>
               </div>
               {/* Filter dropdown */}
               {showFilterDropdown && categories.length > 0 && (
-                <div className="absolute right-0 z-30 mt-1 w-48 rounded-xl border border-slate-200 bg-white shadow-lg overflow-hidden">
+                <div className="absolute right-0 z-30 mt-1 w-48 rounded-xl border border-slate-200 bg-white shadow-lg overflow-hidden dark:border-teal-900/40 dark:bg-slate-950">
                   <p className="px-3 pt-2.5 pb-1 text-xs font-bold uppercase tracking-wider text-slate-400">Filter by Category</p>
                   <ul className="max-h-52 overflow-y-auto py-1">
                     {categories.map(c => (
@@ -1310,7 +1321,7 @@ export function DashboardPage() {
                   return matchSearch && matchCat;
                 })
                 .map(prod => (
-                <div key={prod._id} className={`rounded-2xl border p-3 ${prod.isActive ? "border-slate-200 bg-slate-50" : "border-slate-100 bg-slate-100 opacity-60"}`}>
+                <div key={prod._id} className={`rounded-2xl border p-3 ${prod.isActive ? "border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-900/70" : "border-slate-100 bg-slate-100 opacity-60 dark:border-slate-800 dark:bg-slate-950/70"}`}>
                   <div className="flex items-start gap-2">
                     {getProductImages(prod)[0] && <img src={getProductImages(prod)[0]} alt="" className="h-12 w-12 rounded-lg object-cover" />}
                     <div className="flex-1 min-w-0">
@@ -1330,7 +1341,7 @@ export function DashboardPage() {
                             variant.options.map(option => {
                               const variantPrice = prod.variantPrices?.[getVariantPriceKey(variant.label, option)];
                               return (
-                                <span key={option} className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs text-slate-600">
+                                <span key={option} className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
                                   {option}{variantPrice ? ` · ₹${variantPrice}` : ""}
                                 </span>
                               );
@@ -1350,7 +1361,7 @@ export function DashboardPage() {
                       {prod.isActive ? "Deactivate" : "Activate"}
                     </button>
                     <button onClick={() => handleDeleteProduct(prod._id)}
-                      className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700">Delete</button>
+                      className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700"><AppIcon name="trash" className="text-[10px]" /> Delete</button>
                   </div>
                 </div>
               ))}
@@ -1369,7 +1380,7 @@ export function DashboardPage() {
 
       {/* ═══════════════════════════════════════ TAB: ORDERS ══ */}
       {tab === "orders" && (
-        <article className="rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card">
+        <article className="rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card dark:border-teal-900/35 dark:bg-gradient-to-br dark:from-slate-950 dark:to-slate-900">
           {/* Header */}
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h2 className="font-heading text-xl font-bold text-slate-900">Orders</h2>
@@ -1386,22 +1397,22 @@ export function DashboardPage() {
 
           {/* Search + filter bar */}
           <div className="relative mt-4">
-            <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-              <span className="text-slate-400 text-sm">🔍</span>
+            <div className="flex items-center gap-2 rounded-xl border border-emerald-100 bg-emerald-50/70 px-3 py-2 dark:border-slate-700 dark:bg-slate-900/75">
+              <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 dark:from-teal-500 dark:to-sky-500"><AppIcon name="search" className="text-[10px]" /></span>
               <input className="flex-1 bg-transparent text-sm outline-none placeholder:text-slate-400" placeholder="Search by customer, product or category…" value={orderSearch} onChange={e => setOrderSearch(e.target.value)} />
               {(orderStatusFilter || orderCategoryFilter) && (
                 <button type="button" onClick={() => { setOrderStatusFilter(""); setOrderCategoryFilter(""); }}
                   className="flex items-center gap-1 rounded-full border border-teal-200 bg-teal-50 px-2 py-0.5 text-xs font-semibold text-teal-700 hover:bg-teal-100 transition">
-                  {[orderStatusFilter && STATUS_LABEL[orderStatusFilter as OrderStatus], orderCategoryFilter].filter(Boolean).join(" · ")} <span>✕</span>
+                  {[orderStatusFilter && STATUS_LABEL[orderStatusFilter as OrderStatus], orderCategoryFilter].filter(Boolean).join(" ? ")} <AppIcon name="close" className="text-[8px]" />
                 </button>
               )}
               <button type="button" onClick={() => setShowOrderFilter(v => !v)}
-                className={`flex h-7 w-7 items-center justify-center rounded-lg border transition ${ (orderStatusFilter || orderCategoryFilter) ? "border-teal-300 bg-teal-100 text-teal-700" : "border-slate-200 bg-white text-slate-400 hover:text-slate-600"}`}>
-                <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2 4h12M4 8h8M6 12h4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></svg>
+                className={`flex h-7 w-7 items-center justify-center rounded-lg border transition ${ (orderStatusFilter || orderCategoryFilter) ? "border-teal-300 bg-teal-100 text-teal-700 dark:border-teal-700 dark:bg-teal-900/50 dark:text-teal-300" : "border-emerald-100 bg-white text-slate-400 hover:text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400"}`}>
+                <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-br from-sky-500 to-cyan-600 dark:from-cyan-500 dark:to-blue-500"><AppIcon name="filter" className="text-[10px]" /></span>
               </button>
             </div>
             {showOrderFilter && (
-              <div className="absolute right-0 z-30 mt-1 w-56 rounded-xl border border-slate-200 bg-white shadow-lg overflow-hidden">
+              <div className="absolute right-0 z-30 mt-1 w-56 rounded-xl border border-slate-200 bg-white shadow-lg overflow-hidden dark:border-teal-900/40 dark:bg-slate-950">
                 <p className="px-3 pt-2.5 pb-1 text-xs font-bold uppercase tracking-wider text-slate-400">Status</p>
                 <ul className="py-1 border-b border-slate-100">
                   {ORDER_STATUSES.map(s => (
@@ -1453,7 +1464,7 @@ export function DashboardPage() {
                         <div>
                           <p className="font-semibold text-slate-800">{order.customerName}</p>
                           <p className="text-xs text-slate-500">{order.customerPhone}</p>
-                          {order.deliveryAddress && <p className="mt-0.5 text-xs text-slate-400">📍 {order.deliveryAddress}</p>}
+                          {order.deliveryAddress && <p className="mt-0.5 flex items-center gap-1.5 text-xs text-slate-400"><span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 dark:from-teal-500 dark:to-sky-500"><AppIcon name="location" className="text-[8px]" /></span>{order.deliveryAddress}</p>}
                         </div>
                         <span className={`flex items-center gap-1.5 rounded-full border px-2 py-1 text-xs font-semibold ${statusClasses[order.paymentStatus]}`}>
                           <span className={`h-1.5 w-1.5 rounded-full ${STATUS_DOT[order.paymentStatus]}`} />{STATUS_LABEL[order.paymentStatus]}
@@ -1485,7 +1496,7 @@ export function DashboardPage() {
                           <td className="py-3 pr-4">
                             <p className="font-semibold text-slate-800 whitespace-nowrap">{order.customerName}</p>
                             <p className="text-xs text-slate-500">{order.customerPhone}</p>
-                            {order.deliveryAddress && <p className="text-xs text-slate-400 max-w-[160px] truncate" title={order.deliveryAddress}>📍 {order.deliveryAddress}</p>}
+                            {order.deliveryAddress && <p className="flex items-center gap-1.5 text-xs text-slate-400 max-w-[160px] truncate" title={order.deliveryAddress}><span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 dark:from-teal-500 dark:to-sky-500"><AppIcon name="location" className="text-[8px]" /></span>{order.deliveryAddress}</p>}
                           </td>
                           <td className="py-3 pr-4">
                             <p className="text-slate-700 whitespace-nowrap">{order.product?.title||"—"}</p>
@@ -1503,7 +1514,7 @@ export function DashboardPage() {
                             </select>
                           </td>
                           <td className="py-3">
-                            <button onClick={() => setViewingOrder(order)} className="rounded-lg border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition whitespace-nowrap">👁 View</button>
+                            <button onClick={() => setViewingOrder(order)} className="inline-flex items-center gap-2 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-600 px-3 py-1 text-xs font-semibold text-white hover:from-emerald-400 hover:to-teal-500 transition whitespace-nowrap"><AppIcon name="orders" className="text-[9px]" /> View</button>
                           </td>
                         </tr>
                       ))}
@@ -1520,8 +1531,8 @@ export function DashboardPage() {
       {/* ── Order detail modal ── */}
       {viewingOrder && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={() => setViewingOrder(null)}>
-          <div className="relative w-full max-w-lg rounded-3xl border border-white/70 bg-white shadow-2xl overflow-hidden" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-6 py-4">
+          <div className="relative w-full max-w-lg rounded-3xl border border-white/70 bg-white shadow-2xl overflow-hidden dark:border-teal-900/40 dark:bg-gradient-to-b dark:from-slate-950 dark:to-slate-900" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-6 py-4 dark:border-teal-900/30">
               <div>
                 <h3 className="font-heading text-lg font-bold text-slate-900">Order Details</h3>
                 <p className="text-xs text-slate-400">#{viewingOrder._id.slice(-8).toUpperCase()}</p>
@@ -1530,29 +1541,29 @@ export function DashboardPage() {
                 <span className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold ${statusClasses[viewingOrder.paymentStatus]}`}>
                   <span className={`h-1.5 w-1.5 rounded-full ${STATUS_DOT[viewingOrder.paymentStatus]}`} />{STATUS_LABEL[viewingOrder.paymentStatus]}
                 </span>
-                <button onClick={() => setViewingOrder(null)} className="rounded-xl border border-slate-200 p-1.5 text-slate-400 hover:text-slate-700 transition">✕</button>
+                <button onClick={() => setViewingOrder(null)} className="flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 transition hover:from-emerald-400 hover:to-teal-500 dark:from-teal-500 dark:to-sky-500"><AppIcon name="close" className="text-[10px]" /></button>
               </div>
             </div>
-            <div className="overflow-y-auto max-h-[65vh] px-6 py-4 space-y-4">
-              <div className="grid grid-cols-2 gap-3">
-                <div className="rounded-xl bg-slate-50 p-3">
+            <div className="overflow-y-auto max-h-[70vh] px-4 py-4 space-y-4 sm:px-6">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-900/80">
                   <p className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">Customer</p>
                   <p className="font-semibold text-slate-800">{viewingOrder.customerName}</p>
                   <p className="text-sm text-slate-600">{viewingOrder.customerPhone}</p>
                 </div>
-                <div className="rounded-xl bg-slate-50 p-3">
+                <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-900/80">
                   <p className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">Order Date</p>
                   <p className="text-sm text-slate-700">{new Date(viewingOrder.createdAt).toLocaleDateString("en-IN",{day:"numeric",month:"short",year:"numeric"})}</p>
                   <p className="text-xs text-slate-400">{new Date(viewingOrder.createdAt).toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"})}</p>
                 </div>
               </div>
               {viewingOrder.deliveryAddress && (
-                <div className="rounded-xl bg-slate-50 p-3">
-                  <p className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">📍 Delivery Address</p>
+                <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-900/80">
+                  <p className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-400 mb-1"><span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 dark:from-teal-500 dark:to-sky-500"><AppIcon name="location" className="text-[8px]" /></span>Delivery Address</p>
                   <p className="text-sm text-slate-700">{viewingOrder.deliveryAddress}</p>
                 </div>
               )}
-              <div className="rounded-xl bg-slate-50 p-3">
+              <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-900/80">
                 <p className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">Product</p>
                 <p className="font-semibold text-slate-800">{viewingOrder.product?.title||"—"}</p>
                 {viewingOrder.product?.category && <span className="inline-block mt-1 rounded-full border border-teal-200 bg-teal-50 px-2 py-0.5 text-xs font-semibold text-teal-700">{viewingOrder.product.category}</span>}
@@ -1571,12 +1582,12 @@ export function DashboardPage() {
                   <span className="text-sm font-bold text-teal-700">₹{viewingOrder.amount+(viewingOrder.deliveryCharge||0)}</span>
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="rounded-xl bg-slate-50 p-3">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-900/80">
                   <p className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">Payment Method</p>
                   <p className="text-sm font-semibold text-slate-700 capitalize">{viewingOrder.paymentMethod||"—"}</p>
                 </div>
-                <div className="rounded-xl bg-slate-50 p-3">
+                <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-900/80">
                   <p className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">Payment Proof</p>
                   {viewingOrder.paymentScreenshotUrl
                     ?<a href={viewingOrder.paymentScreenshotUrl} target="_blank" rel="noreferrer" className="text-sm font-semibold text-teal-700 underline">View Screenshot</a>
@@ -1590,8 +1601,8 @@ export function DashboardPage() {
                 </div>
               )}
             </div>
-            <div className="border-t border-slate-100 px-6 py-3 flex gap-2">
-              <select className="flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none"
+            <div className="flex flex-col gap-2 border-t border-slate-100 px-4 py-3 dark:border-teal-900/30 sm:flex-row sm:px-6">
+              <select className="flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
                 value={viewingOrder.paymentStatus}
                 onChange={e => { handleOrderStatus(viewingOrder._id, e.target.value as OrderStatus); setViewingOrder(o => o?{...o,paymentStatus:e.target.value as OrderStatus}:o); }}>
                 {ORDER_STATUSES.map(s => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
@@ -1600,11 +1611,11 @@ export function DashboardPage() {
                 onClick={() => {
                   const o = viewingOrder;
                   const w = window.open("","_blank"); if(!w) return;
-                  w.document.write(`<html><head><title>Order #${o._id.slice(-8).toUpperCase()}</title><style>body{font-family:sans-serif;padding:24px;color:#0f172a}h1{font-size:20px}h2{font-size:15px;margin-top:18px}table{width:100%;border-collapse:collapse;margin-top:12px}td,th{border:1px solid #e2e8f0;padding:8px 12px;text-align:left}th{background:#f8fafc;font-size:11px;text-transform:uppercase}</style></head><body><h1>Order #${o._id.slice(-8).toUpperCase()}</h1><p><b>Date:</b> ${new Date(o.createdAt).toLocaleString("en-IN")}</p><p><b>Status:</b> ${STATUS_LABEL[o.paymentStatus]}</p><h2>Customer</h2><p>${o.customerName} &middot; ${o.customerPhone}</p>${o.deliveryAddress?`<p>📍 ${o.deliveryAddress}</p>`:""}<h2>Product</h2><p>${o.product?.title||"—"} ${o.product?.category?`(${o.product.category})`:""}</p><table><tr><th>Qty</th><th>Items</th><th>Delivery</th><th>Grand Total</th></tr><tr><td>${o.quantity}</td><td>₹${o.amount}</td><td>₹${o.deliveryCharge||0}</td><td><b>₹${o.amount+(o.deliveryCharge||0)}</b></td></tr></table><p style="margin-top:14px"><b>Payment:</b> ${o.paymentMethod||"—"}</p>${o.note?`<p><b>Note:</b> ${o.note}</p>`:""}<script>window.onload=()=>window.print()<\/script></body></html>`);
+                  w.document.write(`<html><head><title>Order #${o._id.slice(-8).toUpperCase()}</title><style>body{font-family:sans-serif;padding:24px;color:#0f172a}h1{font-size:20px}h2{font-size:15px;margin-top:18px}table{width:100%;border-collapse:collapse;margin-top:12px}td,th{border:1px solid #e2e8f0;padding:8px 12px;text-align:left}th{background:#f8fafc;font-size:11px;text-transform:uppercase}</style></head><body><h1>Order #${o._id.slice(-8).toUpperCase()}</h1><p><b>Date:</b> ${new Date(o.createdAt).toLocaleString("en-IN")}</p><p><b>Status:</b> ${STATUS_LABEL[o.paymentStatus]}</p><h2>Customer</h2><p>${o.customerName} &middot; ${o.customerPhone}</p>${o.deliveryAddress?`<p>${o.deliveryAddress}</p>`:""}<h2>Product</h2><p>${o.product?.title||"?"} ${o.product?.category?`(${o.product.category})`:""}</p><table><tr><th>Qty</th><th>Items</th><th>Delivery</th><th>Grand Total</th></tr><tr><td>${o.quantity}</td><td>?${o.amount}</td><td>?${o.deliveryCharge||0}</td><td><b>?${o.amount+(o.deliveryCharge||0)}</b></td></tr></table><p style="margin-top:14px"><b>Payment:</b> ${o.paymentMethod||"?"}</p>${o.note?`<p><b>Note:</b> ${o.note}</p>`:""}<script>window.onload=()=>window.print()<\/script></body></html>`);
                   w.document.close();
                 }}
-                className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition whitespace-nowrap"
-              >🖨 Print / PDF</button>
+                className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800 sm:w-auto sm:whitespace-nowrap"
+              ><AppIcon name="orders" className="text-[10px]" /> Print / PDF</button>
             </div>
           </div>
         </div>
@@ -1614,28 +1625,28 @@ export function DashboardPage() {
       {/* ══════════════════════════════════════ TAB: REPORTS ══ */}
       {tab === "reports" && (
         <div className="space-y-4">
-          <article className="rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card">
+          <article className="rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card dark:border-teal-900/35 dark:bg-gradient-to-br dark:from-slate-950 dark:to-slate-900">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <h2 className="font-heading text-xl font-bold text-slate-900">Sales Report</h2>
               <div className="flex gap-2">
                 {[7, 30].map(d => (
                   <button key={d} onClick={() => setReportDays(d)}
-                    className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${reportDays === d ? "bg-slate-900 text-white" : "border border-slate-200 bg-white text-slate-600 hover:border-slate-400"}`}>
+                    className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${reportDays === d ? "bg-gradient-to-r from-emerald-500 via-teal-500 to-sky-500 text-white shadow-md" : "border border-slate-200 bg-white text-slate-600 hover:border-slate-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-teal-700"}`}>
                     {d === 7 ? "7 Days" : "30 Days"}
                   </button>
                 ))}
-                <button onClick={handleExport} className="rounded-xl border border-teal-200 bg-teal-50 px-4 py-2 text-sm font-semibold text-teal-700 hover:bg-teal-100 transition">⬇ Export CSV</button>
+                <button onClick={handleExport} className="inline-flex items-center gap-2 rounded-xl bg-teal-600 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-500 transition"><AppIcon name="download" className="text-[10px]" />Export CSV</button>
               </div>
             </div>
             {loadingReport && <p className="mt-4 text-sm text-slate-500">Loading report...</p>}
             {report && !loadingReport && (
               <>
                 <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900/80">
                     <p className="text-xs uppercase tracking-wide text-slate-500">Orders ({reportDays}d)</p>
                     <p className="mt-1 text-3xl font-bold text-slate-900">{report.totalOrders}</p>
                   </div>
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900/80">
                     <p className="text-xs uppercase tracking-wide text-slate-500">Revenue ({reportDays}d)</p>
                     <p className="mt-1 text-3xl font-bold text-teal-700">₹{report.totalRevenue.toLocaleString("en-IN")}</p>
                   </div>
@@ -1644,7 +1655,7 @@ export function DashboardPage() {
                 {report.topProducts.length === 0 && <p className="mt-2 text-sm text-slate-500">No sales data for this period.</p>}
                 <div className="mt-2 space-y-2">
                   {report.topProducts.map((p, i) => (
-                    <div key={i} className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    <div key={i} className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-700 dark:bg-slate-900/80">
                       <div className="flex items-center gap-3">
                         <span className="text-lg font-bold text-slate-300">#{i + 1}</span>
                         <p className="font-semibold text-slate-800">{p.title}</p>
@@ -1679,7 +1690,7 @@ export function DashboardPage() {
 
           <form onSubmit={handleProfileSave} className="space-y-5">
             {/* Business Identity */}
-            <article className="rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card">
+            <article className="rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card dark:border-teal-900/35 dark:bg-gradient-to-br dark:from-slate-950 dark:to-slate-900">
               <h3 className="font-heading text-base font-bold text-slate-800 mb-4 flex items-center gap-2">
                 <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-teal-50 text-teal-600 text-sm">🏢</span>
                 Business Identity
@@ -1714,9 +1725,9 @@ export function DashboardPage() {
             </article>
 
             {/* Contact Details */}
-            <article className="rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card">
+            <article className="rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card dark:border-teal-900/35 dark:bg-gradient-to-br dark:from-slate-950 dark:to-slate-900">
               <h3 className="font-heading text-base font-bold text-slate-800 mb-4 flex items-center gap-2">
-                <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-sky-50 text-sky-600 text-sm">📞</span>
+                <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-sky-600"><AppIcon name="phone" className="text-[10px]" /></span>
                 Contact Details
               </h3>
               <div className="grid gap-3 sm:grid-cols-2">
@@ -1743,9 +1754,9 @@ export function DashboardPage() {
             </article>
 
             {/* Business Address */}
-            <article className="rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card">
+            <article className="rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card dark:border-teal-900/35 dark:bg-gradient-to-br dark:from-slate-950 dark:to-slate-900">
               <h3 className="font-heading text-base font-bold text-slate-800 mb-4 flex items-center gap-2">
-                <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-violet-50 text-violet-600 text-sm">📍</span>
+                <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-violet-600"><AppIcon name="location" className="text-[10px]" /></span>
                 Business Address
               </h3>
               <div className="grid gap-3 sm:grid-cols-2">
@@ -1777,7 +1788,7 @@ export function DashboardPage() {
             </article>
 
             {/* KYC Documents */}
-            <article className="rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card">
+            <article className="rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card dark:border-teal-900/35 dark:bg-gradient-to-br dark:from-slate-950 dark:to-slate-900">
               <h3 className="font-heading text-base font-bold text-slate-800 mb-1 flex items-center gap-2">
                 <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-amber-50 text-amber-600 text-sm">🪺</span>
                 KYC Documents
@@ -1808,7 +1819,7 @@ export function DashboardPage() {
             </article>
 
             <button type="submit" disabled={isSavingProfile}
-              className="w-full rounded-xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:bg-slate-400 shadow-sm">
+              className="w-full rounded-xl bg-gradient-to-r from-emerald-500 via-teal-500 to-sky-500 px-4 py-3 text-sm font-semibold text-white transition hover:from-emerald-400 hover:via-teal-400 hover:to-sky-400 disabled:from-slate-300 disabled:via-slate-300 disabled:to-slate-300 shadow-sm">
               {isSavingProfile ? "Saving…" : "💾 Save Profile"}
             </button>
           </form>
@@ -1819,7 +1830,7 @@ export function DashboardPage() {
 
       {/* ═════════════════════════════════════ TAB: POLICIES ══ */}
       {tab === "policies" && (
-        <article className="mx-auto max-w-4xl rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card">
+        <article className="mx-auto max-w-4xl rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card dark:border-teal-900/35 dark:bg-gradient-to-br dark:from-slate-950 dark:to-slate-900">
           <h2 className="font-heading text-xl font-bold text-slate-900">Store Policies</h2>
           <p className="mt-1 text-sm text-slate-500">
             These policy pages are shown to customers in your public store. You can keep the default text or customize it for your business.
@@ -1852,7 +1863,7 @@ export function DashboardPage() {
             <button
               type="submit"
               disabled={isSavingPolicies}
-              className="w-full rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:bg-slate-400"
+              className="w-full rounded-xl bg-gradient-to-r from-emerald-500 via-teal-500 to-sky-500 px-4 py-2.5 text-sm font-semibold text-white transition hover:from-emerald-400 hover:via-teal-400 hover:to-sky-400 disabled:from-slate-300 disabled:via-slate-300 disabled:to-slate-300"
             >
               {isSavingPolicies ? "Saving..." : "Save Policies"}
             </button>
