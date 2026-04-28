@@ -74,6 +74,77 @@ function normalizeVariantQuantities(input) {
   }, {});
 }
 
+function normalizeVariantItems(input) {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+
+  return input.reduce((acc, item, index) => {
+    const variantId = String(item?.variantId || "").trim() || `variant-${index + 1}`;
+    const title = String(item?.title || "").trim();
+    const attributesInput =
+      item?.attributes && typeof item.attributes === "object" && !Array.isArray(item.attributes)
+        ? item.attributes
+        : {};
+    const attributes = Object.entries(attributesInput).reduce((next, [key, value]) => {
+      const cleanKey = String(key || "").trim();
+      const cleanValue = String(value || "").trim();
+      if (cleanKey && cleanValue) {
+        next[cleanKey] = cleanValue;
+      }
+      return next;
+    }, {});
+    const price = Number(item?.price);
+    const mrp = Number(item?.mrp);
+    const stockQuantity = Number(item?.stockQuantity);
+
+    if (!variantId || !Number.isFinite(price) || price < 0) {
+      return acc;
+    }
+
+    acc.push({
+      variantId,
+      title,
+      attributes,
+      price,
+      mrp: Number.isFinite(mrp) && mrp >= 0 ? mrp : 0,
+      stockQuantity:
+        Number.isFinite(stockQuantity) && stockQuantity >= 0
+          ? Math.floor(stockQuantity)
+          : 0,
+      isActive: item?.isActive !== false,
+    });
+    return acc;
+  }, []);
+}
+
+function deriveVariantItemsFromLegacy(variants, variantPrices, variantMrps, variantQuantities) {
+  const parsedVariants = Array.isArray(variants) ? variants : [];
+  const items = [];
+
+  for (const variant of parsedVariants) {
+    const label = String(variant?.label || "").trim();
+    for (const optionValue of variant?.options || []) {
+      const option = String(optionValue || "").trim();
+      if (!label || !option) continue;
+
+      const key = `${label}::${option}`;
+      const price = Number(variantPrices[key]);
+      items.push({
+        variantId: `legacy:${key}`,
+        title: option,
+        attributes: { [label]: option },
+        price: Number.isFinite(price) && price >= 0 ? price : 0,
+        mrp: Number(variantMrps[key]) || 0,
+        stockQuantity: Math.max(0, Math.floor(Number(variantQuantities[key]) || 0)),
+        isActive: true,
+      });
+    }
+  }
+
+  return items;
+}
+
 function normalizeImageUrls(imageUrls, fallbackImageUrl = "") {
   const list = Array.isArray(imageUrls) ? imageUrls : [];
   const cleaned = list
@@ -99,6 +170,7 @@ router.post("/", auth, async (req, res) => {
       mrp,
       category,
       variants,
+      variantItems,
       variantPrices,
       variantMrps,
       variantQuantities,
@@ -107,9 +179,21 @@ router.post("/", auth, async (req, res) => {
     const parsedVariants = Array.isArray(variants) ? variants : [];
     const normalizedVariantPrices = normalizeVariantPrices(variantPrices);
     const normalizedVariantMrps = normalizeVariantMrps(variantMrps);
+    const normalizedVariantQuantities = normalizeVariantQuantities(variantQuantities);
+    const normalizedVariantItems = normalizeVariantItems(variantItems);
+    const nextVariantItems =
+      normalizedVariantItems.length > 0
+        ? normalizedVariantItems
+        : deriveVariantItemsFromLegacy(
+            parsedVariants,
+            normalizedVariantPrices,
+            normalizedVariantMrps,
+            normalizedVariantQuantities
+          );
     const hasVariantOptions = parsedVariants.some(
       (variant) => Array.isArray(variant?.options) && variant.options.length > 0
     );
+    const hasExplicitVariantItems = nextVariantItems.length > 0;
     const hasBasePrice = Number.isFinite(Number(price)) && Number(price) > 0;
 
     if (!title) {
@@ -121,14 +205,14 @@ router.post("/", auth, async (req, res) => {
       return res.status(400).json({ message: "At least one product image is required." });
     }
 
-    if (!hasBasePrice && !hasVariantOptions) {
+    if (!hasBasePrice && !hasVariantOptions && !hasExplicitVariantItems) {
       return res.status(400).json({
         message:
           "Provide a base selling price or add variant options with prices.",
       });
     }
 
-    if (!hasBasePrice && Object.keys(normalizedVariantPrices).length === 0) {
+    if (!hasBasePrice && Object.keys(normalizedVariantPrices).length === 0 && !hasExplicitVariantItems) {
       return res.status(400).json({
         message: "At least one variant selling price is required.",
       });
@@ -172,9 +256,10 @@ router.post("/", auth, async (req, res) => {
       mrp: mrp ? Number(mrp) : 0,
       category: category ? String(category).trim() : "",
       variants: parsedVariants,
+      variantItems: nextVariantItems,
       variantPrices: normalizedVariantPrices,
       variantMrps: normalizedVariantMrps,
-      variantQuantities: normalizeVariantQuantities(variantQuantities),
+      variantQuantities: normalizedVariantQuantities,
     });
 
     // Ensure category is tracked in seller's categories list
@@ -273,6 +358,7 @@ router.put("/:productId", auth, async (req, res) => {
       mrp,
       category,
       variants,
+      variantItems,
       variantPrices,
       variantMrps,
       variantQuantities,
@@ -293,6 +379,16 @@ router.put("/:productId", auth, async (req, res) => {
         : (product.variantMrps instanceof Map
           ? Object.fromEntries(product.variantMrps.entries())
           : product.variantMrps || {});
+    const nextVariantQuantities =
+      variantQuantities !== undefined
+        ? normalizeVariantQuantities(variantQuantities)
+        : (product.variantQuantities instanceof Map
+          ? Object.fromEntries(product.variantQuantities.entries())
+          : product.variantQuantities || {});
+    const nextVariantItems =
+      variantItems !== undefined
+        ? normalizeVariantItems(variantItems)
+        : (Array.isArray(product.variantItems) ? product.variantItems : []);
 
     if (nextMrp > 0 && nextPrice > 0 && nextPrice >= nextMrp) {
       return res.status(400).json({
@@ -329,9 +425,29 @@ router.put("/:productId", auth, async (req, res) => {
     if (mrp !== undefined) product.mrp = Number(mrp);
     if (category !== undefined) product.category = String(category).trim();
     if (Array.isArray(variants)) product.variants = variants;
+    if (variantItems !== undefined) {
+      product.variantItems =
+        nextVariantItems.length > 0
+          ? nextVariantItems
+          : deriveVariantItemsFromLegacy(
+              Array.isArray(variants) ? variants : product.variants,
+              nextVariantPrices,
+              nextVariantMrps,
+              nextVariantQuantities
+            );
+    }
     if (variantPrices !== undefined) product.variantPrices = normalizeVariantPrices(variantPrices);
     if (variantMrps !== undefined) product.variantMrps = normalizeVariantMrps(variantMrps);
     if (variantQuantities !== undefined) product.variantQuantities = normalizeVariantQuantities(variantQuantities);
+
+    if (variantItems === undefined && (variantPrices !== undefined || variantMrps !== undefined || variantQuantities !== undefined || Array.isArray(variants))) {
+      product.variantItems = deriveVariantItemsFromLegacy(
+        Array.isArray(variants) ? variants : product.variants,
+        nextVariantPrices,
+        nextVariantMrps,
+        nextVariantQuantities
+      );
+    }
 
     await product.save();
 

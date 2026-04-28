@@ -13,9 +13,16 @@ import {
   type AddressParts,
   type PhoneParts,
 } from "../utils/contactFields";
-import type { PaymentMethod, Product, Seller } from "../types";
+import type { PaymentMethod, Product, Seller, VariantItem } from "../types";
 
-type CartItem = { quantity: number; variants: Record<string, string> };
+type CartItem = {
+  productId: string;
+  variantId: string;
+  variantTitle: string;
+  quantity: number;
+  variants: Record<string, string>;
+  unitPrice: number;
+};
 type CartMap = Record<string, CartItem>;
 type SavedCheckoutData = {
   customerName: string;
@@ -83,6 +90,71 @@ function getVariantPriceKey(label: string, option: string) {
   return `${label}::${option}`;
 }
 
+function buildLegacyVariantItems(product: Product): VariantItem[] {
+  const items: VariantItem[] = [];
+
+  for (const variant of product.variants || []) {
+    const label = String(variant?.label || "").trim();
+    for (const optionValue of variant.options || []) {
+      const option = String(optionValue || "").trim();
+      if (!label || !option) continue;
+      const priceKey = getVariantPriceKey(label, option);
+      items.push({
+        variantId: `legacy:${priceKey}`,
+        title: option,
+        attributes: { [label]: option },
+        price: product.variantPrices?.[priceKey] ?? product.price,
+        mrp: product.variantMrps?.[priceKey] ?? product.mrp,
+        stockQuantity: product.variantQuantities?.[priceKey] ?? 0,
+        isActive: true,
+      });
+    }
+  }
+
+  return items;
+}
+
+function getNormalizedVariantItems(product: Product): VariantItem[] {
+  if (Array.isArray(product.variantItems) && product.variantItems.length > 0) {
+    return product.variantItems.filter((item) => item.isActive !== false);
+  }
+  return buildLegacyVariantItems(product);
+}
+
+function findMatchingVariant(
+  product: Product,
+  selectedVariants: Record<string, string>,
+  variantId = "",
+) {
+  const normalizedVariantItems = getNormalizedVariantItems(product);
+  if (variantId) {
+    return normalizedVariantItems.find((item) => item.variantId === variantId) || null;
+  }
+  const entries = Object.entries(selectedVariants).filter(([, value]) => String(value || "").trim());
+  if (entries.length === 0) return null;
+  return (
+    normalizedVariantItems.find((item) =>
+      entries.every(([key, value]) => item.attributes?.[key] === value)
+    ) || null
+  );
+}
+
+function buildCartItemKey(productId: string, variantId = "") {
+  return `${productId}::${variantId || "base"}`;
+}
+
+function getVariantDisplayTitle(
+  product: Product,
+  variantId: string,
+  selectedVariants: Record<string, string>,
+) {
+  const matchedVariant = findMatchingVariant(product, selectedVariants, variantId);
+  if (matchedVariant?.title) return matchedVariant.title;
+  const values = Object.values(selectedVariants).filter(Boolean);
+  if (values.length > 0) return values.join(" / ");
+  return product.title;
+}
+
 function getNormalizedVariantGroups(product: Product) {
   const grouped = new Map<string, Set<string>>();
   for (const variant of product.variants || []) {
@@ -102,6 +174,14 @@ function getNormalizedVariantGroups(product: Product) {
 }
 
 function getProductUnitPricing(product: Product, selectedVariants: Record<string, string>) {
+  const matchedVariant = findMatchingVariant(product, selectedVariants);
+  if (matchedVariant) {
+    return {
+      price: matchedVariant.price,
+      mrp: matchedVariant.mrp || product.mrp,
+    };
+  }
+
   let selectedVariantMrp: number | undefined;
   for (const variant of getNormalizedVariantGroups(product)) {
     const option = selectedVariants[variant.label];
@@ -126,6 +206,11 @@ function getProductUnitPricing(product: Product, selectedVariants: Record<string
 }
 
 function getProductAvailableStock(product: Product, selectedVariants: Record<string, string>) {
+  const matchedVariant = findMatchingVariant(product, selectedVariants);
+  if (matchedVariant) {
+    return matchedVariant.stockQuantity;
+  }
+
   const quantityMap = product.variantQuantities || {};
   const stocks: number[] = [];
   for (const variant of getNormalizedVariantGroups(product)) {
@@ -323,19 +408,56 @@ export function PublicStorePage() {
     });
   }, [activeCategory, maxPriceFilter, products, searchQuery, sortBy]);
 
-  // Selected products from cart
-  const selectedItems = useMemo(() =>
-    products.filter(p => (cart[p._id]?.quantity || 0) > 0),
-    [products, cart]
+  const cartEntries = useMemo(
+    () =>
+      Object.entries(cart)
+        .map(([cartItemId, item]) => {
+          const product = products.find((candidate) => candidate._id === item.productId);
+          if (!product) return null;
+          const matchedVariant =
+            findMatchingVariant(product, item.variants, item.variantId) || null;
+          const unitPrice = matchedVariant?.price ?? item.unitPrice ?? product.price;
+          const variantTitle = getVariantDisplayTitle(product, item.variantId, item.variants);
+
+          return {
+            cartItemId,
+            product,
+            item: {
+              ...item,
+              unitPrice,
+              variantTitle,
+            },
+          };
+        })
+        .filter(
+          (entry): entry is {
+            cartItemId: string;
+            product: Product;
+            item: CartItem;
+          } => Boolean(entry)
+        ),
+    [cart, products]
   );
 
-  const itemsTotal = useMemo(() =>
-    selectedItems.reduce((s, p) => {
-      const quantity = cart[p._id]?.quantity || 1;
-      const unit = getProductUnitPricing(p, cart[p._id]?.variants || {});
-      return s + unit.price * quantity;
-    }, 0),
-    [cart, selectedItems]
+  const itemsTotal = useMemo(
+    () =>
+      cartEntries.reduce(
+        (sum, entry) => sum + entry!.item.unitPrice * entry!.item.quantity,
+        0
+      ),
+    [cartEntries]
+  );
+
+  const selectedItems = useMemo(
+    () =>
+      cartEntries.map((entry) => ({
+        ...entry!.product,
+        _id: entry!.cartItemId,
+        title: entry!.item.variantId
+          ? `${entry!.product.title} (${entry!.item.variantTitle})`
+          : entry!.product.title,
+      })),
+    [cartEntries]
   );
 
   const deliveryCharge = useMemo(() => {
@@ -405,18 +527,26 @@ export function PublicStorePage() {
     };
   }, [seller?.favicon]);
 
-  function getItem(productId: string): CartItem {
-    return cart[productId] || { quantity: 0, variants: {} };
+  function getBaseCartItem(productId: string): CartItem {
+    return (
+      cart[buildCartItemKey(productId)] || {
+        productId,
+        variantId: "",
+        variantTitle: "",
+        quantity: 0,
+        variants: {},
+        unitPrice: 0,
+      }
+    );
   }
 
   function addProduct(productId: string) {
     resetSavedProgress();
     setCart(prev => {
-      if (prev[productId]?.quantity) return prev;
       const product = products.find((p) => p._id === productId);
       if (!product) return prev;
 
-      const currentItem = prev[productId] || { quantity: 0, variants: {} };
+      const currentItem = getBaseCartItem(productId);
       const variants = withAutoSelectedSingleVariants(product, currentItem.variants);
       const requiresVariantSelection = (product.variants || []).some(v => (v.options || []).length > 0);
       const hasSelection = hasCompleteVariantSelection(product, variants);
@@ -433,24 +563,44 @@ export function PublicStorePage() {
         setCartFeedback(`${product.title} added to cart`);
         window.setTimeout(() => setCartFeedback(""), 1800);
       }
-      return { ...prev, [productId]: { quantity: 1, variants } };
+      const cartItemKey = buildCartItemKey(productId);
+      const existingItem = prev[cartItemKey];
+      const nextQuantity = (existingItem?.quantity || 0) + 1;
+      return {
+        ...prev,
+        [cartItemKey]: {
+          productId,
+          variantId: "",
+          variantTitle: product.title,
+          quantity: nextQuantity,
+          variants,
+          unitPrice: product.price,
+        },
+      };
     });
   }
 
-  function removeProduct(productId: string) {
+  function removeProduct(cartItemId: string) {
     resetSavedProgress();
-    setCart(prev => { const n = { ...prev }; delete n[productId]; return n; });
+    setCart(prev => { const n = { ...prev }; delete n[cartItemId]; return n; });
   }
 
-  function setQty(productId: string, q: number) {
-    if (q <= 0) { removeProduct(productId); return; }
-    const product = products.find(p => p._id === productId);
+  function setQty(cartItemId: string, q: number) {
+    if (q <= 0) { removeProduct(cartItemId); return; }
+    const currentItem = cart[cartItemId];
+    if (!currentItem) return;
+    const product = products.find(p => p._id === currentItem.productId);
     if (!product) return;
-    const item = getItem(productId);
-    const availableStock = getProductAvailableStock(product, item.variants);
+    const availableStock = getProductAvailableStock(product, currentItem.variants);
     const safeQty = availableStock !== null ? Math.min(q, availableStock) : q;
     resetSavedProgress();
-    setCart(prev => ({ ...prev, [productId]: { ...getItem(productId), quantity: Math.max(1, safeQty) } }));
+    setCart(prev => ({
+      ...prev,
+      [cartItemId]: {
+        ...currentItem,
+        quantity: Math.max(1, safeQty),
+      },
+    }));
   }
 
   function openUpiIntent(link: string) {
@@ -467,7 +617,7 @@ export function PublicStorePage() {
     setError("");
     setSuccessMessage("");
 
-    if (selectedItems.length === 0) {
+    if (cartEntries.length === 0) {
       setError("Select at least one product.");
       return null;
     }
@@ -492,8 +642,7 @@ export function PublicStorePage() {
       return null;
     }
 
-    for (const product of selectedItems) {
-      const item = cart[product._id];
+    for (const { product, item } of cartEntries) {
       for (const variant of getNormalizedVariantGroups(product)) {
         if (!variant.options?.length) continue;
         if (!item?.variants?.[variant.label]) {
@@ -549,7 +698,7 @@ export function PublicStorePage() {
       return;
     }
 
-    const stagedItems = products.filter((product) => (savedCheckoutData.cart[product._id]?.quantity || 0) > 0);
+    const stagedItems = Object.values(savedCheckoutData.cart);
     if (stagedItems.length === 0) {
       setError("Your saved cart is empty. Save your details again.");
       return;
@@ -557,26 +706,26 @@ export function PublicStorePage() {
 
     setSubmitting(true);
     try {
-      const reqs = stagedItems.map((p) =>
-        api.post<{ order: { _id: string } }>("/orders", {
-          productId: p._id,
-          quantity: savedCheckoutData.cart[p._id]?.quantity || 1,
-          customerName: savedCheckoutData.customerName,
-          customerPhone: formatPhone(savedCheckoutData.customerPhone),
-          deliveryAddress: formatAddress(savedCheckoutData.deliveryAddress),
-          deliveryCharge: savedCheckoutData.deliveryCharge,
-          selectedVariants: savedCheckoutData.cart[p._id]?.variants || {},
-          note: savedCheckoutData.note,
-          paymentMethod: savedCheckoutData.paymentMethod,
-          paymentScreenshotUrl: savedCheckoutData.paymentMethod === "prepaid" ? savedProofUrl : "",
-        })
-      );
-      const results = await Promise.allSettled(reqs);
-      const ids = results.filter(r => r.status === "fulfilled").map(r => (r as PromiseFulfilledResult<{ data: { order: { _id: string } } }>).value.data.order._id);
-      if (ids.length === 0) { setError("Could not place order. Please retry."); }
+      const response = await api.post<{ order: { _id: string } }>("/orders", {
+        items: stagedItems.map((item) => ({
+          productId: item.productId,
+          variantId: item.variantId,
+          quantity: item.quantity,
+          selectedVariants: item.variants,
+        })),
+        customerName: savedCheckoutData.customerName,
+        customerPhone: formatPhone(savedCheckoutData.customerPhone),
+        deliveryAddress: formatAddress(savedCheckoutData.deliveryAddress),
+        deliveryCharge: savedCheckoutData.deliveryCharge,
+        note: savedCheckoutData.note,
+        paymentMethod: savedCheckoutData.paymentMethod,
+        paymentScreenshotUrl: savedCheckoutData.paymentMethod === "prepaid" ? savedProofUrl : "",
+      });
+      const orderId = response.data.order._id;
+      if (!orderId) { setError("Could not place order. Please retry."); }
       else {
         if (savedCheckoutData.paymentMethod === "cod") {
-          setSuccessMessage(`Order placed successfully for ${ids.length} item(s). The seller will collect payment on delivery.`);
+          setSuccessMessage(`Order placed successfully for ${stagedItems.length} cart item(s). The seller will collect payment on delivery.`);
           setCustomerName("");
           setCustomerPhone({ countryCode: DEFAULT_COUNTRY_CODE, number: "" });
           setDeliveryAddress(EMPTY_ADDRESS);
@@ -601,7 +750,7 @@ export function PublicStorePage() {
 
         const params = new URLSearchParams();
         if (sellerSlug) params.set("sellerSlug", sellerSlug);
-        params.set("orderIds", ids.join(","));
+        params.set("orderIds", orderId);
         navigate(`/thank-you?${params.toString()}`, { replace: true });
       }
     } catch { setError("Could not submit order."); }
@@ -634,7 +783,7 @@ export function PublicStorePage() {
   function openVariantPopup(productId: string) {
     const product = products.find(p => p._id === productId);
     if (!product) return;
-    setPopupVariants(withAutoSelectedSingleVariants(product, cart[productId]?.variants || {}));
+    setPopupVariants(withAutoSelectedSingleVariants(product, {}));
     setPopupVariantError("");
     setVariantPopupProductId(productId);
   }
@@ -644,8 +793,32 @@ export function PublicStorePage() {
     const product = products.find(p => p._id === variantPopupProductId);
     if (!product) return;
     if (!hasCompleteVariantSelection(product, popupVariants)) { setPopupVariantError("Please select all options."); return; }
+    const matchedVariant = findMatchingVariant(product, popupVariants);
+    if (!matchedVariant) {
+      setPopupVariantError("Selected combination is unavailable.");
+      return;
+    }
     resetSavedProgress();
-    setCart(prev => ({ ...prev, [variantPopupProductId]: { quantity: 1, variants: popupVariants } }));
+    setCart(prev => {
+      const cartItemKey = buildCartItemKey(variantPopupProductId, matchedVariant.variantId);
+      const existingItem = prev[cartItemKey];
+      const nextQuantity = (existingItem?.quantity || 0) + 1;
+      if (nextQuantity > matchedVariant.stockQuantity) {
+        setPopupVariantError(`Only ${matchedVariant.stockQuantity} left for this variant.`);
+        return prev;
+      }
+      return {
+        ...prev,
+        [cartItemKey]: {
+          productId: variantPopupProductId,
+          variantId: matchedVariant.variantId,
+          variantTitle: matchedVariant.title || product.title,
+          quantity: nextQuantity,
+          variants: popupVariants,
+          unitPrice: matchedVariant.price,
+        },
+      };
+    });
     setCartFeedback(`${product.title} added to cart`);
     window.setTimeout(() => setCartFeedback(""), 1800);
     setVariantPopupProductId(null);
@@ -878,23 +1051,28 @@ export function PublicStorePage() {
         {/* Products */}
         {(() => {
           function renderCard(product: Product) {
-            const item = getItem(product._id);
-            const isSelected = item.quantity > 0;
-            const unit = getProductUnitPricing(product, item.variants);
+            const baseItem = getBaseCartItem(product._id);
+            const productCartEntries = cartEntries.filter((entry) => entry?.product._id === product._id);
+            const hasVariantLines = productCartEntries.some((entry) => entry?.item.variantId);
+            const productCartQuantity = productCartEntries.reduce((sum, entry) => sum + entry!.item.quantity, 0);
+            const unit = getProductUnitPricing(product, baseItem.variants);
             const unitPrice = unit.price;
             const unitMrp = unit.mrp;
             const normalizedVariants = getNormalizedVariantGroups(product);
-            const selectedStock = getProductAvailableStock(product, item.variants);
-            const requiresVariantSelection = normalizedVariants.some(v => (v.options || []).length > 0);
+            const normalizedVariantItems = getNormalizedVariantItems(product);
+            const selectedStock = getProductAvailableStock(product, baseItem.variants);
+            const requiresVariantSelection = normalizedVariantItems.length > 0 || normalizedVariants.some(v => (v.options || []).length > 0);
             const discountPercent = unitMrp > unitPrice ? Math.round(((unitMrp - unitPrice) / unitMrp) * 100) : 0;
-            const isOutOfStock = selectedStock !== null && selectedStock <= 0;
+            const isOutOfStock = requiresVariantSelection
+              ? normalizedVariantItems.length > 0 && normalizedVariantItems.every((variantItem) => variantItem.stockQuantity <= 0)
+              : selectedStock !== null && selectedStock <= 0;
             const isNewProduct = Date.now() - new Date(product.createdAt).getTime() < 1000 * 60 * 60 * 24 * 7;
             const productImages = getProductImages(product);
             const activeImgIdx = Math.min(activeProductImageIndex[product._id] || 0, Math.max(productImages.length - 1, 0));
             const activeImage = productImages[activeImgIdx] || "";
             return (
               <article key={product._id}
-                className={`group flex flex-col overflow-hidden rounded-2xl border bg-white shadow-sm transition duration-200 hover:-translate-y-0.5 hover:shadow-md dark:border-slate-700 dark:bg-slate-900 ${isSelected ? "border-emerald-400 ring-2 ring-emerald-100/80 dark:ring-emerald-900/40" : "border-slate-200"}`}>
+                className={`group flex flex-col overflow-hidden rounded-2xl border bg-white shadow-sm transition duration-200 hover:-translate-y-0.5 hover:shadow-md dark:border-slate-700 dark:bg-slate-900 ${productCartQuantity > 0 ? "border-emerald-400 ring-2 ring-emerald-100/80 dark:ring-emerald-900/40" : "border-slate-200"}`}>
                 {/* Image + badges + dot carousel */}
                 <div className="relative overflow-hidden bg-slate-100 dark:bg-slate-800">
                   {activeImage ? (
@@ -949,27 +1127,32 @@ export function PublicStorePage() {
                   )}
                   {/* ADD / stepper */}
                   <div className="mt-auto pt-1">
-                    {!isSelected ? (
+                    {!requiresVariantSelection && productCartQuantity > 0 ? (
+                      <div className="flex items-center justify-between rounded-xl bg-emerald-600 px-2 py-1">
+                        <button type="button" onClick={() => setQty(buildCartItemKey(product._id), baseItem.quantity - 1)}
+                          className="flex h-7 w-7 items-center justify-center rounded-lg bg-white/20 text-lg font-bold text-white hover:bg-white/30">-</button>
+                        <span className="text-sm font-bold text-white">{baseItem.quantity}</span>
+                        <button type="button" onClick={() => setQty(buildCartItemKey(product._id), baseItem.quantity + 1)}
+                          className="flex h-7 w-7 items-center justify-center rounded-lg bg-white/20 text-lg font-bold text-white hover:bg-white/30">+</button>
+                      </div>
+                    ) : (
                       <button type="button" disabled={isOutOfStock}
                         onClick={() => { if (requiresVariantSelection) { openVariantPopup(product._id); } else { addProduct(product._id); } }}
                         className="w-full rounded-xl border-2 border-emerald-500 bg-white py-1 text-sm font-bold text-emerald-600 transition hover:bg-emerald-50 disabled:opacity-40 dark:bg-slate-900">
                         {isOutOfStock ? "Out of stock" : (
                           <span className="flex flex-col items-center leading-tight">
-                            <span>ADD</span>
-                            {requiresVariantSelection && <span className="text-[9px] font-medium text-emerald-500">{normalizedVariants.reduce((s,v)=>s+v.options.length,0)} options</span>}
+                            <span>{requiresVariantSelection ? "Choose variant" : "ADD"}</span>
+                            {requiresVariantSelection && <span className="text-[9px] font-medium text-emerald-500">{normalizedVariantItems.length || normalizedVariants.reduce((s,v)=>s+v.options.length,0)} options</span>}
                           </span>
                         )}
                       </button>
-                    ) : (
-                      <div className="flex items-center justify-between rounded-xl bg-emerald-600 px-2 py-1">
-                        <button type="button" onClick={() => setQty(product._id, item.quantity - 1)}
-                          className="flex h-7 w-7 items-center justify-center rounded-lg bg-white/20 text-lg font-bold text-white hover:bg-white/30">-</button>
-                        <span className="text-sm font-bold text-white">{item.quantity}</span>
-                        <button type="button" onClick={() => setQty(product._id, item.quantity + 1)}
-                          className="flex h-7 w-7 items-center justify-center rounded-lg bg-white/20 text-lg font-bold text-white hover:bg-white/30">+</button>
-                      </div>
                     )}
                   </div>
+                  {requiresVariantSelection && productCartQuantity > 0 && (
+                    <p className="text-center text-[10px] text-emerald-600">
+                      {hasVariantLines ? `${productCartEntries.length} variants in cart` : `${productCartQuantity} in cart`}
+                    </p>
+                  )}
                   {selectedStock !== null && selectedStock <= 5 && selectedStock > 0 && (
                     <p className="text-center text-[10px] text-rose-500">Only {selectedStock} left</p>
                   )}
@@ -1049,26 +1232,26 @@ export function PublicStorePage() {
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">Order Summary</p>
             {selectedItems.map(p => (
               <div key={p._id} className="flex items-center justify-between gap-2 text-sm text-slate-700">
-                <span className="max-w-[65%] break-words">{p.title} � {cart[p._id]?.quantity}</span>
-                <span className="font-semibold text-slate-900">?{getProductUnitPricing(p, cart[p._id]?.variants || {}).price * (cart[p._id]?.quantity || 1)}</span>
+                <span className="max-w-[65%] break-words">{p.title} × {cart[p._id]?.quantity}</span>
+                <span className="font-semibold text-slate-900">₹{getProductUnitPricing(p, cart[p._id]?.variants || {}).price * (cart[p._id]?.quantity || 1)}</span>
               </div>
             ))}
             <div className="border-t border-slate-200 pt-2 space-y-1">
               <div className="flex justify-between text-sm text-slate-600">
-                <span>Items total</span><span>?{itemsTotal}</span>
+                <span>Items total</span><span>₹{itemsTotal}</span>
               </div>
               <div className="flex items-center justify-between text-sm text-slate-600">
                 <span>
                   {seller?.deliveryMode === "flat_rate"
-                    ? `Delivery charge${seller.freeDeliveryThreshold > 0 ? ` (Free above ?${seller.freeDeliveryThreshold})` : ""}`
+                    ? `Delivery charge${seller.freeDeliveryThreshold > 0 ? ` (Free above ₹${seller.freeDeliveryThreshold})` : ""}`
                     : "Delivery charge"}
                 </span>
                 <span className="font-semibold text-slate-800">
-                  {deliveryCharge === 0 ? "Free" : `?${deliveryCharge}`}
+                  {deliveryCharge === 0 ? "Free" : `₹${deliveryCharge}`}
                 </span>
               </div>
               <div className="flex justify-between font-bold text-slate-900 pt-1 border-t border-slate-200 text-sm">
-                <span>Total Payable</span><span>?{grandTotal}</span>
+                <span>Total Payable</span><span>₹{grandTotal}</span>
               </div>
             </div>
           </div>
@@ -1199,7 +1382,7 @@ export function PublicStorePage() {
             <div className="flex flex-col gap-2 sm:flex-row">
               <button type="button" onClick={() => openUpiIntent(previewUpiLink)} disabled={!savedCheckoutData}
                 className="flex-1 rounded-xl bg-teal-600 px-4 py-2 text-center text-sm font-semibold text-white hover:bg-teal-500 transition disabled:bg-teal-300">
-                Pay ?{grandTotal} via UPI
+                Pay ₹{grandTotal} via UPI
               </button>
               <button type="button" onClick={copyIntentLink}
                 className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:border-slate-400 transition">

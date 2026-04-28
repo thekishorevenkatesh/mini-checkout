@@ -21,6 +21,7 @@ type ProductFormVariant = {
   label: string;   // value / size  e.g. "500"
   uom: string;     // unit of measure e.g. "g", "ml", "Pack"
   amount: string;  // price
+  stock: string;   // available stock for this variant
 };
 
 type ProductForm = {
@@ -151,6 +152,40 @@ function getProductImages(product: Product): string[] {
   if (cleaned.length > 0) return cleaned;
   const fallback = normalizeImageUrl(product.imageUrl || "");
   return fallback ? [fallback] : [];
+}
+
+function getOrderItems(order: Order) {
+  if (Array.isArray(order.items) && order.items.length > 0) {
+    return order.items;
+  }
+
+  return order.product
+    ? [{
+        product: order.product,
+        productTitle: order.product.title,
+        productCategory: order.product.category,
+        productImageUrl: order.product.imageUrl,
+        variantId: "",
+        variantTitle: "",
+        selectedVariants: order.selectedVariants || {},
+        unitPrice: order.quantity > 0 ? order.amount / order.quantity : order.amount,
+        quantity: order.quantity,
+        lineTotal: order.amount,
+      }]
+    : [];
+}
+
+function getOrderItemSummary(order: Order) {
+  return getOrderItems(order)
+    .map((item) => {
+      const variantValues = Object.values(item.selectedVariants || {}).filter(Boolean);
+      return `${item.productTitle}${variantValues.length ? ` (${variantValues.join("/")})` : ""} x${item.quantity}`;
+    })
+    .join(", ");
+}
+
+function getOrderPrimaryCategory(order: Order) {
+  return getOrderItems(order)[0]?.productCategory || order.product?.category || "";
 }
 
 // ─── DashboardPage ────────────────────────────────────────────────────────────
@@ -481,6 +516,11 @@ export function DashboardPage() {
           label: match ? match[1] : option,
           uom: match ? match[2] : "",
           amount: rawPrice !== undefined && rawPrice !== null ? String(rawPrice) : "",
+          stock: String(
+            prod.variantItems?.find((item) => item.variantId === `legacy:${key}`)?.stockQuantity
+              ?? prod.variantQuantities?.[key]
+              ?? 0
+          ),
         });
       });
     });
@@ -515,6 +555,7 @@ export function DashboardPage() {
           label: "Variant",
           option: (v.label.trim() + (v.uom.trim() ? v.uom.trim() : "")),
           amount: Number(v.amount),
+          stock: Math.max(0, Math.floor(Number(v.stock) || 0)),
         }));
 
       const hasVariants = variantPayload.length > 0;
@@ -525,6 +566,19 @@ export function DashboardPage() {
         return acc;
       }, {});
       const variantMrps = {};
+      const variantQuantities = variantPayload.reduce<Record<string, number>>((acc, variant) => {
+        acc[getVariantPriceKey(variant.label, variant.option)] = variant.stock;
+        return acc;
+      }, {});
+      const variantItems = variantPayload.map((variant) => ({
+        variantId: `legacy:${getVariantPriceKey(variant.label, variant.option)}`,
+        title: variant.option,
+        attributes: { [variant.label]: variant.option },
+        price: variant.amount,
+        mrp: 0,
+        stockQuantity: variant.stock,
+        isActive: true,
+      }));
 
       if (!hasVariants && (!Number.isFinite(baseSellingPrice) || baseSellingPrice <= 0)) {
         setError("Enter product selling price, or add variants with prices.");
@@ -557,8 +611,10 @@ export function DashboardPage() {
         notes: productForm.notes.trim(),
         category: catTrimmed,
         variants: hasVariants ? [{ label: "Variant", options: variantPayload.map(v => v.option) }] : [],
+        variantItems,
         variantPrices,
         variantMrps,
+        variantQuantities,
       };
 
       if (editingProduct) {
@@ -1177,18 +1233,19 @@ export function DashboardPage() {
               <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-3">
                 <div>
                   <p className="text-sm font-semibold text-slate-700">Product Variants &amp; Pricing</p>
-                  <p className="text-xs text-slate-500 mt-0.5">Each variant has a value, unit of measure (UOM) and price.</p>
+                  <p className="text-xs text-slate-500 mt-0.5">Each variant has a value, unit of measure (UOM), price, and stock.</p>
                 </div>
                 {productForm.variants.length > 0 && (
-                  <div className="hidden grid-cols-[1fr_80px_100px_32px] gap-1.5 px-1 sm:grid">
+                  <div className="hidden grid-cols-[1fr_80px_100px_100px_32px] gap-1.5 px-1 sm:grid">
                     <span className="text-xs font-semibold text-slate-500">Value</span>
                     <span className="text-xs font-semibold text-slate-500">UOM</span>
                     <span className="text-xs font-semibold text-slate-500">Price (₹)</span>
+                    <span className="text-xs font-semibold text-slate-500">Stock</span>
                     <span />
                   </div>
                 )}
                 {productForm.variants.map((v, i) => (
-                  <div key={i} className="grid gap-2 rounded-xl border border-slate-200 bg-white p-3 sm:grid-cols-[1fr_80px_100px_32px] sm:items-center sm:gap-1.5 sm:rounded-none sm:border-0 sm:bg-transparent sm:p-0">
+                  <div key={i} className="grid gap-2 rounded-xl border border-slate-200 bg-white p-3 sm:grid-cols-[1fr_80px_100px_100px_32px] sm:items-center sm:gap-1.5 sm:rounded-none sm:border-0 sm:bg-transparent sm:p-0">
                     <input
                       className="rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm outline-none focus:border-slate-400"
                       placeholder="e.g. 500"
@@ -1208,6 +1265,13 @@ export function DashboardPage() {
                       value={v.amount}
                       onChange={e => setProductForm(p => { const vv = [...p.variants]; vv[i] = { ...vv[i], amount: e.target.value }; return { ...p, variants: vv }; })}
                     />
+                    <input
+                      type="number" min={0}
+                      className="rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm outline-none focus:border-slate-400"
+                      placeholder="10"
+                      value={v.stock}
+                      onChange={e => setProductForm(p => { const vv = [...p.variants]; vv[i] = { ...vv[i], stock: e.target.value }; return { ...p, variants: vv }; })}
+                    />
                     <button
                       type="button"
                       onClick={() => setProductForm(p => ({ ...p, variants: p.variants.filter((_, j) => j !== i) }))}
@@ -1217,7 +1281,7 @@ export function DashboardPage() {
                 ))}
                 <button
                   type="button"
-                  onClick={() => setProductForm(p => ({ ...p, variants: [...p.variants, { label: "", uom: "", amount: "" }] }))}
+                  onClick={() => setProductForm(p => ({ ...p, variants: [...p.variants, { label: "", uom: "", amount: "", stock: "" }] }))}
                   className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-100 transition"
                 >+ Add Variant</button>
               </div>
@@ -1355,13 +1419,13 @@ export function DashboardPage() {
                     <button
                       onClick={() => handleStartEdit(prod)}
                       className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-100 transition"
-                    >✏️ Edit</button>
+                    >Edit</button>
                     <button onClick={() => handleToggleProduct(prod._id)}
                       className={`rounded-lg px-3 py-1 text-xs font-semibold transition ${prod.isActive ? "bg-amber-100 text-amber-700 border border-amber-200" : "bg-emerald-100 text-emerald-700 border border-emerald-200"}`}>
                       {prod.isActive ? "Deactivate" : "Activate"}
                     </button>
                     <button onClick={() => handleDeleteProduct(prod._id)}
-                      className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700"><AppIcon name="trash" className="text-[10px]" /> Delete</button>
+                      className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700">Delete</button>
                   </div>
                 </div>
               ))}
@@ -1449,9 +1513,11 @@ export function DashboardPage() {
           {orders.length > 0 && (() => {
             const filtered = orders.filter(o => {
               const q = orderSearch.trim().toLowerCase();
-              const matchQ = !q || o.customerName.toLowerCase().includes(q) || o.customerPhone.includes(q) || (o.product?.title||"").toLowerCase().includes(q) || (o.product?.category||"").toLowerCase().includes(q);
+              const itemSummary = getOrderItemSummary(o).toLowerCase();
+              const primaryCategory = getOrderPrimaryCategory(o).toLowerCase();
+              const matchQ = !q || o.customerName.toLowerCase().includes(q) || o.customerPhone.includes(q) || itemSummary.includes(q) || primaryCategory.includes(q);
               const matchS = !orderStatusFilter || o.paymentStatus === orderStatusFilter;
-              const matchC = !orderCategoryFilter || (o.product?.category||"") === orderCategoryFilter;
+              const matchC = !orderCategoryFilter || getOrderPrimaryCategory(o) === orderCategoryFilter;
               return matchQ && matchS && matchC;
             });
             return (
@@ -1470,7 +1536,7 @@ export function DashboardPage() {
                           <span className={`h-1.5 w-1.5 rounded-full ${STATUS_DOT[order.paymentStatus]}`} />{STATUS_LABEL[order.paymentStatus]}
                         </span>
                       </div>
-                      <p className="mt-2 text-sm text-slate-700">{order.product?.title||"—"}</p>
+                      <p className="mt-2 text-sm text-slate-700">{getOrderItemSummary(order)||"—"}</p>
                       <p className="text-xs text-slate-500">Qty: {order.quantity} · ₹{order.amount} + ₹{order.deliveryCharge||0} = <strong>₹{order.amount+(order.deliveryCharge||0)}</strong></p>
                       <div className="mt-3 flex gap-2">
                         <button onClick={() => setViewingOrder(order)} className="flex-1 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition">👁 View</button>
@@ -1499,10 +1565,10 @@ export function DashboardPage() {
                             {order.deliveryAddress && <p className="flex items-center gap-1.5 text-xs text-slate-400 max-w-[160px] truncate" title={order.deliveryAddress}><span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 dark:from-teal-500 dark:to-sky-500"><AppIcon name="location" className="text-[8px]" /></span>{order.deliveryAddress}</p>}
                           </td>
                           <td className="py-3 pr-4">
-                            <p className="text-slate-700 whitespace-nowrap">{order.product?.title||"—"}</p>
-                            {order.product?.category && <p className="text-xs text-teal-700">{order.product.category}</p>}
+                            <p className="text-slate-700">{getOrderItemSummary(order)||"—"}</p>
+                            {getOrderPrimaryCategory(order) && <p className="text-xs text-teal-700">{getOrderPrimaryCategory(order)}</p>}
                           </td>
-                          <td className="py-3 pr-4 text-xs text-slate-500 whitespace-nowrap">{order.selectedVariants&&Object.keys(order.selectedVariants).length>0?Object.values(order.selectedVariants).join(", "):"—"}</td>
+                          <td className="py-3 pr-4 text-xs text-slate-500 whitespace-nowrap">{getOrderItems(order).map((item) => item.variantTitle || Object.values(item.selectedVariants || {}).join(", ") || "—").join(" | ")}</td>
                           <td className="py-3 pr-4 text-slate-700">{order.quantity}</td>
                           <td className="py-3 pr-4 font-semibold text-slate-900 whitespace-nowrap">₹{order.amount+(order.deliveryCharge||0)}</td>
                           <td className="py-3 pr-4">
@@ -1565,11 +1631,15 @@ export function DashboardPage() {
               )}
               <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-900/80">
                 <p className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">Product</p>
-                <p className="font-semibold text-slate-800">{viewingOrder.product?.title||"—"}</p>
-                {viewingOrder.product?.category && <span className="inline-block mt-1 rounded-full border border-teal-200 bg-teal-50 px-2 py-0.5 text-xs font-semibold text-teal-700">{viewingOrder.product.category}</span>}
-                {viewingOrder.selectedVariants&&Object.keys(viewingOrder.selectedVariants).length>0&&(
-                  <p className="mt-1 text-xs text-slate-500">Variant: {Object.values(viewingOrder.selectedVariants).join(", ")}</p>
-                )}
+                <div className="space-y-2">
+                  {getOrderItems(viewingOrder).map((item, index) => (
+                    <div key={`${item.productTitle}-${item.variantId}-${index}`}>
+                      <p className="font-semibold text-slate-800">{item.productTitle}</p>
+                      {item.productCategory && <span className="inline-block mt-1 rounded-full border border-teal-200 bg-teal-50 px-2 py-0.5 text-xs font-semibold text-teal-700">{item.productCategory}</span>}
+                      <p className="mt-1 text-xs text-slate-500">{item.variantTitle || Object.values(item.selectedVariants || {}).join(", ") || "Default"} · Qty {item.quantity} · ₹{item.lineTotal}</p>
+                    </div>
+                  ))}
+                </div>
               </div>
               <div className="rounded-xl border border-slate-200 overflow-hidden">
                 {[{l:"Quantity",v:viewingOrder.quantity},{l:"Items Total",v:`₹${viewingOrder.amount}`},{l:"Delivery Charge",v:`₹${viewingOrder.deliveryCharge||0}`}].map(r=>(

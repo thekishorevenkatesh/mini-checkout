@@ -17,6 +17,16 @@ export interface ProductVariant {
   options: string[]; // ["S","M","L"]
 }
 
+export interface VariantItem {
+  variantId: string;
+  title: string;
+  attributes: Record<string, string>;
+  price: number;
+  mrp: number;
+  stockQuantity: number;
+  isActive: boolean;
+}
+
 export interface Seller {
   _id: string;
   slug: string;
@@ -65,6 +75,7 @@ export interface Product {
   mrp: number;
   price: number; // selling price
   variants: ProductVariant[];
+  variantItems?: VariantItem[];
   variantPrices?: Record<string, number>;
   variantMrps?: Record<string, number>;
   variantQuantities?: Record<string, number>;
@@ -72,10 +83,24 @@ export interface Product {
   createdAt: string;
 }
 
+export interface OrderItem {
+  product: Product | string;
+  productTitle: string;
+  productCategory: string;
+  productImageUrl: string;
+  variantId: string;
+  variantTitle: string;
+  selectedVariants: Record<string, string>;
+  unitPrice: number;
+  quantity: number;
+  lineTotal: number;
+}
+
 export interface Order {
   _id: string;
   seller: string;
-  product: Product;
+  product: Product | null;
+  items: OrderItem[];
   customerName: string;
   customerPhone: string;
   deliveryAddress: string;

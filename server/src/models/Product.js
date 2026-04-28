@@ -8,6 +8,46 @@ const variantSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const variantItemSchema = new mongoose.Schema(
+  {
+    variantId: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    title: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    attributes: {
+      type: Map,
+      of: String,
+      default: {},
+    },
+    price: {
+      type: Number,
+      required: true,
+      min: 0,
+    },
+    mrp: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    stockQuantity: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    isActive: {
+      type: Boolean,
+      default: true,
+    },
+  },
+  { _id: false }
+);
+
 const productSchema = new mongoose.Schema(
   {
     seller: {
@@ -58,6 +98,10 @@ const productSchema = new mongoose.Schema(
     },
     variants: {
       type: [variantSchema],
+      default: [],
+    },
+    variantItems: {
+      type: [variantItemSchema],
       default: [],
     },
     variantPrices: {
