@@ -1,4 +1,4 @@
-export type OrderStatus = "pending" | "paid" | "confirmed" | "cancelled";
+export type OrderStatus = "pending" | "paid" | "delivered" | "cancelled";
 export type PaymentMode = "prepaid_only" | "cod_only" | "both";
 export type PaymentMethod = "prepaid" | "cod";
 
@@ -17,10 +17,21 @@ export interface ProductVariant {
   options: string[]; // ["S","M","L"]
 }
 
+export interface VariantItem {
+  variantId: string;
+  title: string;
+  attributes: Record<string, string>;
+  price: number;
+  mrp: number;
+  stockQuantity: number;
+  isActive: boolean;
+}
+
 export interface Seller {
   _id: string;
   slug: string;
   businessName: string;
+  businessCategory?: string;
   phone: string;
   businessEmail: string;
   upiId: string;
@@ -41,11 +52,15 @@ export interface Seller {
   privacyPolicy: string;
   returnRefundPolicy: string;
   termsAndConditions: string;
-  approvalStatus: "pending" | "approved" | "rejected";
+  approvalStatus: "draft" | "pending" | "approved" | "rejected";
+  storePublished?: boolean;
+  publishRequestedAt?: string | null;
   approvedAt?: string | null;
   approvedBy?: string;
   termsAcceptedAt?: string | null;
   createdAt?: string;
+  idProofUrl?: string;
+  addressProofUrl?: string;
 }
 
 export interface Product {
@@ -60,6 +75,7 @@ export interface Product {
   mrp: number;
   price: number; // selling price
   variants: ProductVariant[];
+  variantItems?: VariantItem[];
   variantPrices?: Record<string, number>;
   variantMrps?: Record<string, number>;
   variantQuantities?: Record<string, number>;
@@ -67,10 +83,24 @@ export interface Product {
   createdAt: string;
 }
 
+export interface OrderItem {
+  product: Product | string;
+  productTitle: string;
+  productCategory: string;
+  productImageUrl: string;
+  variantId: string;
+  variantTitle: string;
+  selectedVariants: Record<string, string>;
+  unitPrice: number;
+  quantity: number;
+  lineTotal: number;
+}
+
 export interface Order {
   _id: string;
   seller: string;
-  product: Product;
+  product: Product | null;
+  items: OrderItem[];
   customerName: string;
   customerPhone: string;
   deliveryAddress: string;

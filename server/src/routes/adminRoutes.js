@@ -54,7 +54,7 @@ router.get("/sellers", adminAuth, async (req, res) => {
 
     const sellers = await Seller.find(query)
       .select(
-        "businessName businessEmail phone approvalStatus createdAt updatedAt slug upiId businessAddress businessGST businessLogo favicon whatsappNumber callNumber approvedAt approvedBy"
+        "businessName businessEmail phone approvalStatus createdAt updatedAt slug upiId businessAddress businessGST businessLogo favicon whatsappNumber callNumber approvedAt approvedBy idProofUrl addressProofUrl storePublished publishRequestedAt"
       )
       .sort({ createdAt: -1 });
     return res.json({ sellers });
@@ -77,9 +77,15 @@ router.patch("/sellers/:sellerId/approval", adminAuth, async (req, res) => {
 
     seller.approvalStatus = status;
     if (status === "approved") {
+      seller.storePublished = true;
+      seller.publishRequestedAt = seller.publishRequestedAt || new Date();
       seller.approvedAt = new Date();
       seller.approvedBy = req.adminUsername || "admin";
     } else {
+      seller.storePublished = false;
+      if (status === "pending") {
+        seller.publishRequestedAt = new Date();
+      }
       seller.approvedAt = null;
       seller.approvedBy = "";
     }
@@ -91,6 +97,7 @@ router.patch("/sellers/:sellerId/approval", adminAuth, async (req, res) => {
         businessName: seller.businessName,
         phone: seller.phone,
         approvalStatus: seller.approvalStatus,
+        storePublished: seller.storePublished,
         approvedAt: seller.approvedAt,
       },
     });

@@ -26,9 +26,33 @@ router.get("/public/:sellerSlug", async (req, res) => {
       return res.status(404).json({ message: "Store not found" });
     }
 
+    if (!seller.storePublished || seller.approvalStatus !== "approved") {
+      return res.status(404).json({ message: "Store not found" });
+    }
+
     return res.json({ seller: withPolicyDefaults(seller) });
   } catch (error) {
     return res.status(500).json({ message: "Unable to fetch store config" });
+  }
+});
+
+router.post("/publish", auth, async (req, res) => {
+  try {
+    const seller = await Seller.findById(req.sellerId);
+    if (!seller) {
+      return res.status(404).json({ message: "Seller not found" });
+    }
+
+    seller.approvalStatus = "pending";
+    seller.storePublished = false;
+    seller.publishRequestedAt = new Date();
+    seller.approvedAt = null;
+    seller.approvedBy = "";
+
+    await seller.save();
+    return res.json({ seller: withPolicyDefaults(seller) });
+  } catch (error) {
+    return res.status(500).json({ message: "Unable to publish store" });
   }
 });
 

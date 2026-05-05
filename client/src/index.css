@@ -1,4 +1,6 @@
 @import url("https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Sora:wght@500;600;700;800&display=swap");
+@import "@flaticon/flaticon-uicons/css/bold/rounded";
+@import "@flaticon/flaticon-uicons/css/brands/all";
 
 @tailwind base;
 @tailwind components;
@@ -47,6 +49,18 @@ html.dark body {
 img {
   max-width: 100%;
   height: auto;
+}
+
+.app-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  line-height: 1;
+}
+
+.app-icon::before {
+  line-height: 1;
 }
 
 /* Dark theme compatibility for existing utility-heavy markup */

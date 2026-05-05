@@ -1,5 +1,63 @@
 const mongoose = require("mongoose");
 
+const orderItemSchema = new mongoose.Schema(
+  {
+    product: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Product",
+      required: true,
+      index: true,
+    },
+    productTitle: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    productCategory: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    productImageUrl: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    variantId: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    variantTitle: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    selectedVariants: {
+      type: Map,
+      of: String,
+      default: {},
+    },
+    unitPrice: {
+      type: Number,
+      required: true,
+      min: 0,
+    },
+    quantity: {
+      type: Number,
+      required: true,
+      min: 1,
+      default: 1,
+    },
+    lineTotal: {
+      type: Number,
+      required: true,
+      min: 0,
+    },
+  },
+  { _id: false }
+);
+
 const orderSchema = new mongoose.Schema(
   {
     seller: {
@@ -11,8 +69,11 @@ const orderSchema = new mongoose.Schema(
     product: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Product",
-      required: true,
       index: true,
+    },
+    items: {
+      type: [orderItemSchema],
+      default: [],
     },
     customerName: {
       type: String,
@@ -37,7 +98,7 @@ const orderSchema = new mongoose.Schema(
     amount: {
       type: Number,
       required: true,
-      min: 1,
+      min: 0,
     },
     quantity: {
       type: Number,

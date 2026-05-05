@@ -22,6 +22,7 @@ interface VerifyOtpInput {
 
 interface RegisterInput {
   businessName: string;
+  businessCategory?: string;
   termsAccepted: boolean;
   businessEmail?: string;
   businessAddress?: string;
@@ -30,6 +31,8 @@ interface RegisterInput {
   businessLogo?: string;
   whatsappNumber?: string;
   callNumber?: string;
+  idProofUrl?: string;
+  addressProofUrl?: string;
   privacyPolicy?: string;
   returnRefundPolicy?: string;
   termsAndConditions?: string;
@@ -37,6 +40,7 @@ interface RegisterInput {
 
 interface UpdateProfileInput {
   businessName?: string;
+  businessCategory?: string;
   businessEmail?: string;
   businessAddress?: string;
   businessGST?: string;
@@ -46,6 +50,8 @@ interface UpdateProfileInput {
   favicon?: string;
   whatsappNumber?: string;
   callNumber?: string;
+  idProofUrl?: string;
+  addressProofUrl?: string;
   privacyPolicy?: string;
   returnRefundPolicy?: string;
   termsAndConditions?: string;
