@@ -4,6 +4,7 @@ export type AddressParts = {
   city: string;
   state: string;
   country: string;
+  pincode: string;
   landmark: string;
 };
 
@@ -18,6 +19,7 @@ export const EMPTY_ADDRESS: AddressParts = {
   city: "",
   state: "",
   country: "",
+  pincode: "",
   landmark: "",
 };
 
@@ -35,7 +37,8 @@ export function parseAddress(value: string): AddressParts {
     city: parts[2] || "",
     state: parts[3] || "",
     country: parts[4] || "",
-    landmark: parts[5] || "",
+    pincode: parts[5] || "",
+    landmark: parts[6] || "",
   };
 }
 
@@ -46,6 +49,7 @@ export function formatAddress(parts: AddressParts): string {
     parts.city,
     parts.state,
     parts.country,
+    parts.pincode,
     parts.landmark,
   ]
     .map((part) => part.trim())

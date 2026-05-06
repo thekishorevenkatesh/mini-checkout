@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { QRCodeCanvas } from "qrcode.react";
 import { api } from "../api/client";
 import { AppIcon } from "../components/ui/AppIcon";
+import { AddressFields } from "../components/forms/AddressFields";
 import { useAuth } from "../context/AuthContext";
 import { useI18n } from "../context/I18nContext";
 import { DEFAULT_POLICY_CONTENT } from "../constants/policyDefaults";
@@ -683,6 +684,10 @@ export function DashboardPage() {
   async function handleToggleProduct(id: string) {
     try { await api.patch(`/products/${id}/toggle`, {}); await loadData(); }
     catch { setError("Could not toggle product."); }
+  }
+  async function handleToggleOutOfStock(id: string) {
+    try { await api.patch(`/products/${id}/out-of-stock`, {}); await loadData(); }
+    catch { setError("Could not update stock status."); }
   }
   async function handleDeleteProduct(id: string) {
     if (!window.confirm("Delete this product? This cannot be undone.")) return;
@@ -1438,6 +1443,9 @@ export function DashboardPage() {
                       {prod.category && (
                         <span className="inline-block mt-0.5 rounded-full border border-teal-200 bg-teal-50 px-2 py-0.5 text-xs font-semibold text-teal-700">{prod.category}</span>
                       )}
+                      {prod.forceOutOfStock && (
+                        <span className="ml-1 inline-block mt-0.5 rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-xs font-semibold text-rose-700">Out of stock</span>
+                      )}
                       <div className="flex gap-2 mt-1">
                         <span className="text-sm font-bold text-slate-900">₹{prod.price}</span>
                         {prod.mrp > 0 && prod.mrp > prod.price && (
@@ -1469,6 +1477,11 @@ export function DashboardPage() {
                       className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold transition ${prod.isActive ? "bg-amber-100 text-amber-700 border border-amber-200 hover:bg-amber-200/70" : "bg-emerald-100 text-emerald-700 border border-emerald-200 hover:bg-emerald-200/70"}`}>
                       <AppIcon name={prod.isActive ? "pending" : "check"} className="text-[10px]" />
                       {prod.isActive ? "Deactivate" : "Activate"}
+                    </button>
+                    <button onClick={() => handleToggleOutOfStock(prod._id)}
+                      className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold transition ${prod.forceOutOfStock ? "bg-emerald-100 text-emerald-700 border border-emerald-200 hover:bg-emerald-200/70" : "bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100"}`}>
+                      <AppIcon name={prod.forceOutOfStock ? "check" : "inactive"} className="text-[10px]" />
+                      {prod.forceOutOfStock ? "Mark In Stock" : "Mark Out of Stock"}
                     </button>
                     <button onClick={() => handleDeleteProduct(prod._id)}
                       className="inline-flex items-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-100 transition"
@@ -1876,32 +1889,12 @@ export function DashboardPage() {
                 <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-violet-600"><AppIcon name="location" className="text-[10px]" /></span>
                 Business Address
               </h3>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <label className="block space-y-1 sm:col-span-2">
-                  <span className="text-sm font-semibold text-slate-700">Address line 1</span>
-                  <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-teal-400" value={profileAddress.line1} onChange={e => setProfileAddress(p => ({...p, line1: e.target.value}))} />
-                </label>
-                <label className="block space-y-1 sm:col-span-2">
-                  <span className="text-sm font-semibold text-slate-700">Address line 2</span>
-                  <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-teal-400" value={profileAddress.line2} onChange={e => setProfileAddress(p => ({...p, line2: e.target.value}))} />
-                </label>
-                <label className="block space-y-1">
-                  <span className="text-sm font-semibold text-slate-700">City</span>
-                  <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-teal-400" value={profileAddress.city} onChange={e => setProfileAddress(p => ({...p, city: e.target.value}))} />
-                </label>
-                <label className="block space-y-1">
-                  <span className="text-sm font-semibold text-slate-700">State</span>
-                  <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-teal-400" value={profileAddress.state} onChange={e => setProfileAddress(p => ({...p, state: e.target.value}))} />
-                </label>
-                <label className="block space-y-1">
-                  <span className="text-sm font-semibold text-slate-700">Country</span>
-                  <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-teal-400" value={profileAddress.country} onChange={e => setProfileAddress(p => ({...p, country: e.target.value}))} />
-                </label>
-                <label className="block space-y-1">
-                  <span className="text-sm font-semibold text-slate-700">Landmark</span>
-                  <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-teal-400" value={profileAddress.landmark} onChange={e => setProfileAddress(p => ({...p, landmark: e.target.value}))} />
-                </label>
-              </div>
+              <AddressFields
+                value={profileAddress}
+                onChange={setProfileAddress}
+                inputClassName="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-teal-400"
+                gridClassName="grid gap-3 sm:grid-cols-2"
+              />
             </article>
 
             {/* KYC Documents */}

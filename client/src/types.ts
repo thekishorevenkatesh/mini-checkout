@@ -80,6 +80,7 @@ export interface Product {
   variantMrps?: Record<string, number>;
   variantQuantities?: Record<string, number>;
   isActive: boolean;
+  forceOutOfStock?: boolean;
   createdAt: string;
 }
 

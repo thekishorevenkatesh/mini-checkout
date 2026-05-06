@@ -1102,9 +1102,9 @@ export function PublicStorePage() {
             const selectedStock = getProductAvailableStock(product, baseItem.variants);
             const requiresVariantSelection = normalizedVariantItems.length > 0 || normalizedVariants.some(v => (v.options || []).length > 0);
             const discountPercent = unitMrp > unitPrice ? Math.round(((unitMrp - unitPrice) / unitMrp) * 100) : 0;
-            const isOutOfStock = requiresVariantSelection
+            const isOutOfStock = Boolean(product.forceOutOfStock) || (requiresVariantSelection
               ? normalizedVariantItems.length > 0 && normalizedVariantItems.every((variantItem) => variantItem.stockQuantity <= 0)
-              : selectedStock !== null && selectedStock <= 0;
+              : selectedStock !== null && selectedStock <= 0);
             const isNewProduct = Date.now() - new Date(product.createdAt).getTime() < 1000 * 60 * 60 * 24 * 7;
             const productImages = getProductImages(product);
             const activeImgIdx = Math.min(activeProductImageIndex[product._id] || 0, Math.max(productImages.length - 1, 0));
