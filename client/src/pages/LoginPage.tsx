@@ -21,15 +21,42 @@ type Mode = "login" | "register";
 type Step = "contact" | "otp" | "profile";
 
 const BUSINESS_CATEGORY_OPTIONS = [
-  "Fashion",
-  "Groceries",
-  "Food & Beverages",
-  "Electronics",
-  "Home & Kitchen",
+  "Agriculture Products",
+  "Art & Crafts",
+  "Baby Products",
+  "Bags & Luggage",
+  "Bakery & Homemade Food",
   "Beauty & Personal Care",
-  "Health & Wellness",
   "Books & Stationery",
-  "Services",
+  "Clothing & Apparel",
+  "Computers & Accessories",
+  "Dairy Products",
+  "Decor & Handicrafts",
+  "Electronics",
+  "Fashion Accessories",
+  "Footwear",
+  "Furniture",
+  "Gifts & Personalized Products",
+  "Grocery & Essentials",
+  "Health & Nutrition",
+  "Home & Kitchen",
+  "Home Decor",
+  "Industrial Supplies",
+  "Jewellery",
+  "Kitchen Appliances",
+  "Lifestyle Products",
+  "Mobile Phones & Accessories",
+  "Nursery & Gardening",
+  "Organic Products",
+  "Pet Supplies",
+  "Religious / Puja Items",
+  "Refurbished Products",
+  "Sports & Fitness Equipment",
+  "Stationery Supplies",
+  "Toys & Games",
+  "Vehicle Accessories",
+  "Watches",
+  "Wellness Products",
   "Other",
 ] as const;
 
@@ -119,7 +146,7 @@ export function LoginPage() {
 
   // Business / onboarding fields (Register mode Step 1 + Login mode Step 3)
   const [businessName, setBusinessName] = useState("");
-  const [businessCategory, setBusinessCategory] = useState<(typeof BUSINESS_CATEGORY_OPTIONS)[number]>("Fashion");
+  const [businessCategory, setBusinessCategory] = useState<(typeof BUSINESS_CATEGORY_OPTIONS)[number]>("Fashion Accessories");
   const [businessCategoryOther, setBusinessCategoryOther] = useState("");
   const [businessEmail, setBusinessEmail] = useState("");
   const [businessAddress, setBusinessAddress] = useState<AddressParts>(EMPTY_ADDRESS);
@@ -183,7 +210,7 @@ export function LoginPage() {
     setInfo("");
     setOtp("");
     setDevOtp("");
-    setBusinessCategory("Fashion");
+    setBusinessCategory("Fashion Accessories");
     setBusinessCategoryOther("");
     setPolicyChecks(Object.fromEntries(DEFAULT_VENDOR_POLICY_POINTS.map((_, index) => [String(index), false])));
     setPhone({ countryCode: DEFAULT_COUNTRY_CODE, number: "" });
