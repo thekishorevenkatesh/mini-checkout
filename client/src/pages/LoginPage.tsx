@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { useAuth } from "../context/AuthContext";
 import { AppIcon } from "../components/ui/AppIcon";
+import { AddressFields } from "../components/forms/AddressFields";
 import { useI18n } from "../context/I18nContext";
 import { DEFAULT_POLICY_CONTENT } from "../constants/policyDefaults";
 import { DEFAULT_VENDOR_POLICY_POINTS } from "../constants/vendorPolicyDefaults";
@@ -559,33 +560,11 @@ export function LoginPage() {
                     />
                   </label>
 
-                  {/* Business Address */}
-                  <div className="sm:col-span-2 grid gap-3 sm:grid-cols-2">
-                    <label className="block space-y-1">
-                      <span className="text-sm font-semibold text-slate-700">Address line 1</span>
-                      <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50" value={businessAddress.line1} onChange={(e) => setBusinessAddress((prev) => ({ ...prev, line1: e.target.value }))} />
-                    </label>
-                    <label className="block space-y-1">
-                      <span className="text-sm font-semibold text-slate-700">Address line 2</span>
-                      <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50" value={businessAddress.line2} onChange={(e) => setBusinessAddress((prev) => ({ ...prev, line2: e.target.value }))} />
-                    </label>
-                    <label className="block space-y-1">
-                      <span className="text-sm font-semibold text-slate-700">City</span>
-                      <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50" value={businessAddress.city} onChange={(e) => setBusinessAddress((prev) => ({ ...prev, city: e.target.value }))} />
-                    </label>
-                    <label className="block space-y-1">
-                      <span className="text-sm font-semibold text-slate-700">State</span>
-                      <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50" value={businessAddress.state} onChange={(e) => setBusinessAddress((prev) => ({ ...prev, state: e.target.value }))} />
-                    </label>
-                    <label className="block space-y-1">
-                      <span className="text-sm font-semibold text-slate-700">Country</span>
-                      <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50" value={businessAddress.country} onChange={(e) => setBusinessAddress((prev) => ({ ...prev, country: e.target.value }))} />
-                    </label>
-                    <label className="block space-y-1">
-                      <span className="text-sm font-semibold text-slate-700">Landmark</span>
-                      <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50" value={businessAddress.landmark} onChange={(e) => setBusinessAddress((prev) => ({ ...prev, landmark: e.target.value }))} />
-                    </label>
-                  </div>
+                  <AddressFields
+                    value={businessAddress}
+                    onChange={setBusinessAddress}
+                    inputClassName="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50"
+                  />
 
                   {/* WhatsApp */}
                   <label className="block space-y-1">
@@ -818,33 +797,11 @@ export function LoginPage() {
                   onChange={(e) => setUpiId(e.target.value)}
                 />
               </label>
-              {/* Business Address */}
-              <div className="sm:col-span-2 grid gap-3 sm:grid-cols-2">
-                <label className="block space-y-1">
-                  <span className="text-sm font-semibold text-slate-700">Address line 1</span>
-                  <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50" value={businessAddress.line1} onChange={(e) => setBusinessAddress((prev) => ({ ...prev, line1: e.target.value }))} />
-                </label>
-                <label className="block space-y-1">
-                  <span className="text-sm font-semibold text-slate-700">Address line 2</span>
-                  <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50" value={businessAddress.line2} onChange={(e) => setBusinessAddress((prev) => ({ ...prev, line2: e.target.value }))} />
-                </label>
-                <label className="block space-y-1">
-                  <span className="text-sm font-semibold text-slate-700">City</span>
-                  <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50" value={businessAddress.city} onChange={(e) => setBusinessAddress((prev) => ({ ...prev, city: e.target.value }))} />
-                </label>
-                <label className="block space-y-1">
-                  <span className="text-sm font-semibold text-slate-700">State</span>
-                  <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50" value={businessAddress.state} onChange={(e) => setBusinessAddress((prev) => ({ ...prev, state: e.target.value }))} />
-                </label>
-                <label className="block space-y-1">
-                  <span className="text-sm font-semibold text-slate-700">Country</span>
-                  <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50" value={businessAddress.country} onChange={(e) => setBusinessAddress((prev) => ({ ...prev, country: e.target.value }))} />
-                </label>
-                <label className="block space-y-1">
-                  <span className="text-sm font-semibold text-slate-700">Landmark</span>
-                  <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50" value={businessAddress.landmark} onChange={(e) => setBusinessAddress((prev) => ({ ...prev, landmark: e.target.value }))} />
-                </label>
-              </div>
+              <AddressFields
+                value={businessAddress}
+                onChange={setBusinessAddress}
+                inputClassName="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50"
+              />
               {/* GST */}
               <label className="block space-y-1">
                 <span className="text-sm font-semibold text-slate-700">GST number (optional)</span>
