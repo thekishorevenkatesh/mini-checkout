@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { QRCodeSVG } from "qrcode.react";
 import { api } from "../api/client";
 import { AppIcon } from "../components/ui/AppIcon";
+import { AddressFields } from "../components/forms/AddressFields";
 import { DEFAULT_POLICY_CONTENT } from "../constants/policyDefaults";
 import { useI18n } from "../context/I18nContext";
 import {
@@ -1138,9 +1139,6 @@ export function PublicStorePage() {
                 </div>
                 {/* Info */}
                 <div className="flex flex-1 flex-col gap-1.5 p-2.5">
-                  {product.category && (
-                    <span className="inline-flex w-fit rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500 dark:bg-slate-800 dark:text-slate-400">{product.category}</span>
-                  )}
                   <p className="line-clamp-2 text-[13px] font-semibold leading-tight text-slate-800 dark:text-slate-100">{product.title}</p>
                   <div className="flex items-baseline gap-1.5">
                     <span className="text-sm font-bold text-slate-900 dark:text-slate-100">₹{unitPrice}</span>
@@ -1361,32 +1359,15 @@ export function PublicStorePage() {
               />
             </div>
           </label>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="block space-y-1">
-              <span className="text-sm font-semibold text-slate-700">Address line 1</span>
-              <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400" value={deliveryAddress.line1} onChange={(e) => { setDeliveryAddress((prev) => ({ ...prev, line1: e.target.value })); resetSavedProgress(); }} />
-            </label>
-            <label className="block space-y-1">
-              <span className="text-sm font-semibold text-slate-700">Address line 2</span>
-              <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400" value={deliveryAddress.line2} onChange={(e) => { setDeliveryAddress((prev) => ({ ...prev, line2: e.target.value })); resetSavedProgress(); }} />
-            </label>
-            <label className="block space-y-1">
-              <span className="text-sm font-semibold text-slate-700">City</span>
-              <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400" value={deliveryAddress.city} onChange={(e) => { setDeliveryAddress((prev) => ({ ...prev, city: e.target.value })); resetSavedProgress(); }} />
-            </label>
-            <label className="block space-y-1">
-              <span className="text-sm font-semibold text-slate-700">State</span>
-              <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400" value={deliveryAddress.state} onChange={(e) => { setDeliveryAddress((prev) => ({ ...prev, state: e.target.value })); resetSavedProgress(); }} />
-            </label>
-            <label className="block space-y-1">
-              <span className="text-sm font-semibold text-slate-700">Country</span>
-              <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400" value={deliveryAddress.country} onChange={(e) => { setDeliveryAddress((prev) => ({ ...prev, country: e.target.value })); resetSavedProgress(); }} />
-            </label>
-            <label className="block space-y-1">
-              <span className="text-sm font-semibold text-slate-700">Landmark</span>
-              <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400" value={deliveryAddress.landmark} onChange={(e) => { setDeliveryAddress((prev) => ({ ...prev, landmark: e.target.value })); resetSavedProgress(); }} />
-            </label>
-          </div>
+          <AddressFields
+            value={deliveryAddress}
+            onChange={(next) => {
+              setDeliveryAddress(next);
+              resetSavedProgress();
+            }}
+            inputClassName="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400"
+            gridClassName="grid gap-3 sm:grid-cols-2"
+          />
           <label className="block space-y-1">
             <span className="text-sm font-semibold text-slate-700">Note (optional)</span>
             <textarea className="min-h-12 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400"
