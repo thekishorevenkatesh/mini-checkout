@@ -74,6 +74,40 @@ function normalizeVariantQuantities(input) {
   }, {});
 }
 
+function expandImageSource(value) {
+  if (Array.isArray(value)) {
+    return value.flatMap(expandImageSource);
+  }
+
+  const raw = String(value || "").trim();
+  if (!raw) return [];
+
+  if (raw.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed.flatMap(expandImageSource);
+      }
+    } catch (_error) {
+      // Fall through to string parsing below.
+    }
+  }
+
+  if (raw.includes("\n")) {
+    return raw
+      .split(/\r?\n/)
+      .flatMap((part) => expandImageSource(part));
+  }
+
+  if ((raw.match(/https?:\/\//gi) || []).length > 1) {
+    return raw
+      .split(/,(?=https?:\/\/)/i)
+      .flatMap((part) => expandImageSource(part));
+  }
+
+  return [raw];
+}
+
 function normalizeVariantItems(input) {
   if (!Array.isArray(input)) {
     return [];
@@ -146,15 +180,16 @@ function deriveVariantItemsFromLegacy(variants, variantPrices, variantMrps, vari
 }
 
 function normalizeImageUrls(imageUrls, fallbackImageUrl = "") {
-  const list = Array.isArray(imageUrls) ? imageUrls : [];
+  const list = Array.isArray(imageUrls) ? imageUrls : expandImageSource(imageUrls);
   const cleaned = list
+    .flatMap((url) => expandImageSource(url))
     .map((url) => String(url || "").trim())
     .filter(Boolean);
 
   if (cleaned.length > 0) return cleaned;
 
-  const fallback = String(fallbackImageUrl || "").trim();
-  return fallback ? [fallback] : [];
+  const fallback = expandImageSource(fallbackImageUrl).map((url) => String(url || "").trim()).filter(Boolean);
+  return fallback;
 }
 
 // ─── POST /products — Create product (auth) ───────────────────────────────

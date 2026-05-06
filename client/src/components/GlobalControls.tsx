@@ -6,13 +6,13 @@ export function GlobalControls() {
   const { language, setLanguage } = useI18n();
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex flex-wrap items-center justify-end gap-2">
 
       {/* Theme Toggle */}
       <div className="flex items-center rounded-lg border border-slate-200 bg-white p-0.5 dark:border-slate-700 dark:bg-slate-900">
         <button
           onClick={() => setTheme("light")}
-          className={`px-2 py-1 text-xs rounded-md transition ${
+          className={`rounded-md px-2 py-1 text-[11px] transition sm:text-xs ${
             theme === "light"
               ? "bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900"
               : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
@@ -23,7 +23,7 @@ export function GlobalControls() {
 
         <button
           onClick={() => setTheme("dark")}
-          className={`px-2 py-1 text-xs rounded-md transition ${
+          className={`rounded-md px-2 py-1 text-[11px] transition sm:text-xs ${
             theme === "dark"
               ? "bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900"
               : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
@@ -37,7 +37,7 @@ export function GlobalControls() {
       <div className="flex items-center rounded-lg border border-slate-200 bg-white p-0.5 dark:border-slate-700 dark:bg-slate-900">
         <button
           onClick={() => setLanguage("en")}
-          className={`px-2 py-1 text-xs rounded-md transition ${
+          className={`rounded-md px-2 py-1 text-[11px] transition sm:text-xs ${
             language === "en"
               ? "bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900"
               : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
@@ -48,7 +48,7 @@ export function GlobalControls() {
 
         <button
           onClick={() => setLanguage("kn")}
-          className={`px-2 py-1 text-xs rounded-md transition ${
+          className={`rounded-md px-2 py-1 text-[11px] transition sm:text-xs ${
             language === "kn"
               ? "bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900"
               : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"

@@ -146,12 +146,42 @@ function normalizeImageUrl(url: string) {
   return `https://${trimmed}`;
 }
 
+function expandImageSource(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.flatMap(expandImageSource);
+  }
+
+  const raw = String(value || "").trim();
+  if (!raw) return [];
+
+  if (raw.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed.flatMap(expandImageSource);
+      }
+    } catch (_error) {
+      // Fall through to string parsing below.
+    }
+  }
+
+  if (raw.includes("\n")) {
+    return raw.split(/\r?\n/).flatMap(expandImageSource);
+  }
+
+  if ((raw.match(/https?:\/\//gi) || []).length > 1) {
+    return raw.split(/,(?=https?:\/\/)/i).flatMap(expandImageSource);
+  }
+
+  return [raw];
+}
+
 function getProductImages(product: Product): string[] {
-  const list = Array.isArray(product.imageUrls) ? product.imageUrls : [];
-  const cleaned = list.map(normalizeImageUrl).filter(Boolean);
+  const list = Array.isArray(product.imageUrls) ? product.imageUrls : expandImageSource(product.imageUrls);
+  const cleaned = list.flatMap(expandImageSource).map(normalizeImageUrl).filter(Boolean);
   if (cleaned.length > 0) return cleaned;
-  const fallback = normalizeImageUrl(product.imageUrl || "");
-  return fallback ? [fallback] : [];
+  const fallback = expandImageSource(product.imageUrl || "").map(normalizeImageUrl).filter(Boolean);
+  return fallback;
 }
 
 function getOrderItems(order: Order) {
@@ -399,10 +429,14 @@ export function DashboardPage() {
     link.click();
   }
 
-  const isStoreApproved = seller?.approvalStatus === "approved" && Boolean(seller?.storePublished);
-  const isPublishPending = seller?.approvalStatus === "pending";
-  const isPublishRejected = seller?.approvalStatus === "rejected";
-  const isStoreDraft = !seller || seller.approvalStatus === "draft";
+  const isStoreApproved =
+    Boolean(seller?.storePublished) || seller?.approvalStatus === "approved";
+  const isPublishPending =
+    !isStoreApproved && seller?.approvalStatus === "pending";
+  const isPublishRejected =
+    !isStoreApproved && seller?.approvalStatus === "rejected";
+  const isStoreDraft =
+    !seller || (!isStoreApproved && seller.approvalStatus === "draft");
 
   async function handlePublishStore() {
     setIsPublishingStore(true); setError(""); setSuccess("");
@@ -726,11 +760,11 @@ export function DashboardPage() {
       {copyFeedback && <p className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-2 text-sm text-sky-700">{copyFeedback}</p>}
 
       {/* Tab nav */}
-      <nav className="flex gap-2 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:flex-wrap">
+      <nav className="flex gap-2 overflow-x-auto pb-1 pr-1 snap-x [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:flex-wrap">
         {tabs.map(t => (
           <button key={t.key} onClick={() => { setTab(t.key); setError(""); setSuccess(""); }}
-            className={`inline-flex shrink-0 items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition ${tab === t.key ? "bg-gradient-to-r from-emerald-500 via-teal-500 to-sky-500 text-white shadow-md" : "border border-emerald-100 bg-white/90 text-slate-600 hover:border-emerald-300 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-300 dark:hover:border-teal-700"}`}>
-            <span className={`inline-flex h-7 w-7 items-center justify-center rounded-full ${tab === t.key ? "bg-white/15" : "bg-gradient-to-br from-emerald-500 to-teal-600 dark:from-teal-500 dark:to-sky-500"}`}>
+            className={`inline-flex shrink-0 snap-start items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold transition sm:px-4 sm:text-sm ${tab === t.key ? "bg-gradient-to-r from-emerald-500 via-teal-500 to-sky-500 text-white shadow-md" : "border border-emerald-100 bg-white/90 text-slate-600 hover:border-emerald-300 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-300 dark:hover:border-teal-700"}`}>
+            <span className={`inline-flex h-6 w-6 items-center justify-center rounded-full sm:h-7 sm:w-7 ${tab === t.key ? "bg-white/15" : "bg-gradient-to-br from-emerald-500 to-teal-600 dark:from-teal-500 dark:to-sky-500"}`}>
               <AppIcon name={t.icon} className="text-[11px]" />
             </span>
             {t.label}
@@ -1029,9 +1063,9 @@ export function DashboardPage() {
                 <button
                   type="button"
                   onClick={handleCancelEdit}
-                  className="rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition"
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700 shadow-sm transition hover:bg-rose-100"
                 >
-                  <AppIcon name="close" className="text-[9px]" /> Cancel Edit
+                  <AppIcon name="close" className="text-[10px]" /> Cancel
                 </button>
               )}
             </div>
@@ -1275,8 +1309,10 @@ export function DashboardPage() {
                     <button
                       type="button"
                       onClick={() => setProductForm(p => ({ ...p, variants: p.variants.filter((_, j) => j !== i) }))}
-                      className="flex h-8 w-full items-center justify-center rounded-lg border border-rose-200 bg-rose-50 text-rose-600 text-sm hover:bg-rose-100 transition sm:w-8"
-                    ><AppIcon name="close" className="text-[9px]" /></button>
+                      className="inline-flex h-9 w-full items-center justify-center gap-1 rounded-lg border border-rose-200 bg-rose-50 px-2 text-sm font-semibold text-rose-700 hover:bg-rose-100 transition sm:h-8 sm:w-8 sm:px-0"
+                      aria-label={`Remove variant ${i + 1}`}
+                      title="Remove variant"
+                    ><AppIcon name="close" className="text-[9px]" /><span className="sm:hidden">Remove</span></button>
                   </div>
                 ))}
                 <button
@@ -1287,8 +1323,17 @@ export function DashboardPage() {
               </div>
 
               <div className="flex flex-wrap justify-between gap-2 pt-1">
+                {editingProduct && (
+                  <button
+                    type="button"
+                    onClick={handleCancelEdit}
+                    className="w-full rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-semibold text-rose-700 transition hover:bg-rose-100 sm:w-auto"
+                  >
+                    Cancel Edit
+                  </button>
+                )}
                 <button type="submit" disabled={isSubmittingProduct}
-                  className={`w-full rounded-xl px-4 py-2.5 text-sm font-semibold text-white transition disabled:opacity-50 ${editingProduct ? "bg-amber-600 hover:bg-amber-500" : "bg-teal-600 hover:bg-teal-500"}`}>
+                  className={`w-full rounded-xl px-4 py-2.5 text-sm font-semibold text-white transition disabled:opacity-50 ${editingProduct ? "bg-amber-600 hover:bg-amber-500 sm:flex-1" : "bg-teal-600 hover:bg-teal-500"}`}>
                   {isSubmittingProduct
                     ? (editingProduct ? "Saving…" : "Saving...")
                     : editingProduct ? <><AppIcon name="edit" className="text-[10px]" /> Update Product</> : <><AppIcon name="products" className="text-[10px]" /> Add Product</>}
@@ -1418,14 +1463,16 @@ export function DashboardPage() {
                   <div className="mt-2 flex flex-wrap gap-2">
                     <button
                       onClick={() => handleStartEdit(prod)}
-                      className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-100 transition"
-                    >Edit</button>
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-700 hover:bg-sky-100 transition"
+                    ><AppIcon name="edit" className="text-[10px]" /> Edit</button>
                     <button onClick={() => handleToggleProduct(prod._id)}
-                      className={`rounded-lg px-3 py-1 text-xs font-semibold transition ${prod.isActive ? "bg-amber-100 text-amber-700 border border-amber-200" : "bg-emerald-100 text-emerald-700 border border-emerald-200"}`}>
+                      className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold transition ${prod.isActive ? "bg-amber-100 text-amber-700 border border-amber-200 hover:bg-amber-200/70" : "bg-emerald-100 text-emerald-700 border border-emerald-200 hover:bg-emerald-200/70"}`}>
+                      <AppIcon name={prod.isActive ? "pending" : "check"} className="text-[10px]" />
                       {prod.isActive ? "Deactivate" : "Activate"}
                     </button>
                     <button onClick={() => handleDeleteProduct(prod._id)}
-                      className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700">Delete</button>
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-100 transition"
+                    ><AppIcon name="close" className="text-[10px]" /> Delete</button>
                   </div>
                 </div>
               ))}

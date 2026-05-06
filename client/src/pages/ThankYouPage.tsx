@@ -81,7 +81,7 @@ export function ThankYouPage() {
     <main className="mx-auto flex min-h-screen w-full max-w-3xl items-center justify-center px-3 py-8 sm:px-4 sm:py-10">
       <Card className="w-full p-5 sm:p-8">
         <p className="text-xs font-bold uppercase tracking-[0.18em] text-teal-700">Payment Status</p>
-        <h1 className="mt-2 font-heading text-3xl font-bold text-slate-900">
+        <h1 className="mt-2 font-heading text-2xl font-bold text-slate-900 sm:text-3xl">
           {allSuccessful ? "Thank you for your payment" : "We are checking your payment"}
         </h1>
 

@@ -61,12 +61,42 @@ function normalizeImageUrl(url: string) {
   return `https://${trimmed}`;
 }
 
+function expandImageSource(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.flatMap(expandImageSource);
+  }
+
+  const raw = String(value || "").trim();
+  if (!raw) return [];
+
+  if (raw.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed.flatMap(expandImageSource);
+      }
+    } catch (_error) {
+      // Fall through to string parsing below.
+    }
+  }
+
+  if (raw.includes("\n")) {
+    return raw.split(/\r?\n/).flatMap(expandImageSource);
+  }
+
+  if ((raw.match(/https?:\/\//gi) || []).length > 1) {
+    return raw.split(/,(?=https?:\/\/)/i).flatMap(expandImageSource);
+  }
+
+  return [raw];
+}
+
 function getProductImages(product: Product) {
-  const images = Array.isArray(product.imageUrls) ? product.imageUrls : [];
-  const normalized = images.map(normalizeImageUrl).filter(Boolean);
+  const images = Array.isArray(product.imageUrls) ? product.imageUrls : expandImageSource(product.imageUrls);
+  const normalized = images.flatMap(expandImageSource).map(normalizeImageUrl).filter(Boolean);
   if (normalized.length > 0) return normalized;
-  const fallback = normalizeImageUrl(product.imageUrl || "");
-  return fallback ? [fallback] : [];
+  const fallback = expandImageSource(product.imageUrl || "").map(normalizeImageUrl).filter(Boolean);
+  return fallback;
 }
 
 function buildUpiLink(
@@ -609,6 +639,14 @@ export function PublicStorePage() {
 
   function resetSavedProgress() {
     setSavedCheckoutData(null);
+    setSavedProofUrl("");
+    setProofSuccess("");
+  }
+
+  function clearScreenshotSelection() {
+    setScreenshotFile(null);
+    setScreenshotPreview("");
+    setScreenshotUrl("");
     setSavedProofUrl("");
     setProofSuccess("");
   }
@@ -1412,14 +1450,38 @@ export function PublicStorePage() {
                 <p className="text-sm text-amber-900">Upload the payment screenshot before placing the order.</p>
               </div>
             </div>
-            <label className="flex cursor-pointer flex-col items-center gap-2 rounded-xl border-2 border-dashed border-amber-300 bg-white px-4 py-3 text-center hover:border-amber-400 transition">
+            <label className="flex cursor-pointer flex-col items-center gap-2 rounded-xl border-2 border-dashed border-amber-300 bg-white px-4 py-3 text-center hover:border-amber-400 transition sm:px-5">
               <span className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-amber-500">
                 <AppIcon name="upload" className="text-lg" />
               </span>
-              <span className="text-xs font-semibold text-amber-700">{screenshotFile ? screenshotFile.name : "Tap to upload image"}</span>
-              <input type="file" accept="image/*" className="sr-only" onChange={e => { const f = e.target.files?.[0] ?? null; setScreenshotFile(f); setSavedProofUrl(""); setProofSuccess(""); if (f) { setScreenshotPreview(URL.createObjectURL(f)); setScreenshotUrl(""); } }} />
+              <span className="break-all text-xs font-semibold text-amber-700">{screenshotFile ? screenshotFile.name : "Tap to upload image"}</span>
+              <span className="text-[11px] text-amber-600">You can remove it and upload a different screenshot before saving.</span>
+              <input type="file" accept="image/*" className="sr-only" onChange={e => { const f = e.target.files?.[0] ?? null; setSavedProofUrl(""); setProofSuccess(""); if (f) { setScreenshotFile(f); setScreenshotPreview(URL.createObjectURL(f)); setScreenshotUrl(""); } }} />
             </label>
-            {screenshotPreview && <img src={screenshotPreview} alt="Preview" className="h-24 w-full rounded-xl object-cover border border-amber-200" />}
+            {(screenshotPreview || screenshotUrl.trim()) && (
+              <div className="rounded-xl border border-amber-200 bg-white p-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-700">Selected screenshot</p>
+                    {screenshotPreview ? (
+                      <>
+                        <img src={screenshotPreview} alt="Preview" className="mt-2 h-28 w-full rounded-xl border border-amber-200 object-cover sm:h-24 sm:max-w-[220px]" />
+                        <p className="mt-2 break-all text-xs text-slate-500">{screenshotFile?.name || "Uploaded image selected"}</p>
+                      </>
+                    ) : (
+                      <p className="mt-2 break-all text-xs text-slate-500">{screenshotUrl}</p>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={clearScreenshotSelection}
+                    className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 transition hover:bg-rose-100 sm:self-start"
+                  >
+                    <AppIcon name="close" className="text-[10px]" /> Cancel
+                  </button>
+                </div>
+              </div>
+            )}
             <div className="flex items-center gap-2"><div className="flex-1 h-px bg-amber-200" /><span className="text-[10px] font-semibold text-amber-500 uppercase">or paste URL</span><div className="flex-1 h-px bg-amber-200" /></div>
             <input className="w-full rounded-xl border border-amber-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-amber-400"
               placeholder="https://drive.google.com/..." value={screenshotUrl}

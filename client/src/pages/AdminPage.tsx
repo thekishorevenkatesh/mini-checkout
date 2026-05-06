@@ -97,7 +97,11 @@ export function AdminPage() {
     setSuccess("");
   }
 
-  async function updateApproval(sellerId: string, nextStatus: ApprovalStatus) {
+  async function updateApproval(
+    sellerId: string,
+    nextStatus: ApprovalStatus,
+    closeModal: boolean = false
+  ) {
     if (!token) return;
     setError("");
     setSuccess("");
@@ -110,7 +114,12 @@ export function AdminPage() {
       setSuccess(`Seller marked as ${nextStatus}.`);
       await loadSellers(status);
       if (selectedSeller?._id === sellerId) {
-        setSelectedSeller((prev) => (prev ? { ...prev, approvalStatus: nextStatus } : prev));
+        setSelectedSeller((prev) =>
+          prev ? { ...prev, approvalStatus: nextStatus } : prev
+        );
+      }
+      if (closeModal) {
+        setSelectedSeller(null);
       }
     } catch {
       setError("Unable to update approval status.");
@@ -464,9 +473,9 @@ export function AdminPage() {
               </div>
             </div>
             <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-              <Button variant="success" onClick={() => void updateApproval(selectedSeller._id, "approved")} className="w-full sm:w-auto">Approve</Button>
-              <Button variant="danger" onClick={() => void updateApproval(selectedSeller._id, "rejected")} className="w-full sm:w-auto">Reject</Button>
-              <Button variant="secondary" onClick={() => void updateApproval(selectedSeller._id, "pending")} className="w-full sm:w-auto">Move to Pending</Button>
+              <Button variant="success" onClick={() => void updateApproval(selectedSeller._id, "approved",true)} className="w-full sm:w-auto">Approve</Button>
+              <Button variant="danger" onClick={() => void updateApproval(selectedSeller._id, "rejected",true)} className="w-full sm:w-auto">Reject</Button>
+              <Button variant="secondary" onClick={() => void updateApproval(selectedSeller._id, "pending",true)} className="w-full sm:w-auto">Move to Pending</Button>
             </div>
           </Card>
         </div>
