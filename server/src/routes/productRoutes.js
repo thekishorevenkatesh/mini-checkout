@@ -372,6 +372,26 @@ router.patch("/:productId/toggle", auth, async (req, res) => {
 });
 
 // ─── PUT /products/:productId — Update product (auth) ────────────────────
+router.patch("/:productId/out-of-stock", auth, async (req, res) => {
+  try {
+    const product = await Product.findOne({
+      _id: req.params.productId,
+      seller: req.sellerId,
+    });
+
+    if (!product) {
+      return res.status(404).json({ message: "Product not found" });
+    }
+
+    product.forceOutOfStock = !product.forceOutOfStock;
+    await product.save();
+
+    return res.json({ product });
+  } catch (error) {
+    return res.status(500).json({ message: "Unable to update stock status" });
+  }
+});
+
 router.put("/:productId", auth, async (req, res) => {
   try {
     const product = await Product.findOne({

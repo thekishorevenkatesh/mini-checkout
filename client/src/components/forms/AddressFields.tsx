@@ -86,6 +86,16 @@ export function AddressFields({
         />
       </label>
       <label className={labelClassName}>
+        <span className="text-sm font-semibold text-slate-700">Pincode</span>
+        <input
+          className={inputClassName}
+          value={value.pincode}
+          onChange={(event) => updateAddressField(value, onChange, "pincode", event.target.value.replace(/\D/g, "").slice(0, 10))}
+          inputMode="numeric"
+          placeholder="Enter pincode"
+        />
+      </label>
+      <label className={labelClassName}>
         <span className="text-sm font-semibold text-slate-700">Landmark</span>
         <input
           className={inputClassName}

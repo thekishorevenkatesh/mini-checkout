@@ -44,6 +44,10 @@ const variantItemSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+    forceOutOfStock: {
+      type: Boolean,
+      default: false,
+    },
   },
   { _id: false }
 );
