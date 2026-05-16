@@ -31,6 +31,23 @@ export function parseAddress(value: string): AddressParts {
     .map((part) => part.trim())
     .filter(Boolean);
 
+  const hasNewOrderPincodeAtEnd =
+    parts.length >= 7 &&
+    /^\d{4,10}$/.test(parts[parts.length - 1] || "") &&
+    !/^\d{4,10}$/.test(parts[5] || "");
+
+  if (hasNewOrderPincodeAtEnd) {
+    return {
+      line1: parts[0] || "",
+      line2: parts[1] || "",
+      landmark: parts[2] || "",
+      city: parts[3] || "",
+      state: parts[4] || "",
+      country: parts[5] || "",
+      pincode: parts[6] || "",
+    };
+  }
+
   return {
     line1: parts[0] || "",
     line2: parts[1] || "",
@@ -46,11 +63,11 @@ export function formatAddress(parts: AddressParts): string {
   return [
     parts.line1,
     parts.line2,
+    parts.landmark,
     parts.city,
     parts.state,
     parts.country,
     parts.pincode,
-    parts.landmark,
   ]
     .map((part) => part.trim())
     .filter(Boolean)

@@ -56,13 +56,22 @@ export function AddressFields({
         />
       </label>
       <label className={labelClassName}>
-        <span className="text-sm font-semibold text-slate-700">Country</span>
+        <span className="text-sm font-semibold text-slate-700">Landmark</span>
         <input
-          list="country-suggestions"
           className={inputClassName}
-          value={value.country}
-          onChange={(event) => updateAddressField(value, onChange, "country", event.target.value)}
-          placeholder="Start typing country"
+          value={value.landmark}
+          onChange={(event) => updateAddressField(value, onChange, "landmark", event.target.value)}
+          placeholder="Nearby place or reference point"
+        />
+      </label>
+      <label className={labelClassName}>
+        <span className="text-sm font-semibold text-slate-700">City</span>
+        <input
+          list="city-suggestions"
+          className={inputClassName}
+          value={value.city}
+          onChange={(event) => updateAddressField(value, onChange, "city", event.target.value)}
+          placeholder={value.country ? "Start typing city" : "Select or type country first"}
         />
       </label>
       <label className={labelClassName}>
@@ -76,13 +85,13 @@ export function AddressFields({
         />
       </label>
       <label className={labelClassName}>
-        <span className="text-sm font-semibold text-slate-700">City</span>
+        <span className="text-sm font-semibold text-slate-700">Country</span>
         <input
-          list="city-suggestions"
+          list="country-suggestions"
           className={inputClassName}
-          value={value.city}
-          onChange={(event) => updateAddressField(value, onChange, "city", event.target.value)}
-          placeholder={value.state ? "Start typing city" : "Select or type state first"}
+          value={value.country}
+          onChange={(event) => updateAddressField(value, onChange, "country", event.target.value)}
+          placeholder="Start typing country"
         />
       </label>
       <label className={labelClassName}>
@@ -93,14 +102,6 @@ export function AddressFields({
           onChange={(event) => updateAddressField(value, onChange, "pincode", event.target.value.replace(/\D/g, "").slice(0, 10))}
           inputMode="numeric"
           placeholder="Enter pincode"
-        />
-      </label>
-      <label className={labelClassName}>
-        <span className="text-sm font-semibold text-slate-700">Landmark</span>
-        <input
-          className={inputClassName}
-          value={value.landmark}
-          onChange={(event) => updateAddressField(value, onChange, "landmark", event.target.value)}
         />
       </label>
       {showSuggestionHint ? (

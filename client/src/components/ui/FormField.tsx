@@ -23,12 +23,12 @@ export function InputField({ label, hint, error, success, required, className = 
   const fieldState: FieldState = error ? "error" : success ? "success" : "default";
   return (
     <label className="block space-y-1.5">
-      <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+      <span className="text-sm font-semibold tracking-[0.01em] text-slate-700 dark:text-slate-200">
         {label}{required ? " *" : ""}
       </span>
       <input
         {...props}
-        className={`w-full rounded-xl border bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:ring-2 dark:bg-slate-900 dark:text-slate-100 ${stateClass[fieldState]} ${className}`}
+        className={`w-full rounded-2xl border bg-white/90 px-3.5 py-3 text-sm text-slate-900 shadow-sm outline-none transition focus:ring-2 dark:bg-slate-900/95 dark:text-slate-100 ${stateClass[fieldState]} ${className}`}
       />
       {error ? <span className="text-xs text-rose-600 dark:text-rose-300">{error}</span> : null}
       {!error && success ? <span className="text-xs text-emerald-600 dark:text-emerald-300">{success}</span> : null}
@@ -41,12 +41,12 @@ export function TextAreaField({ label, hint, error, success, required, className
   const fieldState: FieldState = error ? "error" : success ? "success" : "default";
   return (
     <label className="block space-y-1.5">
-      <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+      <span className="text-sm font-semibold tracking-[0.01em] text-slate-700 dark:text-slate-200">
         {label}{required ? " *" : ""}
       </span>
       <textarea
         {...props}
-        className={`w-full rounded-xl border bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:ring-2 dark:bg-slate-900 dark:text-slate-100 ${stateClass[fieldState]} ${className}`}
+        className={`w-full rounded-2xl border bg-white/90 px-3.5 py-3 text-sm text-slate-900 shadow-sm outline-none transition focus:ring-2 dark:bg-slate-900/95 dark:text-slate-100 ${stateClass[fieldState]} ${className}`}
       />
       {error ? <span className="text-xs text-rose-600 dark:text-rose-300">{error}</span> : null}
       {!error && success ? <span className="text-xs text-emerald-600 dark:text-emerald-300">{success}</span> : null}
@@ -57,8 +57,8 @@ export function TextAreaField({ label, hint, error, success, required, className
 
 export function FieldGroup({ title, children }: { title?: string; children: ReactNode }) {
   return (
-    <div className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50/80 p-4 dark:border-slate-700 dark:bg-slate-800/60">
-      {title ? <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-300">{title}</p> : null}
+    <div className="space-y-3 rounded-[24px] border border-slate-200 bg-slate-50/80 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900/70">
+      {title ? <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-300">{title}</p> : null}
       {children}
     </div>
   );

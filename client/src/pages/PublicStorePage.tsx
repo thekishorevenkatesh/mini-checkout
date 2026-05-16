@@ -6,6 +6,7 @@ import { AppIcon } from "../components/ui/AppIcon";
 import { AddressFields } from "../components/forms/AddressFields";
 import { DEFAULT_POLICY_CONTENT } from "../constants/policyDefaults";
 import { useI18n } from "../context/I18nContext";
+import { useToast } from "../context/ToastContext";
 import {
   DEFAULT_COUNTRY_CODE,
   EMPTY_ADDRESS,
@@ -136,7 +137,6 @@ function buildLegacyVariantItems(product: Product): VariantItem[] {
         attributes: { [label]: option },
         price: product.variantPrices?.[priceKey] ?? product.price,
         mrp: product.variantMrps?.[priceKey] ?? product.mrp,
-        stockQuantity: product.variantQuantities?.[priceKey] ?? 0,
         isActive: true,
       });
     }
@@ -204,6 +204,34 @@ function getNormalizedVariantGroups(product: Product) {
   }));
 }
 
+function getFirstAvailableVariant(product: Product) {
+  return getNormalizedVariantItems(product)[0] || null;
+}
+
+function splitPackAndUom(value: string) {
+  const match = String(value || "").trim().match(/^([\d.]+)\s*([a-zA-Z]+.*)?$/);
+  if (!match) {
+    return { packSize: String(value || "").trim(), uom: "" };
+  }
+  return {
+    packSize: (match[1] || "").trim(),
+    uom: (match[2] || "").trim(),
+  };
+}
+
+function getProductDisplayMeasure(product: Product) {
+  const packSize = String(product.packSize || "").trim();
+  const uom = String(product.uom || "").trim();
+  if (packSize || uom) {
+    return [packSize, uom].filter(Boolean).join(" ");
+  }
+
+  const firstVariant = getFirstAvailableVariant(product);
+  if (!firstVariant?.title) return "";
+  const parsed = splitPackAndUom(firstVariant.title);
+  return [parsed.packSize, parsed.uom].filter(Boolean).join(" ");
+}
+
 function getProductUnitPricing(product: Product, selectedVariants: Record<string, string>) {
   const matchedVariant = findMatchingVariant(product, selectedVariants);
   if (matchedVariant) {
@@ -230,31 +258,18 @@ function getProductUnitPricing(product: Product, selectedVariants: Record<string
     }
   }
 
+  const firstVariant = getFirstAvailableVariant(product);
+  if ((Number(product.price) || 0) <= 0 && firstVariant) {
+    return {
+      price: firstVariant.price,
+      mrp: firstVariant.mrp || product.mrp,
+    };
+  }
+
   return {
     price: product.price,
     mrp: product.mrp,
   };
-}
-
-function getProductAvailableStock(product: Product, selectedVariants: Record<string, string>) {
-  const matchedVariant = findMatchingVariant(product, selectedVariants);
-  if (matchedVariant) {
-    return matchedVariant.stockQuantity;
-  }
-
-  const quantityMap = product.variantQuantities || {};
-  const stocks: number[] = [];
-  for (const variant of getNormalizedVariantGroups(product)) {
-    if (!variant.options?.length) continue;
-    const option = selectedVariants[variant.label];
-    if (!option) continue;
-    const value = Number(quantityMap[getVariantPriceKey(variant.label, option)]);
-    if (Number.isFinite(value) && value >= 0) {
-      stocks.push(value);
-    }
-  }
-  if (!stocks.length) return null;
-  return Math.min(...stocks);
 }
 
 function withAutoSelectedSingleVariants(product: Product, selectedVariants: Record<string, string>) {
@@ -344,6 +359,7 @@ function CategoryScrollRow({
 
 export function PublicStorePage() {
   const { t } = useI18n();
+  const { showError, showSuccess } = useToast();
   const navigate = useNavigate();
   const { sellerSlug } = useParams<{ sellerSlug: string }>();
   const [searchParams] = useSearchParams();
@@ -363,6 +379,12 @@ export function PublicStorePage() {
   const [showCart, setShowCart] = useState(false);
   const [variantPopupProductId, setVariantPopupProductId] = useState<string | null>(null);
   const [popupVariants, setPopupVariants] = useState<Record<string, string>>({});
+  const [popupVariantQuantities, setPopupVariantQuantities] = useState<Record<string, {
+    quantity: number;
+    selections: Record<string, string>;
+    variantTitle: string;
+    unitPrice: number;
+  }>>({});
   const [popupVariantError, setPopupVariantError] = useState("");
 
   // Checkout fields
@@ -558,6 +580,22 @@ export function PublicStorePage() {
     };
   }, [seller?.favicon]);
 
+  useEffect(() => {
+    if (error) showError(error);
+  }, [error, showError]);
+
+  useEffect(() => {
+    if (successMessage) showSuccess(successMessage);
+  }, [showSuccess, successMessage]);
+
+  useEffect(() => {
+    if (proofSuccess) showSuccess(proofSuccess);
+  }, [proofSuccess, showSuccess]);
+
+  useEffect(() => {
+    if (cartFeedback) showSuccess(cartFeedback);
+  }, [cartFeedback, showSuccess]);
+
   function getBaseCartItem(productId: string): CartItem {
     return (
       cart[buildCartItemKey(productId)] || {
@@ -620,16 +658,12 @@ export function PublicStorePage() {
     if (q <= 0) { removeProduct(cartItemId); return; }
     const currentItem = cart[cartItemId];
     if (!currentItem) return;
-    const product = products.find(p => p._id === currentItem.productId);
-    if (!product) return;
-    const availableStock = getProductAvailableStock(product, currentItem.variants);
-    const safeQty = availableStock !== null ? Math.min(q, availableStock) : q;
     resetSavedProgress();
     setCart(prev => ({
       ...prev,
       [cartItemId]: {
         ...currentItem,
-        quantity: Math.max(1, safeQty),
+        quantity: Math.max(1, q),
       },
     }));
   }
@@ -688,11 +722,6 @@ export function PublicStorePage() {
           setError(`Please select ${variant.label} for ${product.title}.`);
           return null;
         }
-      }
-      const selectedStock = getProductAvailableStock(product, item?.variants || {});
-      if (selectedStock !== null && item.quantity > selectedStock) {
-        setError(`Only ${selectedStock} quantity left for selected options in ${product.title}.`);
-        return null;
       }
     }
 
@@ -823,43 +852,86 @@ export function PublicStorePage() {
     const product = products.find(p => p._id === productId);
     if (!product) return;
     setPopupVariants(withAutoSelectedSingleVariants(product, {}));
+    setPopupVariantQuantities(
+      Object.entries(cart).reduce<Record<string, {
+        quantity: number;
+        selections: Record<string, string>;
+        variantTitle: string;
+        unitPrice: number;
+      }>>((acc, [, item]) => {
+        if (item.productId !== productId || !item.variantId || item.quantity <= 0) return acc;
+        acc[item.variantId] = {
+          quantity: item.quantity,
+          selections: item.variants,
+          variantTitle: item.variantTitle,
+          unitPrice: item.unitPrice,
+        };
+        return acc;
+      }, {})
+    );
     setPopupVariantError("");
     setVariantPopupProductId(productId);
+  }
+
+  function setPopupVariantQuantity(
+    variantId: string,
+    details: {
+      quantity: number;
+      selections: Record<string, string>;
+      variantTitle: string;
+      unitPrice: number;
+    },
+  ) {
+    setPopupVariantQuantities(prev => {
+      if (details.quantity <= 0) {
+        const next = { ...prev };
+        delete next[variantId];
+        return next;
+      }
+      return {
+        ...prev,
+        [variantId]: details,
+      };
+    });
   }
 
   function handlePopupAddToCart() {
     if (!variantPopupProductId) return;
     const product = products.find(p => p._id === variantPopupProductId);
     if (!product) return;
-    if (!hasCompleteVariantSelection(product, popupVariants)) { setPopupVariantError("Please select all options."); return; }
-    const matchedVariant = findMatchingVariant(product, popupVariants);
-    if (!matchedVariant) {
-      setPopupVariantError("Selected combination is unavailable.");
+    if (Object.keys(popupVariantQuantities).length === 0) {
+      setPopupVariantError("Please select at least one variant.");
       return;
     }
+
     resetSavedProgress();
     setCart(prev => {
-      const cartItemKey = buildCartItemKey(variantPopupProductId, matchedVariant.variantId);
-      const existingItem = prev[cartItemKey];
-      const nextQuantity = (existingItem?.quantity || 0) + 1;
-      if (nextQuantity > matchedVariant.stockQuantity) {
-        setPopupVariantError(`Only ${matchedVariant.stockQuantity} left for this variant.`);
-        return prev;
+      const next = { ...prev };
+      for (const [cartItemId, item] of Object.entries(next)) {
+        if (item.productId === product._id && item.variantId) {
+          delete next[cartItemId];
+        }
       }
-      return {
-        ...prev,
-        [cartItemKey]: {
-          productId: variantPopupProductId,
-          variantId: matchedVariant.variantId,
-          variantTitle: matchedVariant.title || product.title,
-          quantity: nextQuantity,
-          variants: popupVariants,
-          unitPrice: matchedVariant.price,
-        },
-      };
+
+      for (const [variantId, draft] of Object.entries(popupVariantQuantities)) {
+        if (draft.quantity <= 0) continue;
+        next[buildCartItemKey(product._id, variantId)] = {
+          productId: product._id,
+          variantId,
+          variantTitle: draft.variantTitle,
+          quantity: draft.quantity,
+          variants: draft.selections,
+          unitPrice: draft.unitPrice,
+        };
+      }
+
+      return next;
     });
+
     setCartFeedback(`${product.title} added to cart`);
     window.setTimeout(() => setCartFeedback(""), 1800);
+    setPopupVariantQuantities({});
+    setPopupVariantError("");
     setVariantPopupProductId(null);
   }
 
@@ -893,16 +965,16 @@ export function PublicStorePage() {
   if (!seller) {
     return (
       <main className="mx-auto flex min-h-screen w-full max-w-4xl items-center justify-center px-4 py-10">
-        <div className="rounded-3xl border border-rose-200 bg-white p-8 text-center shadow-card">
-          <p className="mb-3 inline-flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-teal-600">
-            <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-teal-600">
-              <AppIcon name="brand" className="text-[11px]" />
+        <div className="surface-card-strong rounded-[30px] p-8 text-center">
+          <p className="mb-3 inline-flex items-center gap-2 rounded-full border border-teal-100 bg-white/85 px-4 py-2 text-xs font-bold uppercase tracking-widest text-teal-600 dark:border-teal-900/40 dark:bg-slate-950/80 dark:text-teal-300">
+            <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-teal-600 text-white dark:bg-teal-500">
+              <AppIcon name="brand" className="text-[12px]" />
             </span>
             MyDukan
           </p>
-          <h1 className="font-heading text-2xl font-bold text-slate-900">Store Not Found</h1>
-          <p className="mt-2 text-sm text-slate-600">{error || "This seller link is unavailable."}</p>
-          <Link to="/login" className="mt-5 inline-flex rounded-xl bg-gradient-to-r from-emerald-500 via-teal-500 to-sky-500 px-4 py-2 text-sm font-semibold text-white shadow-md transition hover:from-emerald-400 hover:via-teal-400 hover:to-sky-400">Sign In to MyDukan</Link>
+          <h1 className="font-heading text-2xl font-bold text-slate-900 dark:text-slate-100">Store Not Found</h1>
+          <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-slate-300">{error || "This seller link is unavailable."}</p>
+          <Link to="/login" className="mt-5 inline-flex items-center gap-2 rounded-2xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-950 dark:hover:bg-white"><AppIcon name="login" className="text-[14px]" />Sign In to MyDukan</Link>
         </div>
       </main>
     );
@@ -915,29 +987,22 @@ export function PublicStorePage() {
       {/* -- LEFT: Store + Products --------------------------- */}
       <section className="space-y-6">
         {/* Store Header */}
-        <div className="rounded-3xl border border-white/80 bg-gradient-to-br from-white via-emerald-50/70 to-sky-50/80 p-4 shadow-card ring-1 ring-emerald-100/80 backdrop-blur-sm sm:p-5 dark:border-teal-900/50 dark:bg-gradient-to-br dark:from-slate-950/95 dark:via-slate-900/90 dark:to-slate-900/95 dark:ring-teal-900/30">
-          <div className="flex items-center gap-3">
+        <div className="surface-card-strong rounded-[32px] bg-gradient-to-br from-white via-slate-50 to-teal-50/70 p-4 sm:p-5 dark:from-slate-950 dark:via-slate-900 dark:to-slate-900">
+          <div className="flex flex-wrap items-center gap-4">
             {/* Logo + Name */}
             <div className="flex min-w-0 flex-1 items-center gap-3">
               {seller.businessLogo && (
                 <img
                   src={seller.businessLogo}
                   alt=""
-                  className="h-12 w-12 shrink-0 rounded-xl border border-slate-200/80 bg-white object-contain p-0.5 shadow-sm dark:border-slate-600 dark:bg-slate-800 sm:h-14 sm:w-14"
+                  className="h-14 w-14 shrink-0 rounded-2xl border border-slate-200/80 bg-white object-contain p-1 shadow-sm dark:border-slate-700 dark:bg-slate-900 sm:h-16 sm:w-16"
                 />
               )}
               <div className="min-w-0">
-                <h1 className="truncate font-heading text-lg font-bold leading-tight tracking-tight text-slate-900 sm:text-xl dark:text-slate-100">
+                <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">Online Store</p>
+                <h1 className="truncate font-heading text-xl font-bold leading-tight tracking-tight text-slate-900 sm:text-2xl dark:text-slate-100">
                   {seller.businessName}
                 </h1>
-                {seller.businessAddress && (
-                  <p className="flex items-center gap-1.5 truncate text-xs text-slate-500 dark:text-slate-400">
-                    <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 dark:from-teal-500 dark:to-sky-500">
-                      <AppIcon name="location" className="text-[10px]" />
-                    </span>
-                    <span className="truncate">{seller.businessAddress}</span>
-                  </p>
-                )}
               </div>
             </div>
             {/* Social + contact icons � right side */}
@@ -945,26 +1010,19 @@ export function PublicStorePage() {
               {seller.whatsappNumber && (
                 <a href={`https://wa.me/${seller.whatsappNumber.replace(/\D/g, "")}`} target="_blank" rel="noreferrer"
                   title="Chat on WhatsApp" aria-label="Chat on WhatsApp"
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-600 text-base text-white shadow-sm transition hover:bg-emerald-500">
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-emerald-200 bg-emerald-50 text-emerald-700 shadow-sm transition hover:-translate-y-0.5 hover:bg-emerald-100 dark:border-emerald-900/50 dark:bg-emerald-950/50 dark:text-emerald-300">
                   <AppIcon name="whatsapp" className="text-sm" />
                 </a>
               )}
               {seller.callNumber && (
                 <a href={`tel:${seller.callNumber}`} title="Call Seller" aria-label="Call Seller"
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-blue-600 text-base text-white shadow-sm transition hover:bg-blue-500">
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-sky-200 bg-sky-50 text-sky-700 shadow-sm transition hover:-translate-y-0.5 hover:bg-sky-100 dark:border-sky-900/50 dark:bg-sky-950/45 dark:text-sky-300">
                   <AppIcon name="phone" className="text-sm" />
                 </a>
               )}
-              {seller.socialLinks?.filter((s) => String(s.url || "").trim()).map((s, i) => (
-                <a key={i} href={s.url} target="_blank" rel="noreferrer"
-                  title={s.platform} aria-label={s.platform}
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-sky-500 to-cyan-600 text-base shadow-sm transition hover:from-sky-400 hover:to-cyan-500 dark:from-cyan-500 dark:to-blue-500">
-                  <AppIcon name={SOCIAL_ICONS[s.platform] || "link"} className="text-sm" />
-                </a>
-              ))}
               {/* Cart button */}
               <button type="button" onClick={() => setShowCart(true)} aria-label="Open cart"
-                className="relative inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-600 text-base text-white shadow-sm transition hover:bg-emerald-500">
+                className="relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-slate-900 text-base text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-950 dark:hover:bg-white">
                 <AppIcon name="cart" className="text-sm" />
                 {cartCount > 0 && (
                   <span className="absolute -right-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-rose-500 text-[9px] font-bold text-white leading-none">
@@ -983,11 +1041,11 @@ export function PublicStorePage() {
         )}
 
         {/* Discovery controls */}
-        <div className="rounded-2xl border border-emerald-100/90 bg-gradient-to-br from-white to-emerald-50/70 shadow-sm ring-1 ring-emerald-100/70 dark:border-teal-900/40 dark:bg-gradient-to-br dark:from-slate-950/95 dark:to-slate-900/90 dark:ring-teal-900/20">
+        <div className="surface-card rounded-[28px] bg-gradient-to-br from-white to-emerald-50/70 dark:from-slate-950/95 dark:to-slate-900/90">
           {/* Smart search bar */}
           <div className="relative">
             <div className="flex items-center gap-2 px-3 py-2.5">
-              <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 dark:from-teal-500 dark:to-sky-500">
+              <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-2xl bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-950">
                 <AppIcon name="search" className="text-[11px]" />
               </span>
               <input
@@ -1081,12 +1139,6 @@ export function PublicStorePage() {
           </div>
         </div>
 
-        {cartFeedback && (
-          <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-            {cartFeedback}
-          </p>
-        )}
-
         {/* Products */}
         {(() => {
           function renderCard(product: Product) {
@@ -1099,19 +1151,20 @@ export function PublicStorePage() {
             const unitMrp = unit.mrp;
             const normalizedVariants = getNormalizedVariantGroups(product);
             const normalizedVariantItems = getNormalizedVariantItems(product);
-            const selectedStock = getProductAvailableStock(product, baseItem.variants);
+            const displayMeasure = getProductDisplayMeasure(product);
             const requiresVariantSelection = normalizedVariantItems.length > 0 || normalizedVariants.some(v => (v.options || []).length > 0);
             const discountPercent = unitMrp > unitPrice ? Math.round(((unitMrp - unitPrice) / unitMrp) * 100) : 0;
-            const isOutOfStock = Boolean(product.forceOutOfStock) || (requiresVariantSelection
-              ? normalizedVariantItems.length > 0 && normalizedVariantItems.every((variantItem) => variantItem.stockQuantity <= 0)
-              : selectedStock !== null && selectedStock <= 0);
+            const hasConfiguredVariantItems = Array.isArray(product.variantItems) && product.variantItems.length > 0;
+            const isOutOfStock = requiresVariantSelection
+              ? hasConfiguredVariantItems && normalizedVariantItems.length === 0
+              : false;
             const isNewProduct = Date.now() - new Date(product.createdAt).getTime() < 1000 * 60 * 60 * 24 * 7;
             const productImages = getProductImages(product);
             const activeImgIdx = Math.min(activeProductImageIndex[product._id] || 0, Math.max(productImages.length - 1, 0));
             const activeImage = productImages[activeImgIdx] || "";
             return (
               <article key={product._id}
-                className={`group flex flex-col overflow-hidden rounded-2xl border bg-white shadow-sm transition duration-200 hover:-translate-y-0.5 hover:shadow-md dark:border-slate-700 dark:bg-slate-900 ${productCartQuantity > 0 ? "border-emerald-400 ring-2 ring-emerald-100/80 dark:ring-emerald-900/40" : "border-slate-200"}`}>
+                className={`group flex flex-col overflow-hidden rounded-[26px] border bg-white/95 shadow-sm transition duration-200 hover:-translate-y-1 hover:shadow-lg dark:border-slate-700 dark:bg-slate-950/90 ${productCartQuantity > 0 ? "border-emerald-400 ring-2 ring-emerald-100/80 dark:ring-emerald-900/40" : "border-slate-200"}`}>
                 {/* Image + badges + dot carousel */}
                 <div className="relative overflow-hidden bg-slate-100 dark:bg-slate-800">
                   {activeImage ? (
@@ -1138,8 +1191,14 @@ export function PublicStorePage() {
                   )}
                 </div>
                 {/* Info */}
-                <div className="flex flex-1 flex-col gap-1.5 p-2.5">
-                  <p className="line-clamp-2 text-[13px] font-semibold leading-tight text-slate-800 dark:text-slate-100">{product.title}</p>
+                <div className="flex flex-1 flex-col gap-2 p-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="line-clamp-2 text-[13px] font-semibold leading-tight text-slate-800 dark:text-slate-100">{product.title}</p>
+                  
+                  </div>
+                  {displayMeasure && (
+                    <p className="text-[12px] text-slate-500 dark:text-slate-400">{displayMeasure}</p>
+                  )}
                   <div className="flex items-baseline gap-1.5">
                     <span className="text-sm font-bold text-slate-900 dark:text-slate-100">₹{unitPrice}</span>
                     {unitMrp > 0 && unitMrp > unitPrice && (
@@ -1188,9 +1247,6 @@ export function PublicStorePage() {
                     <p className="text-center text-[10px] text-emerald-600">
                       {hasVariantLines ? `${productCartEntries.length} variants in cart` : `${productCartQuantity} in cart`}
                     </p>
-                  )}
-                  {selectedStock !== null && selectedStock <= 5 && selectedStock > 0 && (
-                    <p className="text-center text-[10px] text-rose-500">Only {selectedStock} left</p>
                   )}
                 </div>
               </article>
@@ -1248,7 +1304,7 @@ export function PublicStorePage() {
       <div className="sticky top-0 z-10 flex items-center justify-between bg-white/95 px-5 py-4 border-b border-slate-200 backdrop-blur dark:border-teal-900/30 dark:bg-slate-950/95">
         <div>
           <h2 className="font-heading text-xl font-bold text-slate-900 dark:text-slate-100">{t("store.checkout", "Checkout")}</h2>
-          {selectedItems.length > 0 && <p className="text-xs text-slate-500 dark:text-slate-400">{cartCount} item{cartCount !== 1 ? "s" : ""} � ?{grandTotal}</p>}
+          {selectedItems.length > 0 && <p className="text-xs text-slate-500 dark:text-slate-400">{cartCount} item{cartCount !== 1 ? "s" : ""} � ₹{grandTotal}</p>}
         </div>
         <button type="button" onClick={() => setShowCart(false)} className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 dark:from-teal-500 dark:to-sky-500">
           <AppIcon name="close" className="text-[11px]" />
@@ -1302,39 +1358,7 @@ export function PublicStorePage() {
           </div>
         </div>
 
-        {(supportsPrepaid || supportsCod) && (
-          <div className="space-y-2">
-            <p className="text-sm font-semibold text-slate-700">Payment method</p>
-            <div className="grid gap-2">
-              {supportsPrepaid && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPaymentMethod("prepaid");
-                    resetSavedProgress();
-                  }}
-                  className={`rounded-xl border px-4 py-3 text-left transition ${isPrepaidCheckout ? "border-teal-500 bg-teal-50" : "border-slate-200 bg-slate-50 hover:border-slate-300"}`}
-                >
-                  <p className="text-sm font-semibold text-slate-900">Pay Before Order</p>
-                  <p className="text-xs text-slate-500">Save details, pay by UPI, upload screenshot, then place the order.</p>
-                </button>
-              )}
-              {supportsCod && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPaymentMethod("cod");
-                    resetSavedProgress();
-                  }}
-                  className={`rounded-xl border px-4 py-3 text-left transition ${isCodCheckout ? "border-teal-500 bg-teal-50" : "border-slate-200 bg-slate-50 hover:border-slate-300"}`}
-                >
-                  <p className="text-sm font-semibold text-slate-900">Cash on Delivery</p>
-                  <p className="text-xs text-slate-500">Place the order now and pay the seller at the time of delivery.</p>
-                </button>
-              )}
-            </div>
-          </div>
-        )}
+      
 
         {/* Order form */}
         <form className="space-y-3" onSubmit={handleSaveDetails}>
@@ -1374,16 +1398,45 @@ export function PublicStorePage() {
               placeholder="Special instructions..." value={note} onChange={e => { setNote(e.target.value); resetSavedProgress(); }} />
           </label>
 
-          {error && <p className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p>}
-          {successMessage && <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{successMessage}</p>}
-
           <button type="submit" disabled={submitting || selectedItems.length === 0}
             className="w-full rounded-xl bg-gradient-to-r from-emerald-500 via-teal-500 to-sky-500 px-4 py-3.5 text-sm font-semibold text-white shadow-md transition hover:from-emerald-400 hover:via-teal-400 hover:to-sky-400 disabled:from-slate-300 disabled:via-slate-300 disabled:to-slate-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-500 dark:hover:from-emerald-500 dark:hover:via-teal-500 dark:hover:to-sky-500">
-            Save Details
+            Confirm Delivery Details
           </button>
         </form>
         </div>
-
+  {(supportsPrepaid || supportsCod) && (
+          <div className="space-y-2">
+            <p className="text-sm font-semibold text-slate-700">Payment method</p>
+            <div className="grid gap-2">
+              {supportsPrepaid && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPaymentMethod("prepaid");
+                    resetSavedProgress();
+                  }}
+                  className={`rounded-xl border px-4 py-3 text-left transition ${isPrepaidCheckout ? "border-teal-500 bg-teal-50" : "border-slate-200 bg-slate-50 hover:border-slate-300"}`}
+                >
+                  <p className="text-sm font-semibold text-slate-900">Pay Before Order</p>
+                  <p className="text-xs text-slate-500">Save details, pay by UPI, upload screenshot, then place the order.</p>
+                </button>
+              )}
+              {supportsCod && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPaymentMethod("cod");
+                    resetSavedProgress();
+                  }}
+                  className={`rounded-xl border px-4 py-3 text-left transition ${isCodCheckout ? "border-teal-500 bg-teal-50" : "border-slate-200 bg-slate-50 hover:border-slate-300"}`}
+                >
+                  <p className="text-sm font-semibold text-slate-900">Cash on Delivery</p>
+                  <p className="text-xs text-slate-500">Place the order now and pay the seller at the time of delivery.</p>
+                </button>
+              )}
+            </div>
+          </div>
+        )}
         {/* UPI payment */}
         {(supportsPrepaid && isPrepaidCheckout && seller.upiId && grandTotal > 0 && selectedItems.length > 0) && (
           <div className="rounded-2xl border border-teal-200/60 bg-gradient-to-b from-teal-50/80 to-slate-50 p-4 space-y-3 dark:border-teal-900/40 dark:from-teal-950/30 dark:to-slate-900/50">
@@ -1467,7 +1520,6 @@ export function PublicStorePage() {
             <input className="w-full rounded-xl border border-amber-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-amber-400"
               placeholder="https://drive.google.com/..." value={screenshotUrl}
               onChange={e => { setScreenshotUrl(e.target.value); setSavedProofUrl(""); setProofSuccess(""); if (e.target.value) { setScreenshotFile(null); setScreenshotPreview(""); } }} />
-            {proofSuccess && <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-2.5 py-1.5">{proofSuccess}</p>}
             <button type="button" onClick={handleProofSubmit} disabled={uploadingProof || !savedCheckoutData || (!screenshotUrl.trim() && !screenshotFile)}
               className="w-full rounded-xl bg-amber-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-amber-500 disabled:bg-amber-300 transition">
               {uploadingProof ? "Saving..." : "Save Screenshot"}
@@ -1488,6 +1540,7 @@ export function PublicStorePage() {
       const product = products.find(p => p._id === variantPopupProductId);
       if (!product) return null;
       const vgs = getNormalizedVariantGroups(product);
+      const hasDraftSelections = Object.values(popupVariantQuantities).some((entry) => entry.quantity > 0);
       return (
         <div className="fixed inset-0 z-[60] flex items-end justify-center sm:items-center bg-black/50 backdrop-blur-[2px] px-4 pb-4 sm:p-4">
           <div className="w-full max-w-sm rounded-3xl bg-white p-5 shadow-2xl dark:border dark:border-teal-900/40 dark:bg-gradient-to-b dark:from-slate-950 dark:to-slate-900">
@@ -1505,11 +1558,65 @@ export function PublicStorePage() {
                   <div className="flex flex-wrap gap-2">
                     {v.options.map(opt => {
                       const optPrice = product.variantPrices?.[getVariantPriceKey(v.label, opt)];
-                      const optQty = product.variantQuantities?.[getVariantPriceKey(v.label, opt)];
-                      const optOut = optQty !== undefined && optQty <= 0;
+                      const optOut = Array.isArray(product.variantItems) && product.variantItems.length > 0
+                        ? !product.variantItems.some((item) => item.isActive !== false && item.attributes?.[v.label] === opt)
+                        : false;
+                      const isSelectedOption = popupVariants[v.label] === opt;
+                      const nextSelections = { ...popupVariants, [v.label]: opt };
+                      const optionMatchedVariant = hasCompleteVariantSelection(product, nextSelections)
+                        ? findMatchingVariant(product, nextSelections)
+                        : null;
+                      const optionDraft = optionMatchedVariant
+                        ? popupVariantQuantities[optionMatchedVariant.variantId]
+                        : null;
+                      const optionDraftQuantity = optionDraft?.quantity || 0;
+                      if (optionMatchedVariant && optionDraft && optionDraftQuantity > 0) {
+                        return (
+                          <div
+                            key={opt}
+                            className="inline-flex items-center gap-3 rounded-xl bg-emerald-600 px-2 py-1.5 text-sm font-bold text-white"
+                          >
+                            <button
+                              type="button"
+                              onClick={() => setPopupVariantQuantity(optionMatchedVariant.variantId, {
+                                quantity: optionDraftQuantity - 1,
+                                selections: optionDraft.selections,
+                                variantTitle: optionDraft.variantTitle,
+                                unitPrice: optionDraft.unitPrice,
+                              })}
+                              className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/20 text-base hover:bg-white/30"
+                            >
+                              -
+                            </button>
+                            <span className="min-w-5 text-center">{optionDraftQuantity}</span>
+                            <button
+                              type="button"
+                              onClick={() => setPopupVariantQuantity(optionMatchedVariant.variantId, {
+                                quantity: optionDraftQuantity + 1,
+                                selections: optionDraft.selections,
+                                variantTitle: optionDraft.variantTitle,
+                                unitPrice: optionDraft.unitPrice,
+                              })}
+                              className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/20 text-base hover:bg-white/30"
+                            >
+                              +
+                            </button>
+                          </div>
+                        );
+                      }
                       return (<button key={opt} type="button" disabled={optOut}
-                        onClick={() => { setPopupVariants(prev => ({ ...prev, [v.label]: opt })); setPopupVariantError(""); }}
-                        className={`rounded-xl border px-3 py-1.5 text-sm font-semibold transition disabled:opacity-40 ${popupVariants[v.label] === opt ? "border-emerald-500 bg-emerald-50 text-emerald-800" : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"}`}>
+                        onClick={() => {
+                          setPopupVariants(nextSelections);
+                          setPopupVariantError("");
+                          if (!optionMatchedVariant || popupVariantQuantities[optionMatchedVariant.variantId]) return;
+                          setPopupVariantQuantity(optionMatchedVariant.variantId, {
+                            quantity: 1,
+                            selections: nextSelections,
+                            variantTitle: optionMatchedVariant.title || product.title,
+                            unitPrice: optionMatchedVariant.price,
+                          });
+                        }}
+                        className={`rounded-xl border px-3 py-1.5 text-sm font-semibold transition disabled:opacity-40 ${isSelectedOption ? "border-emerald-500 bg-emerald-50 text-emerald-800" : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"}`}>
                         {opt}{optPrice ? ` - ₹${optPrice}` : ""}
                       </button>);
                     })}
@@ -1518,12 +1625,40 @@ export function PublicStorePage() {
               ))}
             </div>
             {popupVariantError && <p className="mt-2 text-xs text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-2.5 py-1.5">{popupVariantError}</p>}
-            <button type="button" onClick={handlePopupAddToCart} className="mt-4 w-full rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-500 transition">Add to Cart</button>
+            {hasDraftSelections && (
+              <button
+                type="button"
+                onClick={handlePopupAddToCart}
+                className="mt-4 w-full rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-500 transition"
+              >
+                Add to Cart
+              </button>
+            )}
           </div>
         </div>
       );
     })()}
     <footer className="space-y-3 py-4 text-center text-xs text-slate-400">
+      {seller.socialLinks?.some((s) => String(s.url || "").trim()) && (
+        <div className="space-y-2">
+          <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Stay Connected</p>
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            {seller.socialLinks.filter((s) => String(s.url || "").trim()).map((s, i) => (
+              <a
+                key={i}
+                href={s.url}
+                target="_blank"
+                rel="noreferrer"
+                title={s.platform}
+                aria-label={s.platform}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-sky-500 to-cyan-600 text-white shadow-sm transition hover:from-sky-400 hover:to-cyan-500 dark:from-cyan-500 dark:to-blue-500"
+              >
+                <AppIcon name={SOCIAL_ICONS[s.platform] || "link"} className="text-sm" />
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
       <div className="flex flex-wrap items-center justify-center gap-3">
         <button type="button" onClick={() => setActivePolicy("privacyPolicy")} className="font-semibold text-slate-500 hover:text-slate-700">
           Privacy Policy

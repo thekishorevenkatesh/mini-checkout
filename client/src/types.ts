@@ -23,7 +23,6 @@ export interface VariantItem {
   attributes: Record<string, string>;
   price: number;
   mrp: number;
-  stockQuantity: number;
   isActive: boolean;
 }
 
@@ -72,15 +71,15 @@ export interface Product {
   imageUrl: string;
   imageUrls?: string[];
   notes: string;
+  packSize?: string;
+  uom?: string;
   mrp: number;
   price: number; // selling price
   variants: ProductVariant[];
   variantItems?: VariantItem[];
   variantPrices?: Record<string, number>;
   variantMrps?: Record<string, number>;
-  variantQuantities?: Record<string, number>;
   isActive: boolean;
-  forceOutOfStock?: boolean;
   createdAt: string;
 }
 
