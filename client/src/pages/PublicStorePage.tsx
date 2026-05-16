@@ -413,6 +413,21 @@ export function PublicStorePage() {
   const [savedCheckoutData, setSavedCheckoutData] = useState<SavedCheckoutData | null>(null);
   const [activePolicy, setActivePolicy] = useState<PolicyKey | null>(null);
   const [activeProductImageIndex, setActiveProductImageIndex] = useState<Record<string, number>>({});
+  const imageScrollRefs = useRef<Record<string, HTMLDivElement | null>>({});
+
+  const scrollToProductImage = (productId: string, index: number) => {
+    setActiveProductImageIndex((prev) => ({ ...prev, [productId]: index }));
+    const element = imageScrollRefs.current[productId];
+    if (element) {
+      element.scrollTo({ left: element.clientWidth * index, behavior: "smooth" });
+    }
+  };
+
+  const handleProductImageScroll = (productId: string, event: React.UIEvent<HTMLDivElement>) => {
+    const target = event.currentTarget;
+    const index = Math.round(target.scrollLeft / Math.max(1, target.clientWidth));
+    setActiveProductImageIndex((prev) => (prev[productId] === index ? prev : { ...prev, [productId]: index }));
+  };
 
   useEffect(() => {
     async function fetchStore() {
@@ -1240,17 +1255,28 @@ export function PublicStorePage() {
             const isNewProduct = Date.now() - new Date(product.createdAt).getTime() < 1000 * 60 * 60 * 24 * 7;
             const productImages = getProductImages(product);
             const activeImgIdx = Math.min(activeProductImageIndex[product._id] || 0, Math.max(productImages.length - 1, 0));
-            const activeImage = productImages[activeImgIdx] || "";
             return (
               <article key={product._id}
                 className={`group flex flex-col overflow-hidden rounded-[26px] border bg-white/95 shadow-sm transition duration-200 hover:-translate-y-1 hover:shadow-lg dark:border-slate-700 dark:bg-slate-950/90 ${productCartQuantity > 0 ? "border-emerald-400 ring-2 ring-emerald-100/80 dark:ring-emerald-900/40" : "border-slate-200"}`}>
                 {/* Image + badges + dot carousel */}
-                <div className="relative overflow-hidden bg-slate-100 dark:bg-slate-800">
-                  {activeImage ? (
-                    <img src={activeImage} alt={product.title} className="aspect-square w-full object-cover transition duration-300 group-hover:scale-[1.03]" />
-                  ) : (
-                    <div className="aspect-square w-full bg-gradient-to-br from-slate-100 to-slate-200 dark:from-slate-800 dark:to-slate-900" />
-                  )}
+                <div className="relative overflow-hidden bg-slate-100 dark:bg-slate-800 aspect-square">
+                  <div
+                    ref={(el) => { imageScrollRefs.current[product._id] = el; }}
+                    onScroll={(event) => handleProductImageScroll(product._id, event)}
+                    className="flex h-full w-full snap-x snap-mandatory touch-pan-x overflow-x-auto"
+                    style={{ scrollbarWidth: "none" }}
+                  >
+                    {productImages.length > 0 ? productImages.map((imageUrl, idx) => (
+                      <img
+                        key={idx}
+                        src={imageUrl}
+                        alt={`${product.title} image ${idx + 1}`}
+                        className="h-full min-w-full snap-center object-cover transition duration-300 group-hover:scale-[1.03]"
+                      />
+                    )) : (
+                      <div className="aspect-square w-full bg-gradient-to-br from-slate-100 to-slate-200 dark:from-slate-800 dark:to-slate-900" />
+                    )}
+                  </div>
                   {/* Badges */}
                   <div className="absolute left-1.5 top-1.5 flex flex-col gap-1">
                     {discountPercent > 0 && <span className="rounded-md bg-emerald-500 px-1.5 py-0.5 text-[9px] font-bold text-white leading-tight">{discountPercent}%{"\n"}OFF</span>}
@@ -1262,7 +1288,7 @@ export function PublicStorePage() {
                     <div className="absolute bottom-1.5 left-0 right-0 flex justify-center gap-1">
                       {productImages.map((_, idx) => (
                         <button key={idx} type="button"
-                          onClick={() => setActiveProductImageIndex(prev => ({ ...prev, [product._id]: idx }))}
+                          onClick={() => scrollToProductImage(product._id, idx)}
                           className={`h-1.5 rounded-full transition-all ${idx === activeImgIdx ? "w-3 bg-white" : "w-1.5 bg-white/50"}`}
                           aria-label={`Image ${idx + 1}`} />
                       ))}
