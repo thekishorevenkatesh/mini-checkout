@@ -1353,8 +1353,11 @@ export function PublicStorePage() {
       <div className="mx-auto mt-3 h-1 w-10 rounded-full bg-slate-300 dark:bg-slate-600 lg:hidden" />
       <div className="sticky top-0 z-10 flex items-center justify-between bg-white/95 px-5 py-4 border-b border-slate-200 backdrop-blur dark:border-teal-900/30 dark:bg-slate-950/95">
         <div>
-          <h2 className="font-heading text-xl font-bold text-slate-900 dark:text-slate-100">{t("store.checkout", "Checkout")}</h2>
-          {selectedItems.length > 0 && <p className="text-xs text-slate-500 dark:text-slate-400">{cartCount} item{cartCount !== 1 ? "s" : ""} � ₹{grandTotal}</p>}
+          <div className="min-w-0">
+                <h1 className="truncate font-heading text-xl font-bold leading-tight tracking-tight text-slate-900 sm:text-2xl dark:text-slate-100">
+                  {seller.businessName}
+                </h1>
+              </div>
         </div>
         <button type="button" onClick={() => setShowCart(false)} className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 dark:from-teal-500 dark:to-sky-500">
           <AppIcon name="close" className="text-[11px]" />
