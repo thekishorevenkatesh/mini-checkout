@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { createPortal } from "react-dom";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { QRCodeSVG } from "qrcode.react";
 import { api } from "../api/client";
@@ -373,6 +374,8 @@ export function PublicStorePage() {
   const [sortBy, setSortBy] = useState<"latest" | "price_low" | "price_high" | "discount">("latest");
   const [maxPriceFilter, setMaxPriceFilter] = useState<number | null>(null);
   const [showFilterDropdown, setShowFilterDropdown] = useState(false);
+  const [filterDropdownStyle, setFilterDropdownStyle] = useState<{ top: number; left: number } | null>(null);
+  const searchBarRef = useRef<HTMLDivElement | null>(null);
   const [expandedProductId, setExpandedProductId] = useState<string | null>(null);
   const [cartFeedback, setCartFeedback] = useState("");
   const [, setVariantErrorProductId] = useState<string | null>(null);
@@ -428,6 +431,35 @@ export function PublicStorePage() {
     }
     void fetchStore();
   }, [searchParams, sellerSlug]);
+
+  const updateFilterDropdownStyle = () => {
+    if (typeof window === "undefined") return;
+    const rect = searchBarRef.current?.getBoundingClientRect();
+    if (!rect) return;
+
+    const width = 240;
+    const minLeft = 16;
+    const maxLeft = window.innerWidth - 16 - width;
+    const left = Math.min(Math.max(minLeft, rect.right - width), maxLeft);
+
+    setFilterDropdownStyle({
+      top: rect.bottom + 8,
+      left,
+    });
+  };
+
+  useEffect(() => {
+    if (!showFilterDropdown) return;
+    updateFilterDropdownStyle();
+    const handleResize = () => updateFilterDropdownStyle();
+    const handleScroll = () => updateFilterDropdownStyle();
+    window.addEventListener("resize", handleResize);
+    window.addEventListener("scroll", handleScroll, true);
+    return () => {
+      window.removeEventListener("resize", handleResize);
+      window.removeEventListener("scroll", handleScroll, true);
+    };
+  }, [showFilterDropdown]);
 
   // Derived: category list
   const categoryTabs = useMemo(() => {
@@ -1057,19 +1089,6 @@ export function PublicStorePage() {
             </div>
             {/* Social + contact icons � right side */}
             <div className="flex shrink-0 items-center gap-1.5">
-              {seller.whatsappNumber && (
-                <a href={`https://wa.me/${seller.whatsappNumber.replace(/\D/g, "")}`} target="_blank" rel="noreferrer"
-                  title="Chat on WhatsApp" aria-label="Chat on WhatsApp"
-                  className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-emerald-200 bg-emerald-50 text-emerald-700 shadow-sm transition hover:-translate-y-0.5 hover:bg-emerald-100 dark:border-emerald-900/50 dark:bg-emerald-950/50 dark:text-emerald-300">
-                  <AppIcon name="whatsapp" className="text-sm" />
-                </a>
-              )}
-              {seller.callNumber && (
-                <a href={`tel:${seller.callNumber}`} title="Call Seller" aria-label="Call Seller"
-                  className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-sky-200 bg-sky-50 text-sky-700 shadow-sm transition hover:-translate-y-0.5 hover:bg-sky-100 dark:border-sky-900/50 dark:bg-sky-950/45 dark:text-sky-300">
-                  <AppIcon name="phone" className="text-sm" />
-                </a>
-              )}
               {/* Cart button */}
               <button type="button" onClick={openCartAndScroll} aria-label="Open cart"
                 className="relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-slate-900 text-base text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-950 dark:hover:bg-white">
@@ -1091,10 +1110,12 @@ export function PublicStorePage() {
         )}
 
         {/* Discovery controls */}
-        <div className="surface-card rounded-[28px] bg-gradient-to-br from-white to-emerald-50/70 dark:from-slate-950/95 dark:to-slate-900/90">
+        <div className="surface-card rounded-[28px] bg-gradient-to-br from-white to-emerald-50/70 dark:from-slate-950/95 dark:to-slate-900/90 overflow-visible"
+          style={{ zIndex: 1000 }}>
           {/* Smart search bar */}
-          <div className="relative">
-            <div className="flex items-center gap-2 px-3 py-2.5">
+          <div ref={searchBarRef} className="relative overflow-visible"
+            style={{ zIndex: 1000 }}>
+            <div className="flex flex-wrap items-center gap-2 px-3 py-2.5">
               <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-2xl bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-950">
                 <AppIcon name="search" className="text-[11px]" />
               </span>
@@ -1102,7 +1123,7 @@ export function PublicStorePage() {
                 value={searchQuery}
                 onChange={(e) => { setSearchQuery(e.target.value); setShowFilterDropdown(false); }}
                 placeholder="Search products, categories..."
-                className="flex-1 bg-transparent text-sm outline-none placeholder:text-slate-400 dark:text-slate-100"
+                className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-slate-400 dark:text-slate-100"
               />
               {/* Active filter chips */}
               {activeCategory !== "All" && (
@@ -1124,7 +1145,7 @@ export function PublicStorePage() {
                 </button>
               )}
               {/* Filter icon */}
-              <button type="button" onClick={() => setShowFilterDropdown(v => !v)}
+              <button type="button" onClick={() => setShowFilterDropdown((prev) => !prev)}
                 className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border transition ${
                   (activeCategory !== "All" || sortBy !== "latest" || maxPriceFilter !== null)
                     ? "border-teal-300 bg-teal-100 text-teal-700 dark:border-teal-700 dark:bg-teal-900 dark:text-teal-300"
@@ -1136,8 +1157,15 @@ export function PublicStorePage() {
               </button>
             </div>
             {/* Filter dropdown */}
-            {showFilterDropdown && (
-              <div className="absolute right-0 z-40 mt-1 w-60 rounded-2xl border border-slate-200 bg-white shadow-xl overflow-hidden dark:border-teal-900/40 dark:bg-slate-950">
+            {showFilterDropdown && filterDropdownStyle && createPortal(
+              <div className="rounded-2xl border border-slate-200 bg-white shadow-xl overflow-hidden dark:border-teal-900/40 dark:bg-slate-950"
+                style={{
+                  position: "fixed",
+                  top: filterDropdownStyle.top,
+                  left: filterDropdownStyle.left,
+                  width: 240,
+                  zIndex: 9999,
+                }}>
                 {/* Sort */}
                 <p className="px-3 pt-3 pb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">Sort by</p>
                 {(["latest", "price_low", "price_high", "discount"] as const).map(opt => (
@@ -1179,12 +1207,13 @@ export function PublicStorePage() {
                   </>
                 )}
                 {/* Reset */}
-                <div className="border-t border-slate-100 dark:border-slate-800 px-2 py-1.5 mt-1">
+                <div className="border-t border-slate-100 dark:border-teal-800 px-2 py-1.5 mt-1">
                   <button type="button"
                     onClick={() => { setSortBy("latest"); setMaxPriceFilter(null); setActiveCategory("All"); setSearchQuery(""); setShowFilterDropdown(false); }}
                     className="w-full rounded-lg px-2 py-1.5 text-xs font-semibold text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950 transition">Clear all filters</button>
                 </div>
-              </div>
+              </div>,
+              document.body
             )}
           </div>
         </div>
@@ -1702,7 +1731,9 @@ export function PublicStorePage() {
       {seller.socialLinks?.some((s) => String(s.url || "").trim()) && (
         <div className="space-y-2">
           <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Stay Connected</p>
+          
           <div className="flex flex-wrap items-center justify-center gap-2">
+            
             {seller.socialLinks.filter((s) => String(s.url || "").trim()).map((s, i) => (
               <a
                 key={i}
@@ -1716,6 +1747,19 @@ export function PublicStorePage() {
                 <AppIcon name={SOCIAL_ICONS[s.platform] || "link"} className="text-sm" />
               </a>
             ))}
+             {seller.whatsappNumber && (
+                <a href={`https://wa.me/${seller.whatsappNumber.replace(/\D/g, "")}`} target="_blank" rel="noreferrer"
+                  title="Chat on WhatsApp" aria-label="Chat on WhatsApp"
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-emerald-200 bg-emerald-50 text-emerald-700 shadow-sm transition hover:-translate-y-0.5 hover:bg-emerald-100 dark:border-emerald-900/50 dark:bg-emerald-950/50 dark:text-emerald-300">
+                  <AppIcon name="whatsapp" className="text-sm" />
+                </a>
+              )}
+              {seller.callNumber && (
+                <a href={`tel:${seller.callNumber}`} title="Call Seller" aria-label="Call Seller"
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-sky-200 bg-sky-50 text-sky-700 shadow-sm transition hover:-translate-y-0.5 hover:bg-sky-100 dark:border-sky-900/50 dark:bg-sky-950/45 dark:text-sky-300">
+                  <AppIcon name="phone" className="text-sm" />
+                </a>
+              )}
           </div>
         </div>
       )}
