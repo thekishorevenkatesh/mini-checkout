@@ -301,11 +301,6 @@ export function LoginPage() {
         }
       }
     } catch (err) {
-      if (axios.isAxiosError(err) && err.response?.status === 403) {
-        setError(err.response.data?.message || "Your account is pending admin approval.");
-        setStep("contact");
-        return;
-      }
       setError(errMsg(err, "Invalid or expired OTP. Try again."));
     } finally {
       setSubmitting(false);
