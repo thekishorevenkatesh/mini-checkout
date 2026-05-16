@@ -55,7 +55,7 @@ img {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: #fff;
+  color: currentColor;
   line-height: 1;
 }
 

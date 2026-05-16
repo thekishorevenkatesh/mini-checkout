@@ -6,6 +6,7 @@ import { AppIcon } from "../components/ui/AppIcon";
 import { AddressFields } from "../components/forms/AddressFields";
 import { DEFAULT_POLICY_CONTENT } from "../constants/policyDefaults";
 import { useI18n } from "../context/I18nContext";
+import { useToast } from "../context/ToastContext";
 import {
   DEFAULT_COUNTRY_CODE,
   EMPTY_ADDRESS,
@@ -136,7 +137,6 @@ function buildLegacyVariantItems(product: Product): VariantItem[] {
         attributes: { [label]: option },
         price: product.variantPrices?.[priceKey] ?? product.price,
         mrp: product.variantMrps?.[priceKey] ?? product.mrp,
-        stockQuantity: product.variantQuantities?.[priceKey] ?? 0,
         isActive: true,
       });
     }
@@ -204,6 +204,34 @@ function getNormalizedVariantGroups(product: Product) {
   }));
 }
 
+function getFirstAvailableVariant(product: Product) {
+  return getNormalizedVariantItems(product)[0] || null;
+}
+
+function splitPackAndUom(value: string) {
+  const match = String(value || "").trim().match(/^([\d.]+)\s*([a-zA-Z]+.*)?$/);
+  if (!match) {
+    return { packSize: String(value || "").trim(), uom: "" };
+  }
+  return {
+    packSize: (match[1] || "").trim(),
+    uom: (match[2] || "").trim(),
+  };
+}
+
+function getProductDisplayMeasure(product: Product) {
+  const packSize = String(product.packSize || "").trim();
+  const uom = String(product.uom || "").trim();
+  if (packSize || uom) {
+    return [packSize, uom].filter(Boolean).join(" ");
+  }
+
+  const firstVariant = getFirstAvailableVariant(product);
+  if (!firstVariant?.title) return "";
+  const parsed = splitPackAndUom(firstVariant.title);
+  return [parsed.packSize, parsed.uom].filter(Boolean).join(" ");
+}
+
 function getProductUnitPricing(product: Product, selectedVariants: Record<string, string>) {
   const matchedVariant = findMatchingVariant(product, selectedVariants);
   if (matchedVariant) {
@@ -230,31 +258,18 @@ function getProductUnitPricing(product: Product, selectedVariants: Record<string
     }
   }
 
+  const firstVariant = getFirstAvailableVariant(product);
+  if ((Number(product.price) || 0) <= 0 && firstVariant) {
+    return {
+      price: firstVariant.price,
+      mrp: firstVariant.mrp || product.mrp,
+    };
+  }
+
   return {
     price: product.price,
     mrp: product.mrp,
   };
-}
-
-function getProductAvailableStock(product: Product, selectedVariants: Record<string, string>) {
-  const matchedVariant = findMatchingVariant(product, selectedVariants);
-  if (matchedVariant) {
-    return matchedVariant.stockQuantity;
-  }
-
-  const quantityMap = product.variantQuantities || {};
-  const stocks: number[] = [];
-  for (const variant of getNormalizedVariantGroups(product)) {
-    if (!variant.options?.length) continue;
-    const option = selectedVariants[variant.label];
-    if (!option) continue;
-    const value = Number(quantityMap[getVariantPriceKey(variant.label, option)]);
-    if (Number.isFinite(value) && value >= 0) {
-      stocks.push(value);
-    }
-  }
-  if (!stocks.length) return null;
-  return Math.min(...stocks);
 }
 
 function withAutoSelectedSingleVariants(product: Product, selectedVariants: Record<string, string>) {
@@ -344,6 +359,7 @@ function CategoryScrollRow({
 
 export function PublicStorePage() {
   const { t } = useI18n();
+  const { showError, showSuccess } = useToast();
   const navigate = useNavigate();
   const { sellerSlug } = useParams<{ sellerSlug: string }>();
   const [searchParams] = useSearchParams();
@@ -363,6 +379,12 @@ export function PublicStorePage() {
   const [showCart, setShowCart] = useState(false);
   const [variantPopupProductId, setVariantPopupProductId] = useState<string | null>(null);
   const [popupVariants, setPopupVariants] = useState<Record<string, string>>({});
+  const [popupVariantQuantities, setPopupVariantQuantities] = useState<Record<string, {
+    quantity: number;
+    selections: Record<string, string>;
+    variantTitle: string;
+    unitPrice: number;
+  }>>({});
   const [popupVariantError, setPopupVariantError] = useState("");
 
   // Checkout fields
@@ -558,6 +580,22 @@ export function PublicStorePage() {
     };
   }, [seller?.favicon]);
 
+  useEffect(() => {
+    if (error) showError(error);
+  }, [error, showError]);
+
+  useEffect(() => {
+    if (successMessage) showSuccess(successMessage);
+  }, [showSuccess, successMessage]);
+
+  useEffect(() => {
+    if (proofSuccess) showSuccess(proofSuccess);
+  }, [proofSuccess, showSuccess]);
+
+  useEffect(() => {
+    if (cartFeedback) showSuccess(cartFeedback);
+  }, [cartFeedback, showSuccess]);
+
   function getBaseCartItem(productId: string): CartItem {
     return (
       cart[buildCartItemKey(productId)] || {
@@ -620,16 +658,12 @@ export function PublicStorePage() {
     if (q <= 0) { removeProduct(cartItemId); return; }
     const currentItem = cart[cartItemId];
     if (!currentItem) return;
-    const product = products.find(p => p._id === currentItem.productId);
-    if (!product) return;
-    const availableStock = getProductAvailableStock(product, currentItem.variants);
-    const safeQty = availableStock !== null ? Math.min(q, availableStock) : q;
     resetSavedProgress();
     setCart(prev => ({
       ...prev,
       [cartItemId]: {
         ...currentItem,
-        quantity: Math.max(1, safeQty),
+        quantity: Math.max(1, q),
       },
     }));
   }
@@ -688,11 +722,6 @@ export function PublicStorePage() {
           setError(`Please select ${variant.label} for ${product.title}.`);
           return null;
         }
-      }
-      const selectedStock = getProductAvailableStock(product, item?.variants || {});
-      if (selectedStock !== null && item.quantity > selectedStock) {
-        setError(`Only ${selectedStock} quantity left for selected options in ${product.title}.`);
-        return null;
       }
     }
 
@@ -823,43 +852,86 @@ export function PublicStorePage() {
     const product = products.find(p => p._id === productId);
     if (!product) return;
     setPopupVariants(withAutoSelectedSingleVariants(product, {}));
+    setPopupVariantQuantities(
+      Object.entries(cart).reduce<Record<string, {
+        quantity: number;
+        selections: Record<string, string>;
+        variantTitle: string;
+        unitPrice: number;
+      }>>((acc, [, item]) => {
+        if (item.productId !== productId || !item.variantId || item.quantity <= 0) return acc;
+        acc[item.variantId] = {
+          quantity: item.quantity,
+          selections: item.variants,
+          variantTitle: item.variantTitle,
+          unitPrice: item.unitPrice,
+        };
+        return acc;
+      }, {})
+    );
     setPopupVariantError("");
     setVariantPopupProductId(productId);
+  }
+
+  function setPopupVariantQuantity(
+    variantId: string,
+    details: {
+      quantity: number;
+      selections: Record<string, string>;
+      variantTitle: string;
+      unitPrice: number;
+    },
+  ) {
+    setPopupVariantQuantities(prev => {
+      if (details.quantity <= 0) {
+        const next = { ...prev };
+        delete next[variantId];
+        return next;
+      }
+      return {
+        ...prev,
+        [variantId]: details,
+      };
+    });
   }
 
   function handlePopupAddToCart() {
     if (!variantPopupProductId) return;
     const product = products.find(p => p._id === variantPopupProductId);
     if (!product) return;
-    if (!hasCompleteVariantSelection(product, popupVariants)) { setPopupVariantError("Please select all options."); return; }
-    const matchedVariant = findMatchingVariant(product, popupVariants);
-    if (!matchedVariant) {
-      setPopupVariantError("Selected combination is unavailable.");
+    if (Object.keys(popupVariantQuantities).length === 0) {
+      setPopupVariantError("Please select at least one variant.");
       return;
     }
+
     resetSavedProgress();
     setCart(prev => {
-      const cartItemKey = buildCartItemKey(variantPopupProductId, matchedVariant.variantId);
-      const existingItem = prev[cartItemKey];
-      const nextQuantity = (existingItem?.quantity || 0) + 1;
-      if (nextQuantity > matchedVariant.stockQuantity) {
-        setPopupVariantError(`Only ${matchedVariant.stockQuantity} left for this variant.`);
-        return prev;
+      const next = { ...prev };
+      for (const [cartItemId, item] of Object.entries(next)) {
+        if (item.productId === product._id && item.variantId) {
+          delete next[cartItemId];
+        }
       }
-      return {
-        ...prev,
-        [cartItemKey]: {
-          productId: variantPopupProductId,
-          variantId: matchedVariant.variantId,
-          variantTitle: matchedVariant.title || product.title,
-          quantity: nextQuantity,
-          variants: popupVariants,
-          unitPrice: matchedVariant.price,
-        },
-      };
+
+      for (const [variantId, draft] of Object.entries(popupVariantQuantities)) {
+        if (draft.quantity <= 0) continue;
+        next[buildCartItemKey(product._id, variantId)] = {
+          productId: product._id,
+          variantId,
+          variantTitle: draft.variantTitle,
+          quantity: draft.quantity,
+          variants: draft.selections,
+          unitPrice: draft.unitPrice,
+        };
+      }
+
+      return next;
     });
+
     setCartFeedback(`${product.title} added to cart`);
     window.setTimeout(() => setCartFeedback(""), 1800);
+    setPopupVariantQuantities({});
+    setPopupVariantError("");
     setVariantPopupProductId(null);
   }
 
@@ -930,14 +1002,7 @@ export function PublicStorePage() {
                 <h1 className="truncate font-heading text-lg font-bold leading-tight tracking-tight text-slate-900 sm:text-xl dark:text-slate-100">
                   {seller.businessName}
                 </h1>
-                {seller.businessAddress && (
-                  <p className="flex items-center gap-1.5 truncate text-xs text-slate-500 dark:text-slate-400">
-                    <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 dark:from-teal-500 dark:to-sky-500">
-                      <AppIcon name="location" className="text-[10px]" />
-                    </span>
-                    <span className="truncate">{seller.businessAddress}</span>
-                  </p>
-                )}
+               
               </div>
             </div>
             {/* Social + contact icons � right side */}
@@ -955,13 +1020,6 @@ export function PublicStorePage() {
                   <AppIcon name="phone" className="text-sm" />
                 </a>
               )}
-              {seller.socialLinks?.filter((s) => String(s.url || "").trim()).map((s, i) => (
-                <a key={i} href={s.url} target="_blank" rel="noreferrer"
-                  title={s.platform} aria-label={s.platform}
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-sky-500 to-cyan-600 text-base shadow-sm transition hover:from-sky-400 hover:to-cyan-500 dark:from-cyan-500 dark:to-blue-500">
-                  <AppIcon name={SOCIAL_ICONS[s.platform] || "link"} className="text-sm" />
-                </a>
-              ))}
               {/* Cart button */}
               <button type="button" onClick={() => setShowCart(true)} aria-label="Open cart"
                 className="relative inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-600 text-base text-white shadow-sm transition hover:bg-emerald-500">
@@ -1081,12 +1139,6 @@ export function PublicStorePage() {
           </div>
         </div>
 
-        {cartFeedback && (
-          <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-            {cartFeedback}
-          </p>
-        )}
-
         {/* Products */}
         {(() => {
           function renderCard(product: Product) {
@@ -1099,12 +1151,13 @@ export function PublicStorePage() {
             const unitMrp = unit.mrp;
             const normalizedVariants = getNormalizedVariantGroups(product);
             const normalizedVariantItems = getNormalizedVariantItems(product);
-            const selectedStock = getProductAvailableStock(product, baseItem.variants);
+            const displayMeasure = getProductDisplayMeasure(product);
             const requiresVariantSelection = normalizedVariantItems.length > 0 || normalizedVariants.some(v => (v.options || []).length > 0);
             const discountPercent = unitMrp > unitPrice ? Math.round(((unitMrp - unitPrice) / unitMrp) * 100) : 0;
-            const isOutOfStock = Boolean(product.forceOutOfStock) || (requiresVariantSelection
-              ? normalizedVariantItems.length > 0 && normalizedVariantItems.every((variantItem) => variantItem.stockQuantity <= 0)
-              : selectedStock !== null && selectedStock <= 0);
+            const hasConfiguredVariantItems = Array.isArray(product.variantItems) && product.variantItems.length > 0;
+            const isOutOfStock = requiresVariantSelection
+              ? hasConfiguredVariantItems && normalizedVariantItems.length === 0
+              : false;
             const isNewProduct = Date.now() - new Date(product.createdAt).getTime() < 1000 * 60 * 60 * 24 * 7;
             const productImages = getProductImages(product);
             const activeImgIdx = Math.min(activeProductImageIndex[product._id] || 0, Math.max(productImages.length - 1, 0));
@@ -1140,6 +1193,9 @@ export function PublicStorePage() {
                 {/* Info */}
                 <div className="flex flex-1 flex-col gap-1.5 p-2.5">
                   <p className="line-clamp-2 text-[13px] font-semibold leading-tight text-slate-800 dark:text-slate-100">{product.title}</p>
+                  {displayMeasure && (
+                    <p className="text-[12px] text-slate-500 dark:text-slate-400">{displayMeasure}</p>
+                  )}
                   <div className="flex items-baseline gap-1.5">
                     <span className="text-sm font-bold text-slate-900 dark:text-slate-100">₹{unitPrice}</span>
                     {unitMrp > 0 && unitMrp > unitPrice && (
@@ -1188,9 +1244,6 @@ export function PublicStorePage() {
                     <p className="text-center text-[10px] text-emerald-600">
                       {hasVariantLines ? `${productCartEntries.length} variants in cart` : `${productCartQuantity} in cart`}
                     </p>
-                  )}
-                  {selectedStock !== null && selectedStock <= 5 && selectedStock > 0 && (
-                    <p className="text-center text-[10px] text-rose-500">Only {selectedStock} left</p>
                   )}
                 </div>
               </article>
@@ -1248,7 +1301,7 @@ export function PublicStorePage() {
       <div className="sticky top-0 z-10 flex items-center justify-between bg-white/95 px-5 py-4 border-b border-slate-200 backdrop-blur dark:border-teal-900/30 dark:bg-slate-950/95">
         <div>
           <h2 className="font-heading text-xl font-bold text-slate-900 dark:text-slate-100">{t("store.checkout", "Checkout")}</h2>
-          {selectedItems.length > 0 && <p className="text-xs text-slate-500 dark:text-slate-400">{cartCount} item{cartCount !== 1 ? "s" : ""} � ?{grandTotal}</p>}
+          {selectedItems.length > 0 && <p className="text-xs text-slate-500 dark:text-slate-400">{cartCount} item{cartCount !== 1 ? "s" : ""} � ₹{grandTotal}</p>}
         </div>
         <button type="button" onClick={() => setShowCart(false)} className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 dark:from-teal-500 dark:to-sky-500">
           <AppIcon name="close" className="text-[11px]" />
@@ -1302,39 +1355,7 @@ export function PublicStorePage() {
           </div>
         </div>
 
-        {(supportsPrepaid || supportsCod) && (
-          <div className="space-y-2">
-            <p className="text-sm font-semibold text-slate-700">Payment method</p>
-            <div className="grid gap-2">
-              {supportsPrepaid && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPaymentMethod("prepaid");
-                    resetSavedProgress();
-                  }}
-                  className={`rounded-xl border px-4 py-3 text-left transition ${isPrepaidCheckout ? "border-teal-500 bg-teal-50" : "border-slate-200 bg-slate-50 hover:border-slate-300"}`}
-                >
-                  <p className="text-sm font-semibold text-slate-900">Pay Before Order</p>
-                  <p className="text-xs text-slate-500">Save details, pay by UPI, upload screenshot, then place the order.</p>
-                </button>
-              )}
-              {supportsCod && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPaymentMethod("cod");
-                    resetSavedProgress();
-                  }}
-                  className={`rounded-xl border px-4 py-3 text-left transition ${isCodCheckout ? "border-teal-500 bg-teal-50" : "border-slate-200 bg-slate-50 hover:border-slate-300"}`}
-                >
-                  <p className="text-sm font-semibold text-slate-900">Cash on Delivery</p>
-                  <p className="text-xs text-slate-500">Place the order now and pay the seller at the time of delivery.</p>
-                </button>
-              )}
-            </div>
-          </div>
-        )}
+      
 
         {/* Order form */}
         <form className="space-y-3" onSubmit={handleSaveDetails}>
@@ -1374,16 +1395,45 @@ export function PublicStorePage() {
               placeholder="Special instructions..." value={note} onChange={e => { setNote(e.target.value); resetSavedProgress(); }} />
           </label>
 
-          {error && <p className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p>}
-          {successMessage && <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{successMessage}</p>}
-
           <button type="submit" disabled={submitting || selectedItems.length === 0}
             className="w-full rounded-xl bg-gradient-to-r from-emerald-500 via-teal-500 to-sky-500 px-4 py-3.5 text-sm font-semibold text-white shadow-md transition hover:from-emerald-400 hover:via-teal-400 hover:to-sky-400 disabled:from-slate-300 disabled:via-slate-300 disabled:to-slate-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-500 dark:hover:from-emerald-500 dark:hover:via-teal-500 dark:hover:to-sky-500">
-            Save Details
+            Confirm Delivery Details
           </button>
         </form>
         </div>
-
+  {(supportsPrepaid || supportsCod) && (
+          <div className="space-y-2">
+            <p className="text-sm font-semibold text-slate-700">Payment method</p>
+            <div className="grid gap-2">
+              {supportsPrepaid && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPaymentMethod("prepaid");
+                    resetSavedProgress();
+                  }}
+                  className={`rounded-xl border px-4 py-3 text-left transition ${isPrepaidCheckout ? "border-teal-500 bg-teal-50" : "border-slate-200 bg-slate-50 hover:border-slate-300"}`}
+                >
+                  <p className="text-sm font-semibold text-slate-900">Pay Before Order</p>
+                  <p className="text-xs text-slate-500">Save details, pay by UPI, upload screenshot, then place the order.</p>
+                </button>
+              )}
+              {supportsCod && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPaymentMethod("cod");
+                    resetSavedProgress();
+                  }}
+                  className={`rounded-xl border px-4 py-3 text-left transition ${isCodCheckout ? "border-teal-500 bg-teal-50" : "border-slate-200 bg-slate-50 hover:border-slate-300"}`}
+                >
+                  <p className="text-sm font-semibold text-slate-900">Cash on Delivery</p>
+                  <p className="text-xs text-slate-500">Place the order now and pay the seller at the time of delivery.</p>
+                </button>
+              )}
+            </div>
+          </div>
+        )}
         {/* UPI payment */}
         {(supportsPrepaid && isPrepaidCheckout && seller.upiId && grandTotal > 0 && selectedItems.length > 0) && (
           <div className="rounded-2xl border border-teal-200/60 bg-gradient-to-b from-teal-50/80 to-slate-50 p-4 space-y-3 dark:border-teal-900/40 dark:from-teal-950/30 dark:to-slate-900/50">
@@ -1467,7 +1517,6 @@ export function PublicStorePage() {
             <input className="w-full rounded-xl border border-amber-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-amber-400"
               placeholder="https://drive.google.com/..." value={screenshotUrl}
               onChange={e => { setScreenshotUrl(e.target.value); setSavedProofUrl(""); setProofSuccess(""); if (e.target.value) { setScreenshotFile(null); setScreenshotPreview(""); } }} />
-            {proofSuccess && <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-2.5 py-1.5">{proofSuccess}</p>}
             <button type="button" onClick={handleProofSubmit} disabled={uploadingProof || !savedCheckoutData || (!screenshotUrl.trim() && !screenshotFile)}
               className="w-full rounded-xl bg-amber-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-amber-500 disabled:bg-amber-300 transition">
               {uploadingProof ? "Saving..." : "Save Screenshot"}
@@ -1488,6 +1537,7 @@ export function PublicStorePage() {
       const product = products.find(p => p._id === variantPopupProductId);
       if (!product) return null;
       const vgs = getNormalizedVariantGroups(product);
+      const hasDraftSelections = Object.values(popupVariantQuantities).some((entry) => entry.quantity > 0);
       return (
         <div className="fixed inset-0 z-[60] flex items-end justify-center sm:items-center bg-black/50 backdrop-blur-[2px] px-4 pb-4 sm:p-4">
           <div className="w-full max-w-sm rounded-3xl bg-white p-5 shadow-2xl dark:border dark:border-teal-900/40 dark:bg-gradient-to-b dark:from-slate-950 dark:to-slate-900">
@@ -1505,11 +1555,65 @@ export function PublicStorePage() {
                   <div className="flex flex-wrap gap-2">
                     {v.options.map(opt => {
                       const optPrice = product.variantPrices?.[getVariantPriceKey(v.label, opt)];
-                      const optQty = product.variantQuantities?.[getVariantPriceKey(v.label, opt)];
-                      const optOut = optQty !== undefined && optQty <= 0;
+                      const optOut = Array.isArray(product.variantItems) && product.variantItems.length > 0
+                        ? !product.variantItems.some((item) => item.isActive !== false && item.attributes?.[v.label] === opt)
+                        : false;
+                      const isSelectedOption = popupVariants[v.label] === opt;
+                      const nextSelections = { ...popupVariants, [v.label]: opt };
+                      const optionMatchedVariant = hasCompleteVariantSelection(product, nextSelections)
+                        ? findMatchingVariant(product, nextSelections)
+                        : null;
+                      const optionDraft = optionMatchedVariant
+                        ? popupVariantQuantities[optionMatchedVariant.variantId]
+                        : null;
+                      const optionDraftQuantity = optionDraft?.quantity || 0;
+                      if (optionMatchedVariant && optionDraft && optionDraftQuantity > 0) {
+                        return (
+                          <div
+                            key={opt}
+                            className="inline-flex items-center gap-3 rounded-xl bg-emerald-600 px-2 py-1.5 text-sm font-bold text-white"
+                          >
+                            <button
+                              type="button"
+                              onClick={() => setPopupVariantQuantity(optionMatchedVariant.variantId, {
+                                quantity: optionDraftQuantity - 1,
+                                selections: optionDraft.selections,
+                                variantTitle: optionDraft.variantTitle,
+                                unitPrice: optionDraft.unitPrice,
+                              })}
+                              className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/20 text-base hover:bg-white/30"
+                            >
+                              -
+                            </button>
+                            <span className="min-w-5 text-center">{optionDraftQuantity}</span>
+                            <button
+                              type="button"
+                              onClick={() => setPopupVariantQuantity(optionMatchedVariant.variantId, {
+                                quantity: optionDraftQuantity + 1,
+                                selections: optionDraft.selections,
+                                variantTitle: optionDraft.variantTitle,
+                                unitPrice: optionDraft.unitPrice,
+                              })}
+                              className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/20 text-base hover:bg-white/30"
+                            >
+                              +
+                            </button>
+                          </div>
+                        );
+                      }
                       return (<button key={opt} type="button" disabled={optOut}
-                        onClick={() => { setPopupVariants(prev => ({ ...prev, [v.label]: opt })); setPopupVariantError(""); }}
-                        className={`rounded-xl border px-3 py-1.5 text-sm font-semibold transition disabled:opacity-40 ${popupVariants[v.label] === opt ? "border-emerald-500 bg-emerald-50 text-emerald-800" : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"}`}>
+                        onClick={() => {
+                          setPopupVariants(nextSelections);
+                          setPopupVariantError("");
+                          if (!optionMatchedVariant || popupVariantQuantities[optionMatchedVariant.variantId]) return;
+                          setPopupVariantQuantity(optionMatchedVariant.variantId, {
+                            quantity: 1,
+                            selections: nextSelections,
+                            variantTitle: optionMatchedVariant.title || product.title,
+                            unitPrice: optionMatchedVariant.price,
+                          });
+                        }}
+                        className={`rounded-xl border px-3 py-1.5 text-sm font-semibold transition disabled:opacity-40 ${isSelectedOption ? "border-emerald-500 bg-emerald-50 text-emerald-800" : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"}`}>
                         {opt}{optPrice ? ` - ₹${optPrice}` : ""}
                       </button>);
                     })}
@@ -1518,12 +1622,40 @@ export function PublicStorePage() {
               ))}
             </div>
             {popupVariantError && <p className="mt-2 text-xs text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-2.5 py-1.5">{popupVariantError}</p>}
-            <button type="button" onClick={handlePopupAddToCart} className="mt-4 w-full rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-500 transition">Add to Cart</button>
+            {hasDraftSelections && (
+              <button
+                type="button"
+                onClick={handlePopupAddToCart}
+                className="mt-4 w-full rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-500 transition"
+              >
+                Add to Cart
+              </button>
+            )}
           </div>
         </div>
       );
     })()}
     <footer className="space-y-3 py-4 text-center text-xs text-slate-400">
+      {seller.socialLinks?.some((s) => String(s.url || "").trim()) && (
+        <div className="space-y-2">
+          <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">Stay Connected</p>
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            {seller.socialLinks.filter((s) => String(s.url || "").trim()).map((s, i) => (
+              <a
+                key={i}
+                href={s.url}
+                target="_blank"
+                rel="noreferrer"
+                title={s.platform}
+                aria-label={s.platform}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-sky-500 to-cyan-600 text-white shadow-sm transition hover:from-sky-400 hover:to-cyan-500 dark:from-cyan-500 dark:to-blue-500"
+              >
+                <AppIcon name={SOCIAL_ICONS[s.platform] || "link"} className="text-sm" />
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
       <div className="flex flex-wrap items-center justify-center gap-3">
         <button type="button" onClick={() => setActivePolicy("privacyPolicy")} className="font-semibold text-slate-500 hover:text-slate-700">
           Privacy Policy

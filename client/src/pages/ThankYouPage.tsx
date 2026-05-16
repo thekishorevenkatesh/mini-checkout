@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
-import { Alert } from "../components/ui/Alert";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
+import { useToast } from "../context/ToastContext";
 import type { OrderStatus } from "../types";
 
 type PublicOrderStatus = {
@@ -15,6 +15,7 @@ const SUCCESS_STATUSES: OrderStatus[] = ["paid", "delivered"];
 const POLL_INTERVAL_MS = 3000;
 
 export function ThankYouPage() {
+  const { showError } = useToast();
   const [searchParams] = useSearchParams();
   const [orders, setOrders] = useState<PublicOrderStatus[]>([]);
   const [loading, setLoading] = useState(true);
@@ -58,6 +59,10 @@ export function ThankYouPage() {
     void fetchStatuses();
   }, [fetchStatuses]);
 
+  useEffect(() => {
+    if (error) showError(error);
+  }, [error, showError]);
+
   const allSuccessful =
     orders.length > 0 &&
     orders.length === orderIds.length &&
@@ -92,8 +97,6 @@ export function ThankYouPage() {
               ? "This payment attempt looks cancelled. You can go back to the store and try again."
               : "If you just finished the UPI payment, keep this page open. It will refresh automatically as soon as the order status changes."}
         </p>
-
-        {error ? <Alert tone="error" className="mt-4">{error}</Alert> : null}
 
         <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

@@ -7,12 +7,6 @@ const auth = require("../middleware/auth");
 const router = express.Router();
 const validStatuses = ["pending", "paid", "confirmed", "cancelled"];
 
-function resolveVariantQuantityMap(product) {
-  return product.variantQuantities instanceof Map
-    ? Object.fromEntries(product.variantQuantities.entries())
-    : product.variantQuantities || {};
-}
-
 function mapToObject(value) {
   return value instanceof Map ? Object.fromEntries(value.entries()) : (value || {});
 }
@@ -20,7 +14,6 @@ function mapToObject(value) {
 function buildLegacyVariantItems(product) {
   const priceMap = mapToObject(product.variantPrices);
   const mrpMap = mapToObject(product.variantMrps);
-  const quantityMap = resolveVariantQuantityMap(product);
   const seen = new Set();
   const items = [];
 
@@ -41,7 +34,6 @@ function buildLegacyVariantItems(product) {
         attributes: { [label]: option },
         price: Number(priceMap[priceKey]) || Number(product.price) || 0,
         mrp: Number(mrpMap[priceKey]) || Number(product.mrp) || 0,
-        stockQuantity: Number(quantityMap[priceKey]) || 0,
         isActive: true,
       });
     }
@@ -60,7 +52,6 @@ function getNormalizedVariantItems(product) {
       attributes: mapToObject(item.attributes),
       price: Number(item.price) || 0,
       mrp: Number(item.mrp) || 0,
-      stockQuantity: Math.max(0, Number(item.stockQuantity) || 0),
       isActive: item.isActive !== false,
     }));
   }
@@ -88,8 +79,6 @@ function normalizeVariantItems(input) {
     }, {});
     const price = Number(item?.price);
     const mrp = Number(item?.mrp);
-    const stockQuantity = Number(item?.stockQuantity);
-
     if (!variantId || !Number.isFinite(price) || price < 0) return acc;
 
     acc.push({
@@ -98,10 +87,6 @@ function normalizeVariantItems(input) {
       attributes,
       price,
       mrp: Number.isFinite(mrp) && mrp >= 0 ? mrp : 0,
-      stockQuantity:
-        Number.isFinite(stockQuantity) && stockQuantity >= 0
-          ? Math.floor(stockQuantity)
-          : 0,
       isActive: item?.isActive !== false,
     });
     return acc;
@@ -185,7 +170,6 @@ router.post("/", async (req, res) => {
       return res.status(400).json({ message: "At least one cart item is required" });
     }
 
-    const groupedQuantities = new Map();
     const normalizedOrderItems = [];
     const productDocs = new Map();
 
@@ -228,18 +212,13 @@ router.post("/", async (req, res) => {
         });
       }
 
-      if (matchedVariant && (!matchedVariant.isActive || matchedVariant.stockQuantity <= 0)) {
+      if (matchedVariant && !matchedVariant.isActive) {
         return res.status(400).json({
-          message: `${matchedVariant.title || product.title} is out of stock`,
+          message: `${matchedVariant.title || product.title} is unavailable`,
         });
       }
 
       const lineVariantId = matchedVariant?.variantId || "";
-      const stockKey = `${requestedProductId}::${lineVariantId || "base"}`;
-      const requestedSoFar = groupedQuantities.get(stockKey) || 0;
-      const requestedTotal = requestedSoFar + safeQuantity;
-      groupedQuantities.set(stockKey, requestedTotal);
-
       const unitPrice = matchedVariant ? matchedVariant.price : Number(product.price) || 0;
       const lineTotal = unitPrice * safeQuantity;
 
@@ -266,29 +245,6 @@ router.post("/", async (req, res) => {
       return res.status(400).json({
         message: "All cart items in one order must belong to the same seller",
       });
-    }
-
-    for (const [compoundKey, requestedTotal] of groupedQuantities.entries()) {
-      const [requestedProductId, requestedVariantId] = compoundKey.split("::");
-      const product = productDocs.get(requestedProductId);
-      const matchedVariant =
-        getNormalizedVariantItems(product).find((item) => item.variantId === requestedVariantId) ||
-        null;
-
-      if (matchedVariant && requestedTotal > matchedVariant.stockQuantity) {
-        return res.status(400).json({
-          message: `${matchedVariant.title || product.title} has only ${matchedVariant.stockQuantity} left`,
-        });
-      }
-
-      if (!matchedVariant) {
-        const availableBaseStock = Number(product.stockQuantity);
-        if (Number.isFinite(availableBaseStock) && availableBaseStock >= 0 && requestedTotal > availableBaseStock) {
-          return res.status(400).json({
-            message: `${product.title} has only ${availableBaseStock} left`,
-          });
-        }
-      }
     }
 
     const totalQuantity = normalizedOrderItems.reduce((sum, item) => sum + item.quantity, 0);
@@ -325,33 +281,6 @@ router.post("/", async (req, res) => {
       paymentScreenshotUrl:
         safePaymentMethod === "prepaid" ? String(paymentScreenshotUrl || "").trim() : "",
     });
-
-    for (const product of productDocs.values()) {
-      const normalizedVariantItems = getNormalizedVariantItems(product);
-      if (normalizedVariantItems.length === 0) continue;
-
-      const nextVariantItems = normalizedVariantItems.map((item) => {
-        const reservedQty = groupedQuantities.get(`${product._id}::${item.variantId}`) || 0;
-        if (!reservedQty) return item;
-        return {
-          ...item,
-          stockQuantity: Math.max(0, item.stockQuantity - reservedQty),
-        };
-      });
-
-      product.variantItems = normalizeVariantItems(nextVariantItems);
-
-      const nextQuantityMap = {};
-      for (const item of nextVariantItems) {
-        const attributeEntries = Object.entries(item.attributes || {});
-        if (attributeEntries.length === 1) {
-          const [label, value] = attributeEntries[0];
-          nextQuantityMap[`${label}::${value}`] = item.stockQuantity;
-        }
-      }
-      product.variantQuantities = nextQuantityMap;
-      await product.save();
-    }
 
     return res.status(201).json({ order });
   } catch (error) {

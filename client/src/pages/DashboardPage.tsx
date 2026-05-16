@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type DragEvent, type FormEvent } from "react";
 import { QRCodeCanvas } from "qrcode.react";
 import { api } from "../api/client";
 import { AppIcon } from "../components/ui/AppIcon";
 import { AddressFields } from "../components/forms/AddressFields";
 import { useAuth } from "../context/AuthContext";
 import { useI18n } from "../context/I18nContext";
+import { useToast } from "../context/ToastContext";
 import { DEFAULT_POLICY_CONTENT } from "../constants/policyDefaults";
 import {
   DEFAULT_COUNTRY_CODE,
@@ -22,16 +23,17 @@ type ProductFormVariant = {
   label: string;   // value / size  e.g. "500"
   uom: string;     // unit of measure e.g. "g", "ml", "Pack"
   amount: string;  // price
-  stock: string;   // available stock for this variant
+  isActive: boolean;
 };
 
 type ProductForm = {
-  title: string; description: string; price: string; mrp: string;
+  title: string; description: string; price: string; mrp: string; packSize: string; uom: string;
   imageUrls: string[]; notes: string; category: string;
   variants: ProductFormVariant[];
 };
+const PRODUCT_TITLE_MAX_LENGTH = 60;
 const emptyProductForm: ProductForm = {
-  title: "", description: "", price: "", mrp: "",
+  title: "", description: "", price: "", mrp: "", packSize: "", uom: "",
   imageUrls: [""], notes: "", category: "", variants: [],
 };
 
@@ -58,6 +60,23 @@ const ORDER_STATUSES: OrderStatus[] = ["pending", "paid", "delivered", "cancelle
 const SOCIAL_PLATFORMS = ["Instagram", "Facebook", "Twitter/X", "YouTube", "LinkedIn", "Website", "Google Location", "Other"];
 
 const IMGBB_KEY = import.meta.env.VITE_IMGBB_API_KEY as string | undefined;
+
+function reorderItems<T>(items: T[], fromIndex: number, toIndex: number) {
+  if (
+    fromIndex === toIndex ||
+    fromIndex < 0 ||
+    toIndex < 0 ||
+    fromIndex >= items.length ||
+    toIndex >= items.length
+  ) {
+    return items;
+  }
+
+  const next = [...items];
+  const [moved] = next.splice(fromIndex, 1);
+  next.splice(toIndex, 0, moved);
+  return next;
+}
 
 // ─── Reusable image upload field ─────────────────────────────────────────────
 function ImageUploadField({
@@ -223,6 +242,7 @@ function getOrderPrimaryCategory(order: Order) {
 export function DashboardPage() {
   const { seller, logout, updateProfile, refreshProfile } = useAuth();
   const { t } = useI18n();
+  const { showError, showSuccess } = useToast();
 
   const [tab, setTab] = useState<Tab>("dashboard");
   const [products, setProducts] = useState<Product[]>([]);
@@ -265,6 +285,8 @@ export function DashboardPage() {
   const [banners, setBanners] = useState<Banner[]>(seller?.banners || []);
   const [newBannerUrl, setNewBannerUrl] = useState("");
   const [newBannerTitle, setNewBannerTitle] = useState("");
+  const [draggedBannerIndex, setDraggedBannerIndex] = useState<number | null>(null);
+  const [dragOverBannerIndex, setDragOverBannerIndex] = useState<number | null>(null);
   const [socialLinks, setSocialLinks] = useState<SocialLink[]>(seller?.socialLinks || []);
   const [newSocialPlatform, setNewSocialPlatform] = useState("Instagram");
   const [newSocialUrl, setNewSocialUrl] = useState("");
@@ -320,6 +342,8 @@ export function DashboardPage() {
     setStoreFreeDeliveryThreshold(String(seller.freeDeliveryThreshold ?? 500));
     setStorePaymentMode(seller.paymentMode || "prepaid_only");
     setBanners(seller.banners || []);
+    setDraggedBannerIndex(null);
+    setDragOverBannerIndex(null);
     setSocialLinks(seller.socialLinks || []);
     setCategories(seller.categories || []);
     setPrivacyPolicy(seller.privacyPolicy || DEFAULT_POLICY_CONTENT.privacyPolicy);
@@ -342,6 +366,14 @@ export function DashboardPage() {
   }
 
   useEffect(() => { void loadData(); }, []);
+
+  useEffect(() => {
+    if (error) showError(error);
+  }, [error, showError]);
+
+  useEffect(() => {
+    if (success) showSuccess(success);
+  }, [showSuccess, success]);
 
   // ── Auto-refresh orders every 30s when on orders tab
   useEffect(() => {
@@ -505,6 +537,34 @@ export function DashboardPage() {
     finally { setIsSavingStore(false); }
   }
 
+  function moveBanner(fromIndex: number, toIndex: number) {
+    setBanners(prev => reorderItems(prev, fromIndex, toIndex));
+  }
+
+  function handleBannerDragStart(index: number) {
+    setDraggedBannerIndex(index);
+    setDragOverBannerIndex(index);
+  }
+
+  function handleBannerDragOver(e: DragEvent<HTMLDivElement>, index: number) {
+    e.preventDefault();
+    if (dragOverBannerIndex !== index) {
+      setDragOverBannerIndex(index);
+    }
+  }
+
+  function handleBannerDrop(index: number) {
+    if (draggedBannerIndex === null) return;
+    moveBanner(draggedBannerIndex, index);
+    setDraggedBannerIndex(null);
+    setDragOverBannerIndex(null);
+  }
+
+  function resetBannerDragState() {
+    setDraggedBannerIndex(null);
+    setDragOverBannerIndex(null);
+  }
+
 
 
   async function handlePoliciesSave(e: FormEvent) {
@@ -551,19 +611,19 @@ export function DashboardPage() {
           label: match ? match[1] : option,
           uom: match ? match[2] : "",
           amount: rawPrice !== undefined && rawPrice !== null ? String(rawPrice) : "",
-          stock: String(
-            prod.variantItems?.find((item) => item.variantId === `legacy:${key}`)?.stockQuantity
-              ?? prod.variantQuantities?.[key]
-              ?? 0
-          ),
+          isActive:
+            prod.variantItems?.find((item) => item.variantId === `legacy:${key}`)?.isActive
+              ?? true,
         });
       });
     });
     setProductForm({
-      title: prod.title,
+      title: String(prod.title || "").slice(0, PRODUCT_TITLE_MAX_LENGTH),
       description: prod.description || "",
       price: String(prod.price),
       mrp: String(prod.mrp || ""),
+      packSize: prod.packSize || "",
+      uom: prod.uom || "",
       imageUrls: getProductImages(prod).length > 0 ? getProductImages(prod) : [""],
       notes: prod.notes || "",
       category: prod.category || "",
@@ -590,7 +650,7 @@ export function DashboardPage() {
           label: "Variant",
           option: (v.label.trim() + (v.uom.trim() ? v.uom.trim() : "")),
           amount: Number(v.amount),
-          stock: Math.max(0, Math.floor(Number(v.stock) || 0)),
+          isActive: v.isActive !== false,
         }));
 
       const hasVariants = variantPayload.length > 0;
@@ -601,18 +661,13 @@ export function DashboardPage() {
         return acc;
       }, {});
       const variantMrps = {};
-      const variantQuantities = variantPayload.reduce<Record<string, number>>((acc, variant) => {
-        acc[getVariantPriceKey(variant.label, variant.option)] = variant.stock;
-        return acc;
-      }, {});
       const variantItems = variantPayload.map((variant) => ({
         variantId: `legacy:${getVariantPriceKey(variant.label, variant.option)}`,
         title: variant.option,
         attributes: { [variant.label]: variant.option },
         price: variant.amount,
         mrp: 0,
-        stockQuantity: variant.stock,
-        isActive: true,
+        isActive: variant.isActive,
       }));
 
       if (!hasVariants && (!Number.isFinite(baseSellingPrice) || baseSellingPrice <= 0)) {
@@ -636,9 +691,18 @@ export function DashboardPage() {
       }
 
       const catTrimmed = productForm.category.trim();
+      const normalizedTitle = productForm.title.trim().slice(0, PRODUCT_TITLE_MAX_LENGTH);
+      if (!normalizedTitle) {
+        setError("Product title is required.");
+        setIsSubmittingProduct(false);
+        return;
+      }
+
       const payload = {
-        title: productForm.title.trim(),
+        title: normalizedTitle,
         description: productForm.description.trim(),
+        packSize: productForm.packSize.trim(),
+        uom: productForm.uom.trim(),
         price: Number.isFinite(baseSellingPrice) ? baseSellingPrice : 0,
         mrp: Number(productForm.mrp) || 0,
         imageUrl: normalizedImages[0],
@@ -649,7 +713,6 @@ export function DashboardPage() {
         variantItems,
         variantPrices,
         variantMrps,
-        variantQuantities,
       };
 
       if (editingProduct) {
@@ -684,10 +747,6 @@ export function DashboardPage() {
   async function handleToggleProduct(id: string) {
     try { await api.patch(`/products/${id}/toggle`, {}); await loadData(); }
     catch { setError("Could not toggle product."); }
-  }
-  async function handleToggleOutOfStock(id: string) {
-    try { await api.patch(`/products/${id}/out-of-stock`, {}); await loadData(); }
-    catch { setError("Could not update stock status."); }
   }
   async function handleDeleteProduct(id: string) {
     if (!window.confirm("Delete this product? This cannot be undone.")) return;
@@ -724,12 +783,7 @@ export function DashboardPage() {
             <img src={seller.businessLogo} alt="logo" className="h-10 w-10 rounded-xl object-contain border border-slate-200" />
           )}
           <div>
-            <p className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-teal-700">
-            <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-teal-600">
-              <AppIcon name="brand" className="text-[12px]" />
-            </span>
-            MyDukan
-          </p>
+          
             <h1 className="font-heading text-xl font-bold text-slate-900 sm:text-2xl">{seller?.businessName || "My Dukan"}</h1>
           </div>
         </div>
@@ -760,8 +814,6 @@ export function DashboardPage() {
       </header>
 
       {/* Feedback banners */}
-      {error && <p className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm text-rose-700">{error}</p>}
-      {success && <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm text-emerald-700">{success}</p>}
       {copyFeedback && <p className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-2 text-sm text-sky-700">{copyFeedback}</p>}
 
       {/* Tab nav */}
@@ -780,24 +832,89 @@ export function DashboardPage() {
       {/* ═════════════════════════════════════ TAB: DASHBOARD ══ */}
       {tab === "dashboard" && (
         <div className="space-y-4">
-          {/* Row 1 — 6 stat cards */}
+          {/* Row 1 — stat cards */}
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
             {[
-              { label: "Total Products", value: stats.totalProducts, color: "text-slate-900", icon: "products" },
-              { label: "Active Products", value: stats.activeProducts, color: "text-emerald-600", icon: "active" },
-              { label: "Inactive Products", value: stats.inactiveProducts, color: "text-rose-500", icon: "inactive" },
-              { label: "Total Orders", value: stats.totalOrders, color: "text-slate-900", icon: "orders" },
-              { label: "Pending", value: stats.pending, color: "text-amber-600", icon: "pending" },
-              { label: "Delivered", value: stats.delivered, color: "text-teal-600", icon: "check" },
-            ].map(s => (
-              <article key={s.label} className="rounded-2xl border border-white/70 bg-gradient-to-br from-white to-emerald-50/70 p-4 shadow-card flex flex-col gap-1 dark:border-teal-900/35 dark:bg-gradient-to-br dark:from-slate-950 dark:to-slate-900">
-                <div className="flex items-center justify-between">
-                  <p className="text-xs uppercase tracking-[0.14em] text-slate-500">{s.label}</p>
-                  <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 dark:from-teal-500 dark:to-sky-500">
-                    <AppIcon name={s.icon as Parameters<typeof AppIcon>[0]["name"]} className="text-[11px]" />
+              {
+                label: "Total Products",
+                note: "All listed items",
+                value: stats.totalProducts,
+                valueClass: "text-slate-900",
+                icon: "products",
+                iconWrapClass: "border-slate-200 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200",
+                cardClass: "from-white via-slate-50 to-slate-100/80",
+              },
+              {
+                label: "Active Products",
+                note: "Visible in store",
+                value: stats.activeProducts,
+                valueClass: "text-emerald-700",
+                icon: "active",
+                iconWrapClass: "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/50 dark:text-emerald-300",
+                cardClass: "from-white via-emerald-50/80 to-teal-50/70",
+              },
+              {
+                label: "Inactive Products",
+                note: "Hidden from store",
+                value: stats.inactiveProducts,
+                valueClass: "text-rose-700",
+                icon: "inactive",
+                iconWrapClass: "border-rose-200 bg-rose-50 text-rose-600 dark:border-rose-900/60 dark:bg-rose-950/45 dark:text-rose-300",
+                cardClass: "from-white via-rose-50/75 to-orange-50/70",
+              },
+              {
+                label: "Total Orders",
+                note: "All customer orders",
+                value: stats.totalOrders,
+                valueClass: "text-slate-900",
+                icon: "orders",
+                iconWrapClass: "border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-900/60 dark:bg-sky-950/45 dark:text-sky-300",
+                cardClass: "from-white via-sky-50/75 to-cyan-50/70",
+              },
+              {
+                label: "Pending",
+                note: "Awaiting action",
+                value: stats.pending,
+                valueClass: "text-amber-700",
+                icon: "pending",
+                iconWrapClass: "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/45 dark:text-amber-300",
+                cardClass: "from-white via-amber-50/80 to-yellow-50/70",
+              },
+              {
+                label: "Delivered",
+                note: "Completed orders",
+                value: stats.delivered,
+                valueClass: "text-teal-700",
+                icon: "check",
+                iconWrapClass: "border-teal-200 bg-teal-50 text-teal-700 dark:border-teal-900/60 dark:bg-teal-950/45 dark:text-teal-300",
+                cardClass: "from-white via-teal-50/75 to-emerald-50/70",
+              },
+            ].map((s) => (
+              <article
+                key={s.label}
+                className={`group rounded-[26px] border border-white/70 bg-gradient-to-br ${s.cardClass} p-4 shadow-card transition hover:-translate-y-0.5 hover:shadow-lg dark:border-teal-900/35 dark:from-slate-950 dark:via-slate-900 dark:to-slate-900`}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                      {s.label}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {s.note}
+                    </p>
+                  </div>
+                  <span
+                    className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border shadow-sm ${s.iconWrapClass}`}
+                  >
+                    <AppIcon
+                      name={s.icon as Parameters<typeof AppIcon>[0]["name"]}
+                      className="text-[13px]"
+                    />
                   </span>
                 </div>
-                <p className={`text-3xl font-bold ${s.color}`}>{s.value}</p>
+                <div className="mt-5 flex items-end justify-between gap-3">
+                  <p className={`text-3xl font-bold tracking-tight ${s.valueClass}`}>{s.value}</p>
+                </div>
               </article>
             ))}
           </div>
@@ -845,7 +962,14 @@ export function DashboardPage() {
                 {/* Info */}
                 <div className="flex-1 min-w-0 text-center sm:text-left">
                   <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">Your Store QR Code</p>
-                  <p className="text-sm font-semibold text-teal-700 break-all mb-3">{storeUrl}</p>
+                  <a
+                    href={storeUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mb-3 block break-all text-sm font-semibold text-teal-700 hover:text-teal-600 hover:underline"
+                  >
+                    {storeUrl}
+                  </a>
                   <div className="flex flex-wrap gap-2 justify-center sm:justify-start">
                     <button
                       type="button"
@@ -917,7 +1041,7 @@ export function DashboardPage() {
                 onChange={e => setStoreDeliveryMode(e.target.value as "always_free" | "flat_rate")}
               >
                 <option value="always_free">Free Delivery</option>
-                <option value="flat_rate">Flat Charge with Free Above Billing Amount</option>
+                <option value="flat_rate">Flat Delivery Charge</option>
               </select>
             </label>
             <label className="block space-y-1">
@@ -934,12 +1058,13 @@ export function DashboardPage() {
               <p className="text-xs text-slate-500">This controls what the customer can choose during checkout.</p>
             </label>
             <label className="block space-y-1">
-              <span className="text-sm font-semibold text-slate-700">Default Delivery Charge (₹)</span>
+              <span className="text-sm font-semibold text-slate-700">Fixed Delivery Charge (₹)</span>
               <input
                 type="number" min={0}
                 className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400"
                 placeholder="0"
                 value={storeDeliveryCharge}
+                readOnly={storeDeliveryMode === "always_free"}
                 onChange={e => {
                   const v = e.target.value;
                   if (v === "") { setStoreDeliveryCharge(""); return; }
@@ -1007,16 +1132,43 @@ export function DashboardPage() {
                   : "border-slate-200 bg-slate-50 text-slate-600"
               }`}>{banners.length}/5</span>
             </div>
-            <p className="text-xs text-slate-500">Upload up to 5 banner images. They appear as an auto-carousel on your public store.</p>
+            <p className="text-xs text-slate-500">Upload up to 5 banner images. Drag banners up or down to set the order they appear in your public store carousel.</p>
             <div className="space-y-2">
               {banners.map((b, i) => (
-                <div key={i} className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2">
+                <div
+                  key={`${b.imageUrl}-${i}`}
+                  draggable
+                  onDragStart={() => handleBannerDragStart(i)}
+                  onDragOver={e => handleBannerDragOver(e, i)}
+                  onDrop={() => handleBannerDrop(i)}
+                  onDragEnd={resetBannerDragState}
+                  className={`flex items-center gap-2 rounded-xl border bg-slate-50 p-2 transition ${
+                    dragOverBannerIndex === i
+                      ? "border-teal-300 ring-2 ring-teal-100"
+                      : "border-slate-200"
+                  } ${draggedBannerIndex === i ? "opacity-70" : ""}`}
+                >
+                  <div className="flex flex-col items-center gap-1 px-1 text-slate-400 shrink-0 cursor-grab active:cursor-grabbing">
+                    <span className="text-[10px] font-bold uppercase tracking-[0.2em]">Drag</span>
+                    <span className="text-sm leading-none">⋮⋮</span>
+                  </div>
                   {b.imageUrl && <img src={normalizeImageUrl(b.imageUrl)} alt="" className="h-12 w-20 rounded-lg object-cover" />}
                   <div className="flex-1 min-w-0">
                     <p className="text-xs font-semibold text-slate-700 truncate">{b.title || `Banner ${i + 1}`}</p>
                     <p className="text-xs text-slate-400 truncate">{b.imageUrl}</p>
                   </div>
-                  <button onClick={() => setBanners(prev => prev.filter((_, j) => j !== i))} className="text-rose-600 text-xs font-semibold px-2 py-1 rounded-lg border border-rose-200 bg-rose-50 shrink-0">Remove</button>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="rounded-full border border-teal-200 bg-teal-50 px-2 py-1 text-[11px] font-bold text-teal-700">
+                      Position {i + 1}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setBanners(prev => prev.filter((_, j) => j !== i))}
+                      className="text-rose-600 text-xs font-semibold px-2 py-1 rounded-lg border border-rose-200 bg-rose-50"
+                    >
+                      Remove
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -1085,14 +1237,19 @@ export function DashboardPage() {
               {/* ── Section 1: Title + Category */}
               <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-3">
                 <label className="block space-y-1">
-                  <span className="text-sm font-semibold text-slate-700">Product Title *</span>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-sm font-semibold text-slate-700">Product Title *</span>
+                    <span className="text-xs text-slate-500">{productForm.title.length}/{PRODUCT_TITLE_MAX_LENGTH}</span>
+                  </div>
                   <input
                     className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400"
                     placeholder="Home-made Ragi Laddu"
                     value={productForm.title}
-                    onChange={e => setProductForm(p => ({ ...p, title: e.target.value }))}
+                    maxLength={PRODUCT_TITLE_MAX_LENGTH}
+                    onChange={e => setProductForm(p => ({ ...p, title: e.target.value.slice(0, PRODUCT_TITLE_MAX_LENGTH) }))}
                     required
                   />
+                  <p className="text-xs text-slate-500">Keep the title short so it fits nicely in the store card.</p>
                 </label>
                 <label className="block space-y-1">
                   <span className="text-sm font-semibold text-slate-700">Category</span>
@@ -1243,7 +1400,27 @@ export function DashboardPage() {
               </div>
 
               {/* ── Section 3: Selling Price + MRP */}
-              <div className="grid gap-3 sm:grid-cols-2 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <label className="block space-y-1">
+                  <span className="text-sm font-semibold text-slate-700">Pack Size</span>
+                  <input
+                    className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400"
+                    placeholder="500"
+                    value={productForm.packSize}
+                    onChange={e => setProductForm(p => ({ ...p, packSize: e.target.value }))}
+                  />
+                  <p className="text-xs text-slate-500">Optional when you already use variants only.</p>
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-sm font-semibold text-slate-700">UOM</span>
+                  <input
+                    className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400"
+                    placeholder="ml / g / pcs"
+                    value={productForm.uom}
+                    onChange={e => setProductForm(p => ({ ...p, uom: e.target.value }))}
+                  />
+                  <p className="text-xs text-slate-500">Shows with pack size on the store card.</p>
+                </label>
                 <label className="block space-y-1">
                   <span className="text-sm font-semibold text-slate-700">Selling Price (₹)</span>
                   <input
@@ -1272,22 +1449,22 @@ export function DashboardPage() {
               <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-3">
                 <div>
                   <p className="text-sm font-semibold text-slate-700">Product Variants &amp; Pricing</p>
-                  <p className="text-xs text-slate-500 mt-0.5">Each variant has a value, unit of measure (UOM), price, and stock.</p>
+                  <p className="text-xs text-slate-500 mt-0.5">Each variant has a value, unit of measure (UOM), price, and its own active status.</p>
                 </div>
                 {productForm.variants.length > 0 && (
-                  <div className="hidden grid-cols-[1fr_80px_100px_100px_32px] gap-1.5 px-1 sm:grid">
-                    <span className="text-xs font-semibold text-slate-500">Value</span>
+                  <div className="hidden grid-cols-[1fr_80px_100px_92px_32px] gap-1.5 px-1 sm:grid">
+                    <span className="text-xs font-semibold text-slate-500">Pack Size</span>
                     <span className="text-xs font-semibold text-slate-500">UOM</span>
                     <span className="text-xs font-semibold text-slate-500">Price (₹)</span>
-                    <span className="text-xs font-semibold text-slate-500">Stock</span>
+                    <span className="text-xs font-semibold text-slate-500">Status</span>
                     <span />
                   </div>
                 )}
                 {productForm.variants.map((v, i) => (
-                  <div key={i} className="grid gap-2 rounded-xl border border-slate-200 bg-white p-3 sm:grid-cols-[1fr_80px_100px_100px_32px] sm:items-center sm:gap-1.5 sm:rounded-none sm:border-0 sm:bg-transparent sm:p-0">
+                  <div key={i} className="grid gap-2 rounded-xl border border-slate-200 bg-white p-3 sm:grid-cols-[1fr_80px_100px_92px_32px] sm:items-center sm:gap-1.5 sm:rounded-none sm:border-0 sm:bg-transparent sm:p-0">
                     <input
                       className="rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm outline-none focus:border-slate-400"
-                      placeholder="e.g. 500"
+                      placeholder="e.g. 500 (for 500g)"
                       value={v.label}
                       onChange={e => setProductForm(p => { const vv = [...p.variants]; vv[i] = { ...vv[i], label: e.target.value }; return { ...p, variants: vv }; })}
                     />
@@ -1304,13 +1481,21 @@ export function DashboardPage() {
                       value={v.amount}
                       onChange={e => setProductForm(p => { const vv = [...p.variants]; vv[i] = { ...vv[i], amount: e.target.value }; return { ...p, variants: vv }; })}
                     />
-                    <input
-                      type="number" min={0}
-                      className="rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm outline-none focus:border-slate-400"
-                      placeholder="10"
-                      value={v.stock}
-                      onChange={e => setProductForm(p => { const vv = [...p.variants]; vv[i] = { ...vv[i], stock: e.target.value }; return { ...p, variants: vv }; })}
-                    />
+                    <button
+                      type="button"
+                      onClick={() => setProductForm(p => {
+                        const vv = [...p.variants];
+                        vv[i] = { ...vv[i], isActive: !vv[i].isActive };
+                        return { ...p, variants: vv };
+                      })}
+                      className={`inline-flex h-10 items-center justify-center rounded-lg border px-3 text-sm font-semibold transition ${
+                        v.isActive
+                          ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                          : "border-slate-200 bg-slate-100 text-slate-600 hover:bg-slate-200"
+                      }`}
+                    >
+                      {v.isActive ? "Active" : "Inactive"}
+                    </button>
                     <button
                       type="button"
                       onClick={() => setProductForm(p => ({ ...p, variants: p.variants.filter((_, j) => j !== i) }))}
@@ -1322,7 +1507,7 @@ export function DashboardPage() {
                 ))}
                 <button
                   type="button"
-                  onClick={() => setProductForm(p => ({ ...p, variants: [...p.variants, { label: "", uom: "", amount: "", stock: "" }] }))}
+                  onClick={() => setProductForm(p => ({ ...p, variants: [...p.variants, { label: "", uom: "", amount: "", isActive: true }] }))}
                   className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-100 transition"
                 >+ Add Variant</button>
               </div>
@@ -1443,9 +1628,6 @@ export function DashboardPage() {
                       {prod.category && (
                         <span className="inline-block mt-0.5 rounded-full border border-teal-200 bg-teal-50 px-2 py-0.5 text-xs font-semibold text-teal-700">{prod.category}</span>
                       )}
-                      {prod.forceOutOfStock && (
-                        <span className="ml-1 inline-block mt-0.5 rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-xs font-semibold text-rose-700">Out of stock</span>
-                      )}
                       <div className="flex gap-2 mt-1">
                         <span className="text-sm font-bold text-slate-900">₹{prod.price}</span>
                         {prod.mrp > 0 && prod.mrp > prod.price && (
@@ -1477,11 +1659,6 @@ export function DashboardPage() {
                       className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold transition ${prod.isActive ? "bg-amber-100 text-amber-700 border border-amber-200 hover:bg-amber-200/70" : "bg-emerald-100 text-emerald-700 border border-emerald-200 hover:bg-emerald-200/70"}`}>
                       <AppIcon name={prod.isActive ? "pending" : "check"} className="text-[10px]" />
                       {prod.isActive ? "Deactivate" : "Activate"}
-                    </button>
-                    <button onClick={() => handleToggleOutOfStock(prod._id)}
-                      className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold transition ${prod.forceOutOfStock ? "bg-emerald-100 text-emerald-700 border border-emerald-200 hover:bg-emerald-200/70" : "bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100"}`}>
-                      <AppIcon name={prod.forceOutOfStock ? "check" : "inactive"} className="text-[10px]" />
-                      {prod.forceOutOfStock ? "Mark In Stock" : "Mark Out of Stock"}
                     </button>
                     <button onClick={() => handleDeleteProduct(prod._id)}
                       className="inline-flex items-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-100 transition"
@@ -1810,7 +1987,15 @@ export function DashboardPage() {
           <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-white/70 bg-white/90 px-5 py-3 shadow-card">
             <div className="flex-1 min-w-0">
               <p className="text-xs text-slate-400 uppercase tracking-wide">Store URL</p>
-              <p className="text-sm font-semibold text-teal-700 truncate">{storeUrl}</p>
+              <a
+                href={storeUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="block truncate text-sm font-semibold text-teal-700 hover:text-teal-600 hover:underline"
+                title={storeUrl}
+              >
+                {storeUrl}
+              </a>
             </div>
             <span className="text-xs text-slate-500">Slug: <span className="font-semibold text-slate-700">{seller?.slug}</span></span>
             <span className={`rounded-full border px-2.5 py-0.5 text-xs font-semibold ${getApprovalBadgeClasses()}`}>

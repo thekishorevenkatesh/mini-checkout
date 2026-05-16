@@ -6,6 +6,7 @@ const auth = require("../middleware/auth");
 const { getPolicyContent } = require("../utils/policyDefaults");
 
 const router = express.Router();
+const PRODUCT_TITLE_MAX_LENGTH = 60;
 
 function isAdminPreviewRequest(req) {
   if (String(req.query.preview || "") !== "admin") return false;
@@ -55,20 +56,6 @@ function normalizeVariantMrps(input) {
     const numericValue = Number(value);
     if (key && Number.isFinite(numericValue) && numericValue >= 0) {
       acc[key] = numericValue;
-    }
-    return acc;
-  }, {});
-}
-
-function normalizeVariantQuantities(input) {
-  if (!input || typeof input !== "object" || Array.isArray(input)) {
-    return {};
-  }
-
-  return Object.entries(input).reduce((acc, [key, value]) => {
-    const numericValue = Number(value);
-    if (key && Number.isFinite(numericValue) && numericValue >= 0) {
-      acc[key] = Math.floor(numericValue);
     }
     return acc;
   }, {});
@@ -130,8 +117,6 @@ function normalizeVariantItems(input) {
     }, {});
     const price = Number(item?.price);
     const mrp = Number(item?.mrp);
-    const stockQuantity = Number(item?.stockQuantity);
-
     if (!variantId || !Number.isFinite(price) || price < 0) {
       return acc;
     }
@@ -142,17 +127,13 @@ function normalizeVariantItems(input) {
       attributes,
       price,
       mrp: Number.isFinite(mrp) && mrp >= 0 ? mrp : 0,
-      stockQuantity:
-        Number.isFinite(stockQuantity) && stockQuantity >= 0
-          ? Math.floor(stockQuantity)
-          : 0,
       isActive: item?.isActive !== false,
     });
     return acc;
   }, []);
 }
 
-function deriveVariantItemsFromLegacy(variants, variantPrices, variantMrps, variantQuantities) {
+function deriveVariantItemsFromLegacy(variants, variantPrices, variantMrps) {
   const parsedVariants = Array.isArray(variants) ? variants : [];
   const items = [];
 
@@ -170,7 +151,6 @@ function deriveVariantItemsFromLegacy(variants, variantPrices, variantMrps, vari
         attributes: { [label]: option },
         price: Number.isFinite(price) && price >= 0 ? price : 0,
         mrp: Number(variantMrps[key]) || 0,
-        stockQuantity: Math.max(0, Math.floor(Number(variantQuantities[key]) || 0)),
         isActive: true,
       });
     }
@@ -192,6 +172,10 @@ function normalizeImageUrls(imageUrls, fallbackImageUrl = "") {
   return fallback;
 }
 
+function normalizeProductTitle(value = "") {
+  return String(value || "").trim().slice(0, PRODUCT_TITLE_MAX_LENGTH);
+}
+
 // ─── POST /products — Create product (auth) ───────────────────────────────
 router.post("/", auth, async (req, res) => {
   try {
@@ -201,6 +185,8 @@ router.post("/", auth, async (req, res) => {
       imageUrl,
       imageUrls,
       notes,
+      packSize,
+      uom,
       price,
       mrp,
       category,
@@ -208,13 +194,11 @@ router.post("/", auth, async (req, res) => {
       variantItems,
       variantPrices,
       variantMrps,
-      variantQuantities,
     } = req.body;
 
     const parsedVariants = Array.isArray(variants) ? variants : [];
     const normalizedVariantPrices = normalizeVariantPrices(variantPrices);
     const normalizedVariantMrps = normalizeVariantMrps(variantMrps);
-    const normalizedVariantQuantities = normalizeVariantQuantities(variantQuantities);
     const normalizedVariantItems = normalizeVariantItems(variantItems);
     const nextVariantItems =
       normalizedVariantItems.length > 0
@@ -222,8 +206,7 @@ router.post("/", auth, async (req, res) => {
         : deriveVariantItemsFromLegacy(
             parsedVariants,
             normalizedVariantPrices,
-            normalizedVariantMrps,
-            normalizedVariantQuantities
+            normalizedVariantMrps
           );
     const hasVariantOptions = parsedVariants.some(
       (variant) => Array.isArray(variant?.options) && variant.options.length > 0
@@ -231,7 +214,8 @@ router.post("/", auth, async (req, res) => {
     const hasExplicitVariantItems = nextVariantItems.length > 0;
     const hasBasePrice = Number.isFinite(Number(price)) && Number(price) > 0;
 
-    if (!title) {
+    const normalizedTitle = normalizeProductTitle(title);
+    if (!normalizedTitle) {
       return res.status(400).json({ message: "Title is required" });
     }
 
@@ -282,11 +266,13 @@ router.post("/", auth, async (req, res) => {
 
     const product = await Product.create({
       seller: seller._id,
-      title: String(title).trim(),
+      title: normalizedTitle,
       description: description ? String(description).trim() : "",
       imageUrl: normalizedImageUrls[0],
       imageUrls: normalizedImageUrls,
       notes: notes ? String(notes).trim() : "",
+      packSize: packSize ? String(packSize).trim() : "",
+      uom: uom ? String(uom).trim() : "",
       price: hasBasePrice ? Number(price) : 0,
       mrp: mrp ? Number(mrp) : 0,
       category: category ? String(category).trim() : "",
@@ -294,7 +280,6 @@ router.post("/", auth, async (req, res) => {
       variantItems: nextVariantItems,
       variantPrices: normalizedVariantPrices,
       variantMrps: normalizedVariantMrps,
-      variantQuantities: normalizedVariantQuantities,
     });
 
     // Ensure category is tracked in seller's categories list
@@ -372,26 +357,6 @@ router.patch("/:productId/toggle", auth, async (req, res) => {
 });
 
 // ─── PUT /products/:productId — Update product (auth) ────────────────────
-router.patch("/:productId/out-of-stock", auth, async (req, res) => {
-  try {
-    const product = await Product.findOne({
-      _id: req.params.productId,
-      seller: req.sellerId,
-    });
-
-    if (!product) {
-      return res.status(404).json({ message: "Product not found" });
-    }
-
-    product.forceOutOfStock = !product.forceOutOfStock;
-    await product.save();
-
-    return res.json({ product });
-  } catch (error) {
-    return res.status(500).json({ message: "Unable to update stock status" });
-  }
-});
-
 router.put("/:productId", auth, async (req, res) => {
   try {
     const product = await Product.findOne({
@@ -409,6 +374,8 @@ router.put("/:productId", auth, async (req, res) => {
       imageUrl,
       imageUrls,
       notes,
+      packSize,
+      uom,
       price,
       mrp,
       category,
@@ -416,7 +383,6 @@ router.put("/:productId", auth, async (req, res) => {
       variantItems,
       variantPrices,
       variantMrps,
-      variantQuantities,
     } =
       req.body;
 
@@ -434,12 +400,6 @@ router.put("/:productId", auth, async (req, res) => {
         : (product.variantMrps instanceof Map
           ? Object.fromEntries(product.variantMrps.entries())
           : product.variantMrps || {});
-    const nextVariantQuantities =
-      variantQuantities !== undefined
-        ? normalizeVariantQuantities(variantQuantities)
-        : (product.variantQuantities instanceof Map
-          ? Object.fromEntries(product.variantQuantities.entries())
-          : product.variantQuantities || {});
     const nextVariantItems =
       variantItems !== undefined
         ? normalizeVariantItems(variantItems)
@@ -471,11 +431,19 @@ router.put("/:productId", auth, async (req, res) => {
       return res.status(400).json({ message: "At least one product image is required." });
     }
 
-    if (title) product.title = String(title).trim();
+    if (title !== undefined) {
+      const normalizedTitle = normalizeProductTitle(title);
+      if (!normalizedTitle) {
+        return res.status(400).json({ message: "Title is required" });
+      }
+      product.title = normalizedTitle;
+    }
     if (description !== undefined) product.description = String(description).trim();
     product.imageUrls = normalizedImageUrls;
     product.imageUrl = normalizedImageUrls[0];
     if (notes !== undefined) product.notes = String(notes).trim();
+    if (packSize !== undefined) product.packSize = String(packSize).trim();
+    if (uom !== undefined) product.uom = String(uom).trim();
     if (price !== undefined) product.price = Number(price) || 0;
     if (mrp !== undefined) product.mrp = Number(mrp);
     if (category !== undefined) product.category = String(category).trim();
@@ -487,20 +455,17 @@ router.put("/:productId", auth, async (req, res) => {
           : deriveVariantItemsFromLegacy(
               Array.isArray(variants) ? variants : product.variants,
               nextVariantPrices,
-              nextVariantMrps,
-              nextVariantQuantities
+              nextVariantMrps
             );
     }
     if (variantPrices !== undefined) product.variantPrices = normalizeVariantPrices(variantPrices);
     if (variantMrps !== undefined) product.variantMrps = normalizeVariantMrps(variantMrps);
-    if (variantQuantities !== undefined) product.variantQuantities = normalizeVariantQuantities(variantQuantities);
 
-    if (variantItems === undefined && (variantPrices !== undefined || variantMrps !== undefined || variantQuantities !== undefined || Array.isArray(variants))) {
+    if (variantItems === undefined && (variantPrices !== undefined || variantMrps !== undefined || Array.isArray(variants))) {
       product.variantItems = deriveVariantItemsFromLegacy(
         Array.isArray(variants) ? variants : product.variants,
         nextVariantPrices,
-        nextVariantMrps,
-        nextVariantQuantities
+        nextVariantMrps
       );
     }
 

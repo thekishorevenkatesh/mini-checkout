@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const PRODUCT_TITLE_MAX_LENGTH = 60;
 
 const variantSchema = new mongoose.Schema(
   {
@@ -35,18 +36,9 @@ const variantItemSchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
-    stockQuantity: {
-      type: Number,
-      default: 0,
-      min: 0,
-    },
     isActive: {
       type: Boolean,
       default: true,
-    },
-    forceOutOfStock: {
-      type: Boolean,
-      default: false,
     },
   },
   { _id: false }
@@ -64,6 +56,7 @@ const productSchema = new mongoose.Schema(
       type: String,
       required: true,
       trim: true,
+      maxlength: PRODUCT_TITLE_MAX_LENGTH,
     },
     category: {
       type: String,
@@ -85,6 +78,16 @@ const productSchema = new mongoose.Schema(
       default: [],
     },
     notes: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    packSize: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    uom: {
       type: String,
       trim: true,
       default: "",
@@ -114,11 +117,6 @@ const productSchema = new mongoose.Schema(
       default: {},
     },
     variantMrps: {
-      type: Map,
-      of: Number,
-      default: {},
-    },
-    variantQuantities: {
       type: Map,
       of: Number,
       default: {},

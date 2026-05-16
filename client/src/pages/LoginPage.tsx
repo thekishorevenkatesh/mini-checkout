@@ -1,13 +1,13 @@
-import { useRef, useState, type ChangeEvent, type FormEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { useAuth } from "../context/AuthContext";
 import { AppIcon } from "../components/ui/AppIcon";
 import { AddressFields } from "../components/forms/AddressFields";
 import { useI18n } from "../context/I18nContext";
+import { useToast } from "../context/ToastContext";
 import { DEFAULT_POLICY_CONTENT } from "../constants/policyDefaults";
 import { DEFAULT_VENDOR_POLICY_POINTS } from "../constants/vendorPolicyDefaults";
-import { Alert } from "../components/ui/Alert";
 import { Button } from "../components/ui/Button";
 import {
   DEFAULT_COUNTRY_CODE,
@@ -135,6 +135,7 @@ export function LoginPage() {
   const navigate = useNavigate();
   const { sendOtp, verifyOtp, register } = useAuth();
   const { t } = useI18n();
+  const { showError } = useToast();
 
   const [mode, setMode] = useState<Mode>("login");
   const [step, setStep] = useState<Step>("contact");
@@ -170,6 +171,10 @@ export function LoginPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
+
+  useEffect(() => {
+    if (error) showError(error);
+  }, [error, showError]);
 
   const phoneDigits = phone.number.replace(/\D/g, "");
   const phoneError =
@@ -465,7 +470,7 @@ export function LoginPage() {
                     className="min-w-0 rounded-xl border border-slate-200 bg-white px-4 py-3 text-base text-slate-900 outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50 sm:text-sm"
                     placeholder="9876543210"
                     value={phone.number}
-                    onChange={(e) => setPhone((prev) => ({ ...prev, number: e.target.value.replace(/\D/g, "").slice(0, 15) }))}
+                    onChange={(e) => setPhone((prev) => ({ ...prev, number: e.target.value.replace(/\D/g, "").slice(0, 10) }))}
                     required
                   />
                 </div>
@@ -635,12 +640,6 @@ export function LoginPage() {
                 </div>
               )}
 
-              {error && (
-                <Alert tone="error" className={mode === "register" ? "sm:col-span-2" : ""}>
-                  {error}
-                </Alert>
-              )}
-
               <Button
                 type="submit"
                 disabled={submitting || !canSendOtp}
@@ -696,8 +695,6 @@ export function LoginPage() {
                   </p>
                 </div>
               )}
-
-              {error && <Alert tone="error">{error}</Alert>}
 
               <Button
                 type="submit"
@@ -861,11 +858,6 @@ export function LoginPage() {
               </div>
 
               {businessNameError && <span className="text-xs text-rose-600 sm:col-span-2">{businessNameError}</span>}
-              {error && (
-                <Alert tone="error" className="sm:col-span-2">
-                  {error}
-                </Alert>
-              )}
               <Button
                 type="submit"
                 disabled={submitting || !canCompleteProfile}

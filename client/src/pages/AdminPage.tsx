@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { api } from "../api/client";
-import { Alert } from "../components/ui/Alert";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { InputField } from "../components/ui/FormField";
 import { useI18n } from "../context/I18nContext";
+import { useToast } from "../context/ToastContext";
 import type { Seller } from "../types";
 
 type ApprovalStatus = "pending" | "approved" | "rejected";
@@ -20,6 +20,7 @@ function statusBadge(status: ApprovalStatus) {
 
 export function AdminPage() {
   const { t } = useI18n();
+  const { showError, showSuccess } = useToast();
   const [token, setToken] = useState<string>(() => localStorage.getItem(ADMIN_TOKEN_KEY) || "");
   const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState("");
@@ -59,6 +60,14 @@ export function AdminPage() {
     void loadSellers(status);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, status]);
+
+  useEffect(() => {
+    if (error) showError(error);
+  }, [error, showError]);
+
+  useEffect(() => {
+    if (success) showSuccess(success);
+  }, [showSuccess, success]);
 
   async function handleLogin(e: FormEvent) {
     e.preventDefault();
@@ -184,7 +193,6 @@ export function AdminPage() {
               success={password.trim().length > 0 ? "" : ""}
               required
             />
-            {error ? <Alert tone="error">{error}</Alert> : null}
             <Button type="submit" fullWidth loading={submittingLogin} disabled={!formValid}>
               {t("auth.login", "Login")} as Admin
             </Button>
@@ -247,9 +255,6 @@ export function AdminPage() {
           </Button>
         </div>
       </Card>
-
-      {error ? <Alert tone="error">{error}</Alert> : null}
-      {success ? <Alert tone="success">{success}</Alert> : null}
 
       {/* Desktop table */}
       <Card className="hidden p-0 md:block">
