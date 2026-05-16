@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { api } from "../api/client";
+import { AppIcon } from "../components/ui/AppIcon";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { InputField } from "../components/ui/FormField";
@@ -166,12 +167,42 @@ export function AdminPage() {
     const passwordError = password.trim().length === 0 ? "Password is required." : "";
     const formValid = !usernameError && !passwordError;
     return (
-      <main className="mx-auto flex min-h-screen w-full max-w-md items-center px-3 py-8 sm:px-4 sm:py-10">
-        <Card className="w-full space-y-5">
-          <div className="space-y-1">
-            <p className="text-xs font-bold uppercase tracking-[0.14em] text-teal-700 dark:text-teal-300">Admin</p>
-            <h1 className="font-heading text-2xl font-bold text-slate-900">{t("auth.login", "Login")} (Admin)</h1>
-            <p className="text-sm text-slate-500 dark:text-slate-300">Review seller requests and approve registrations.</p>
+      <main className="mx-auto grid min-h-screen w-full max-w-6xl items-center gap-6 px-3 py-8 sm:px-4 sm:py-10 lg:grid-cols-[1.1fr_0.9fr]">
+        <section className="hidden space-y-5 lg:block">
+          <div className="inline-flex items-center gap-2 rounded-full border border-sky-200 bg-white/80 px-4 py-2 text-xs font-bold uppercase tracking-[0.2em] text-sky-700 shadow-sm dark:border-sky-900/40 dark:bg-slate-950/80 dark:text-sky-300">
+            <AppIcon name="policies" className="text-[14px]" />
+            Admin Console
+          </div>
+          <h1 className="font-heading text-4xl font-bold leading-tight text-slate-900 dark:text-slate-100">
+            Review and approve seller onboarding with a cleaner operational workspace.
+          </h1>
+          <p className="max-w-xl text-base leading-7 text-slate-600 dark:text-slate-300">
+            Sign in to manage pending sellers, inspect KYC details, and publish approval decisions from one structured dashboard.
+          </p>
+          <div className="grid gap-3 sm:grid-cols-3">
+            {[
+              { label: "Seller reviews", value: "Fast", icon: "orders" },
+              { label: "Decision flow", value: "Clear", icon: "check" },
+              { label: "KYC access", value: "Ready", icon: "policies" },
+            ].map((item) => (
+              <div key={item.label} className="surface-card rounded-[24px] p-4">
+                <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-950">
+                  <AppIcon name={item.icon as Parameters<typeof AppIcon>[0]["name"]} className="text-[15px]" />
+                </span>
+                <p className="mt-4 text-sm font-semibold text-slate-900 dark:text-slate-100">{item.label}</p>
+                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{item.value}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+        <Card className="w-full space-y-5 p-6 sm:p-7">
+          <div className="space-y-2">
+            <div className="inline-flex items-center gap-2 rounded-full border border-teal-100 bg-teal-50 px-3 py-1 text-xs font-bold uppercase tracking-[0.16em] text-teal-700 dark:border-teal-900/40 dark:bg-teal-950/40 dark:text-teal-300">
+              <AppIcon name="dashboard" className="text-[13px]" />
+              Admin Access
+            </div>
+            <h1 className="font-heading text-3xl font-bold text-slate-900 dark:text-slate-100">{t("auth.login", "Login")} (Admin)</h1>
+            <p className="text-sm leading-6 text-slate-500 dark:text-slate-300">Review seller requests and approve registrations.</p>
           </div>
           <form onSubmit={handleLogin} className="space-y-4">
             <InputField
@@ -204,15 +235,42 @@ export function AdminPage() {
 
   return (
     <main className="mx-auto w-full max-w-7xl space-y-4 px-3 py-5 sm:px-4 sm:py-8">
-      <header className="flex flex-col items-stretch justify-between gap-3 rounded-2xl border border-white/70 bg-white/90 p-4 shadow-card dark:border-slate-700 dark:bg-slate-900/90 sm:flex-row sm:items-center">
+      <header className="surface-card-strong flex flex-col items-stretch justify-between gap-4 rounded-[28px] bg-gradient-to-r from-white via-slate-50 to-sky-50/70 p-5 dark:from-slate-950 dark:via-slate-900 dark:to-slate-900 sm:flex-row sm:items-center">
         <div>
-          <h1 className="font-heading text-2xl font-bold text-slate-900">{t("admin.title", "Seller Approvals")}</h1>
-          <p className="text-sm text-slate-500 dark:text-slate-300">Search, review and approve seller onboarding requests quickly.</p>
+          <div className="inline-flex items-center gap-2 rounded-full border border-sky-100 bg-white/85 px-3 py-1 text-xs font-bold uppercase tracking-[0.18em] text-sky-700 dark:border-sky-900/40 dark:bg-slate-950/80 dark:text-sky-300">
+            <AppIcon name="policies" className="text-[13px]" />
+            Moderation Queue
+          </div>
+          <h1 className="mt-3 font-heading text-3xl font-bold text-slate-900 dark:text-slate-100">{t("admin.title", "Seller Approvals")}</h1>
+          <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-300">Search, review and approve seller onboarding requests quickly.</p>
         </div>
         <Button onClick={logout} variant="secondary" className="w-full sm:w-auto">
+          <AppIcon name="logout" className="text-[14px]" />
           Logout
         </Button>
       </header>
+
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {[
+          { label: "Visible Sellers", value: filteredSellers.length, note: "Current filtered results", icon: "dashboard" },
+          { label: "Pending", value: sellers.filter((seller) => seller.approvalStatus === "pending").length, note: "Awaiting review", icon: "pending" },
+          { label: "Approved", value: sellers.filter((seller) => seller.approvalStatus === "approved").length, note: "Live seller accounts", icon: "active" },
+          { label: "Rejected", value: sellers.filter((seller) => seller.approvalStatus === "rejected").length, note: "Needs follow-up", icon: "inactive" },
+        ].map((item) => (
+          <Card key={item.label} className="rounded-[26px] p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">{item.label}</p>
+                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{item.note}</p>
+              </div>
+              <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-700 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
+                <AppIcon name={item.icon as Parameters<typeof AppIcon>[0]["name"]} className="text-[14px]" />
+              </span>
+            </div>
+            <p className="mt-5 text-3xl font-bold tracking-tight text-slate-900 dark:text-slate-100">{item.value}</p>
+          </Card>
+        ))}
+      </div>
 
       <Card className="space-y-3">
         <div className="grid gap-3 md:grid-cols-3">

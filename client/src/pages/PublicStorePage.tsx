@@ -965,16 +965,16 @@ export function PublicStorePage() {
   if (!seller) {
     return (
       <main className="mx-auto flex min-h-screen w-full max-w-4xl items-center justify-center px-4 py-10">
-        <div className="rounded-3xl border border-rose-200 bg-white p-8 text-center shadow-card">
-          <p className="mb-3 inline-flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-teal-600">
-            <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-teal-600">
-              <AppIcon name="brand" className="text-[11px]" />
+        <div className="surface-card-strong rounded-[30px] p-8 text-center">
+          <p className="mb-3 inline-flex items-center gap-2 rounded-full border border-teal-100 bg-white/85 px-4 py-2 text-xs font-bold uppercase tracking-widest text-teal-600 dark:border-teal-900/40 dark:bg-slate-950/80 dark:text-teal-300">
+            <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-teal-600 text-white dark:bg-teal-500">
+              <AppIcon name="brand" className="text-[12px]" />
             </span>
             MyDukan
           </p>
-          <h1 className="font-heading text-2xl font-bold text-slate-900">Store Not Found</h1>
-          <p className="mt-2 text-sm text-slate-600">{error || "This seller link is unavailable."}</p>
-          <Link to="/login" className="mt-5 inline-flex rounded-xl bg-gradient-to-r from-emerald-500 via-teal-500 to-sky-500 px-4 py-2 text-sm font-semibold text-white shadow-md transition hover:from-emerald-400 hover:via-teal-400 hover:to-sky-400">Sign In to MyDukan</Link>
+          <h1 className="font-heading text-2xl font-bold text-slate-900 dark:text-slate-100">Store Not Found</h1>
+          <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-slate-300">{error || "This seller link is unavailable."}</p>
+          <Link to="/login" className="mt-5 inline-flex items-center gap-2 rounded-2xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-950 dark:hover:bg-white"><AppIcon name="login" className="text-[14px]" />Sign In to MyDukan</Link>
         </div>
       </main>
     );
@@ -987,22 +987,22 @@ export function PublicStorePage() {
       {/* -- LEFT: Store + Products --------------------------- */}
       <section className="space-y-6">
         {/* Store Header */}
-        <div className="rounded-3xl border border-white/80 bg-gradient-to-br from-white via-emerald-50/70 to-sky-50/80 p-4 shadow-card ring-1 ring-emerald-100/80 backdrop-blur-sm sm:p-5 dark:border-teal-900/50 dark:bg-gradient-to-br dark:from-slate-950/95 dark:via-slate-900/90 dark:to-slate-900/95 dark:ring-teal-900/30">
-          <div className="flex items-center gap-3">
+        <div className="surface-card-strong rounded-[32px] bg-gradient-to-br from-white via-slate-50 to-teal-50/70 p-4 sm:p-5 dark:from-slate-950 dark:via-slate-900 dark:to-slate-900">
+          <div className="flex flex-wrap items-center gap-4">
             {/* Logo + Name */}
             <div className="flex min-w-0 flex-1 items-center gap-3">
               {seller.businessLogo && (
                 <img
                   src={seller.businessLogo}
                   alt=""
-                  className="h-12 w-12 shrink-0 rounded-xl border border-slate-200/80 bg-white object-contain p-0.5 shadow-sm dark:border-slate-600 dark:bg-slate-800 sm:h-14 sm:w-14"
+                  className="h-14 w-14 shrink-0 rounded-2xl border border-slate-200/80 bg-white object-contain p-1 shadow-sm dark:border-slate-700 dark:bg-slate-900 sm:h-16 sm:w-16"
                 />
               )}
               <div className="min-w-0">
-                <h1 className="truncate font-heading text-lg font-bold leading-tight tracking-tight text-slate-900 sm:text-xl dark:text-slate-100">
+                <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">Online Store</p>
+                <h1 className="truncate font-heading text-xl font-bold leading-tight tracking-tight text-slate-900 sm:text-2xl dark:text-slate-100">
                   {seller.businessName}
                 </h1>
-               
               </div>
             </div>
             {/* Social + contact icons � right side */}
@@ -1010,19 +1010,19 @@ export function PublicStorePage() {
               {seller.whatsappNumber && (
                 <a href={`https://wa.me/${seller.whatsappNumber.replace(/\D/g, "")}`} target="_blank" rel="noreferrer"
                   title="Chat on WhatsApp" aria-label="Chat on WhatsApp"
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-600 text-base text-white shadow-sm transition hover:bg-emerald-500">
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-emerald-200 bg-emerald-50 text-emerald-700 shadow-sm transition hover:-translate-y-0.5 hover:bg-emerald-100 dark:border-emerald-900/50 dark:bg-emerald-950/50 dark:text-emerald-300">
                   <AppIcon name="whatsapp" className="text-sm" />
                 </a>
               )}
               {seller.callNumber && (
                 <a href={`tel:${seller.callNumber}`} title="Call Seller" aria-label="Call Seller"
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-blue-600 text-base text-white shadow-sm transition hover:bg-blue-500">
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-sky-200 bg-sky-50 text-sky-700 shadow-sm transition hover:-translate-y-0.5 hover:bg-sky-100 dark:border-sky-900/50 dark:bg-sky-950/45 dark:text-sky-300">
                   <AppIcon name="phone" className="text-sm" />
                 </a>
               )}
               {/* Cart button */}
               <button type="button" onClick={() => setShowCart(true)} aria-label="Open cart"
-                className="relative inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-600 text-base text-white shadow-sm transition hover:bg-emerald-500">
+                className="relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-slate-900 text-base text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-950 dark:hover:bg-white">
                 <AppIcon name="cart" className="text-sm" />
                 {cartCount > 0 && (
                   <span className="absolute -right-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-rose-500 text-[9px] font-bold text-white leading-none">
@@ -1041,11 +1041,11 @@ export function PublicStorePage() {
         )}
 
         {/* Discovery controls */}
-        <div className="rounded-2xl border border-emerald-100/90 bg-gradient-to-br from-white to-emerald-50/70 shadow-sm ring-1 ring-emerald-100/70 dark:border-teal-900/40 dark:bg-gradient-to-br dark:from-slate-950/95 dark:to-slate-900/90 dark:ring-teal-900/20">
+        <div className="surface-card rounded-[28px] bg-gradient-to-br from-white to-emerald-50/70 dark:from-slate-950/95 dark:to-slate-900/90">
           {/* Smart search bar */}
           <div className="relative">
             <div className="flex items-center gap-2 px-3 py-2.5">
-              <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 dark:from-teal-500 dark:to-sky-500">
+              <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-2xl bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-950">
                 <AppIcon name="search" className="text-[11px]" />
               </span>
               <input
@@ -1164,7 +1164,7 @@ export function PublicStorePage() {
             const activeImage = productImages[activeImgIdx] || "";
             return (
               <article key={product._id}
-                className={`group flex flex-col overflow-hidden rounded-2xl border bg-white shadow-sm transition duration-200 hover:-translate-y-0.5 hover:shadow-md dark:border-slate-700 dark:bg-slate-900 ${productCartQuantity > 0 ? "border-emerald-400 ring-2 ring-emerald-100/80 dark:ring-emerald-900/40" : "border-slate-200"}`}>
+                className={`group flex flex-col overflow-hidden rounded-[26px] border bg-white/95 shadow-sm transition duration-200 hover:-translate-y-1 hover:shadow-lg dark:border-slate-700 dark:bg-slate-950/90 ${productCartQuantity > 0 ? "border-emerald-400 ring-2 ring-emerald-100/80 dark:ring-emerald-900/40" : "border-slate-200"}`}>
                 {/* Image + badges + dot carousel */}
                 <div className="relative overflow-hidden bg-slate-100 dark:bg-slate-800">
                   {activeImage ? (
@@ -1191,8 +1191,11 @@ export function PublicStorePage() {
                   )}
                 </div>
                 {/* Info */}
-                <div className="flex flex-1 flex-col gap-1.5 p-2.5">
-                  <p className="line-clamp-2 text-[13px] font-semibold leading-tight text-slate-800 dark:text-slate-100">{product.title}</p>
+                <div className="flex flex-1 flex-col gap-2 p-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="line-clamp-2 text-[13px] font-semibold leading-tight text-slate-800 dark:text-slate-100">{product.title}</p>
+                  
+                  </div>
                   {displayMeasure && (
                     <p className="text-[12px] text-slate-500 dark:text-slate-400">{displayMeasure}</p>
                   )}

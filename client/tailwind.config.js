@@ -5,11 +5,11 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        heading: ["Sora", "sans-serif"],
-        body: ["Manrope", "sans-serif"],
+        heading: ["Roboto", "sans-serif"],
+        body: ["Roboto", "sans-serif"],
       },
       boxShadow: {
-        card: "0 20px 50px rgba(20, 27, 40, 0.12)",
+        card: "0 18px 40px rgba(15, 23, 42, 0.08)",
       },
     },
   },
