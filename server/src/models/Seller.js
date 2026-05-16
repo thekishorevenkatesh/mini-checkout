@@ -88,6 +88,16 @@ const sellerSchema = new mongoose.Schema(
       trim: true,
       default: "",
     },
+    idProofUrl: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    addressProofUrl: {
+      type: String,
+      trim: true,
+      default: "",
+    },
     socialLinks: {
       type: [socialLinkSchema],
       default: [],

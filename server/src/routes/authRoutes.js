@@ -49,7 +49,7 @@ async function createUniqueSellerSlug(businessName, ignoreSellerId = null) {
 // For phone-only accounts without email, OTP is returned in response (dev mode).
 router.post("/send-otp", async (req, res) => {
   try {
-    const { phone, email } = req.body;
+    const { phone, email, intent } = req.body;
 
     if (!phone && !email) {
       return res
@@ -65,6 +65,13 @@ router.post("/send-otp", async (req, res) => {
     const isNew = !seller;
 
     if (isNew) {
+      if (String(intent || "").trim() === "login") {
+        return res.status(404).json({
+          message: "No account found. Please register first.",
+          redirectTo: "register",
+        });
+      }
+
       // Pre-create a placeholder so we can attach the OTP
       if (!phone) {
         return res.status(404).json({
@@ -170,6 +177,8 @@ router.post("/register", auth, async (req, res) => {
       businessLogo,
       whatsappNumber,
       callNumber,
+      idProofUrl,
+      addressProofUrl,
       termsAccepted,
       privacyPolicy,
       returnRefundPolicy,
@@ -203,6 +212,8 @@ router.post("/register", auth, async (req, res) => {
     if (businessLogo) seller.businessLogo = String(businessLogo).trim();
     if (whatsappNumber) seller.whatsappNumber = String(whatsappNumber).trim();
     if (callNumber) seller.callNumber = String(callNumber).trim();
+    if (typeof idProofUrl === "string") seller.idProofUrl = idProofUrl.trim();
+    if (typeof addressProofUrl === "string") seller.addressProofUrl = addressProofUrl.trim();
     if (typeof privacyPolicy === "string") seller.privacyPolicy = privacyPolicy.trim();
     if (typeof returnRefundPolicy === "string") seller.returnRefundPolicy = returnRefundPolicy.trim();
     if (typeof termsAndConditions === "string") seller.termsAndConditions = termsAndConditions.trim();
@@ -259,6 +270,8 @@ router.put("/me", auth, async (req, res) => {
       favicon,
       whatsappNumber,
       callNumber,
+      idProofUrl,
+      addressProofUrl,
       privacyPolicy,
       returnRefundPolicy,
       termsAndConditions,
@@ -280,6 +293,8 @@ router.put("/me", auth, async (req, res) => {
     if (typeof favicon === "string") seller.favicon = favicon.trim();
     if (typeof whatsappNumber === "string") seller.whatsappNumber = whatsappNumber.trim();
     if (typeof callNumber === "string") seller.callNumber = callNumber.trim();
+    if (typeof idProofUrl === "string") seller.idProofUrl = idProofUrl.trim();
+    if (typeof addressProofUrl === "string") seller.addressProofUrl = addressProofUrl.trim();
     if (typeof privacyPolicy === "string") seller.privacyPolicy = privacyPolicy.trim();
     if (typeof returnRefundPolicy === "string") seller.returnRefundPolicy = returnRefundPolicy.trim();
     if (typeof termsAndConditions === "string") seller.termsAndConditions = termsAndConditions.trim();

@@ -7,6 +7,7 @@ import { AddressFields } from "../components/forms/AddressFields";
 import { useI18n } from "../context/I18nContext";
 import { useToast } from "../context/ToastContext";
 import { DEFAULT_POLICY_CONTENT } from "../constants/policyDefaults";
+import { BUSINESS_CATEGORY_OPTIONS, type BusinessCategoryOption } from "../constants/businessCategories";
 import { DEFAULT_VENDOR_POLICY_POINTS } from "../constants/vendorPolicyDefaults";
 import { Button } from "../components/ui/Button";
 import {
@@ -20,46 +21,6 @@ import {
 
 type Mode = "login" | "register";
 type Step = "contact" | "otp" | "profile";
-
-const BUSINESS_CATEGORY_OPTIONS = [
-  "Agriculture Products",
-  "Art & Crafts",
-  "Baby Products",
-  "Bags & Luggage",
-  "Bakery & Homemade Food",
-  "Beauty & Personal Care",
-  "Books & Stationery",
-  "Clothing & Apparel",
-  "Computers & Accessories",
-  "Dairy Products",
-  "Decor & Handicrafts",
-  "Electronics",
-  "Fashion Accessories",
-  "Footwear",
-  "Furniture",
-  "Gifts & Personalized Products",
-  "Grocery & Essentials",
-  "Health & Nutrition",
-  "Home & Kitchen",
-  "Home Decor",
-  "Industrial Supplies",
-  "Jewellery",
-  "Kitchen Appliances",
-  "Lifestyle Products",
-  "Mobile Phones & Accessories",
-  "Nursery & Gardening",
-  "Organic Products",
-  "Pet Supplies",
-  "Religious / Puja Items",
-  "Refurbished Products",
-  "Sports & Fitness Equipment",
-  "Stationery Supplies",
-  "Toys & Games",
-  "Vehicle Accessories",
-  "Watches",
-  "Wellness Products",
-  "Other",
-] as const;
 
 const IMGBB_KEY = import.meta.env.VITE_IMGBB_API_KEY as string | undefined;
 
@@ -148,7 +109,7 @@ export function LoginPage() {
 
   // Business / onboarding fields (Register mode Step 1 + Login mode Step 3)
   const [businessName, setBusinessName] = useState("");
-  const [businessCategory, setBusinessCategory] = useState<(typeof BUSINESS_CATEGORY_OPTIONS)[number]>("Fashion Accessories");
+  const [businessCategory, setBusinessCategory] = useState<BusinessCategoryOption>("Fashion Accessories");
   const [businessCategoryOther, setBusinessCategoryOther] = useState("");
   const [businessEmail, setBusinessEmail] = useState("");
   const [businessAddress, setBusinessAddress] = useState<AddressParts>(EMPTY_ADDRESS);
@@ -225,6 +186,15 @@ export function LoginPage() {
     setBusinessAddress(EMPTY_ADDRESS);
   }
 
+  function moveToRegisterWithContext(message: string) {
+    setMode("register");
+    setStep("contact");
+    setOtp("");
+    setDevOtp("");
+    setError("");
+    setInfo(message);
+  }
+
   // ── Step 1: Send OTP ─────────────────────────────────────────────────────
   async function handleSendOtp(e: FormEvent) {
     e.preventDefault();
@@ -249,11 +219,16 @@ export function LoginPage() {
       const result = await sendOtp({
         phone: phoneDigits,
         email: email.trim() || undefined,
+        intent: mode,
       });
       if (result.otp) setDevOtp(result.otp);
       setInfo("OTP generated. Enter it below to continue.");
       setStep("otp");
     } catch (err) {
+      if (axios.isAxiosError(err) && err.response?.data?.redirectTo === "register") {
+        moveToRegisterWithContext("No account found for this phone number. Please complete registration to continue.");
+        return;
+      }
       setError(errMsg(err, "Could not send OTP. Check your details."));
     } finally {
       setSubmitting(false);
@@ -532,7 +507,7 @@ export function LoginPage() {
                     <select
                       className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50"
                       value={businessCategory}
-                      onChange={(e) => setBusinessCategory(e.target.value as (typeof BUSINESS_CATEGORY_OPTIONS)[number])}
+                      onChange={(e) => setBusinessCategory(e.target.value as BusinessCategoryOption)}
                       required
                     >
                       {BUSINESS_CATEGORY_OPTIONS.map((option) => (
@@ -764,7 +739,7 @@ export function LoginPage() {
                 <select
                   className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50"
                   value={businessCategory}
-                  onChange={(e) => setBusinessCategory(e.target.value as (typeof BUSINESS_CATEGORY_OPTIONS)[number])}
+                  onChange={(e) => setBusinessCategory(e.target.value as BusinessCategoryOption)}
                   required
                 >
                   {BUSINESS_CATEGORY_OPTIONS.map((option) => (

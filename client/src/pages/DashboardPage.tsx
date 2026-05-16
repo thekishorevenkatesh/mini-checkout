@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent, type FormEvent } from "react";
+import axios from "axios";
 import { QRCodeCanvas } from "qrcode.react";
 import { api } from "../api/client";
 import { AppIcon } from "../components/ui/AppIcon";
@@ -6,6 +7,7 @@ import { AddressFields } from "../components/forms/AddressFields";
 import { useAuth } from "../context/AuthContext";
 import { useI18n } from "../context/I18nContext";
 import { useToast } from "../context/ToastContext";
+import { BUSINESS_CATEGORY_OPTIONS } from "../constants/businessCategories";
 import { DEFAULT_POLICY_CONTENT } from "../constants/policyDefaults";
 import {
   DEFAULT_COUNTRY_CODE,
@@ -433,6 +435,14 @@ export function DashboardPage() {
     return `${window.location.origin}/store/${seller.slug}`;
   }, [seller?.slug]);
 
+  const profileCategoryOptions = useMemo(() => {
+    const trimmedCategory = profileCategory.trim();
+    if (!trimmedCategory || BUSINESS_CATEGORY_OPTIONS.includes(trimmedCategory as typeof BUSINESS_CATEGORY_OPTIONS[number])) {
+      return BUSINESS_CATEGORY_OPTIONS;
+    }
+    return [trimmedCategory, ...BUSINESS_CATEGORY_OPTIONS];
+  }, [profileCategory]);
+
   async function shareStoreLink() {
     if (!storeUrl) return;
     if (navigator.share) {
@@ -481,13 +491,29 @@ export function DashboardPage() {
     return () => window.clearInterval(publishStatusPoller);
   }, [isPublishPending, refreshProfile]);
 
+  function getApiErrorMessage(error: unknown, fallback: string) {
+    if (axios.isAxiosError(error)) {
+      const message = String(error.response?.data?.message || "").trim();
+      const missingFields = Array.isArray(error.response?.data?.missingFields)
+        ? error.response?.data?.missingFields
+        : [];
+      if (message && missingFields.length > 0) {
+        return `${message} Missing: ${missingFields.join(", ")}.`;
+      }
+      if (message) return message;
+    }
+    return fallback;
+  }
+
   async function handlePublishStore() {
     setIsPublishingStore(true); setError(""); setSuccess("");
     try {
       await api.post("/store/publish");
       await refreshProfile();
       setSuccess("Store sent to admin for approval.");
-    } catch { setError("Could not send store for approval."); }
+    } catch (error) {
+      setError(getApiErrorMessage(error, "Could not send store for approval."));
+    }
     finally { setIsPublishingStore(false); }
   }
 
@@ -2029,7 +2055,7 @@ export function DashboardPage() {
                   <span className="text-sm font-semibold text-slate-700">Business category</span>
                   <select className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-teal-400" value={profileCategory} onChange={e => setProfileCategory(e.target.value)}>
                     <option value="">— Select category —</option>
-                    {["Fashion","Groceries","Food & Beverages","Electronics","Home & Kitchen","Beauty & Personal Care","Health & Wellness","Books & Stationery","Services","Other"].map(c => (
+                    {profileCategoryOptions.map(c => (
                       <option key={c} value={c}>{c}</option>
                     ))}
                   </select>

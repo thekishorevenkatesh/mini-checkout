@@ -12,6 +12,7 @@ import type { Seller } from "../types";
 interface SendOtpInput {
   phone?: string;
   email?: string;
+  intent?: "login" | "register";
 }
 
 interface VerifyOtpInput {

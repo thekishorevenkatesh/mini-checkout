@@ -1,5 +1,6 @@
 const express = require("express");
 const Seller = require("../models/Seller");
+const Product = require("../models/Product");
 const auth = require("../middleware/auth");
 const { getPolicyContent } = require("../utils/policyDefaults");
 
@@ -13,6 +14,24 @@ function withPolicyDefaults(sellerDoc) {
     ...seller,
     ...getPolicyContent(seller),
   };
+}
+
+function getMissingPublishFields(seller) {
+  const checks = [
+    ["businessName", seller?.businessName],
+    ["businessCategory", seller?.businessCategory],
+    ["businessAddress", seller?.businessAddress],
+    ["upiId", seller?.upiId],
+    ["businessLogo", seller?.businessLogo],
+    ["whatsappNumber", seller?.whatsappNumber],
+    ["callNumber", seller?.callNumber],
+    ["idProofUrl", seller?.idProofUrl],
+    ["addressProofUrl", seller?.addressProofUrl],
+  ];
+
+  return checks
+    .filter(([, value]) => !String(value || "").trim())
+    .map(([field]) => field);
 }
 
 // ─── GET /store/public/:sellerSlug — Full store config (no auth) ──────────
@@ -41,6 +60,21 @@ router.post("/publish", auth, async (req, res) => {
     const seller = await Seller.findById(req.sellerId);
     if (!seller) {
       return res.status(404).json({ message: "Seller not found" });
+    }
+
+    const missingFields = getMissingPublishFields(seller);
+    if (missingFields.length > 0) {
+      return res.status(400).json({
+        message: "Complete your business profile before publishing the store.",
+        missingFields,
+      });
+    }
+
+    const hasProducts = await Product.exists({ seller: seller._id });
+    if (!hasProducts) {
+      return res.status(400).json({
+        message: "Add at least one product before publishing the store.",
+      });
     }
 
     seller.approvalStatus = "pending";
