@@ -225,7 +225,7 @@ export function AdminPage() {
               required
             />
             <Button type="submit" fullWidth loading={submittingLogin} disabled={!formValid}>
-              {t("auth.login", "Login")} as Admin
+              {t("auth.login", "Login")}
             </Button>
           </form>
         </Card>
@@ -523,16 +523,6 @@ export function AdminPage() {
                 <span className={`mt-1 inline-block rounded-full border px-2.5 py-1 text-xs font-semibold capitalize ${statusBadge((selectedSeller.approvalStatus || status) as ApprovalStatus)}`}>
                   {selectedSeller.approvalStatus || status}
                 </span>
-              </div>
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/70">
-                <p className="text-xs uppercase tracking-wide text-slate-500">Approved By</p>
-                <p className="mt-1 font-semibold text-slate-900 dark:text-slate-100">{selectedSeller.approvedBy || "—"}</p>
-              </div>
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/70">
-                <p className="text-xs uppercase tracking-wide text-slate-500">Approved At</p>
-                <p className="mt-1 font-semibold text-slate-900 dark:text-slate-100">
-                  {selectedSeller.approvedAt ? new Date(selectedSeller.approvedAt).toLocaleString("en-IN") : "—"}
-                </p>
               </div>
             </div>
             <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
