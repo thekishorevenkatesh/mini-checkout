@@ -471,6 +471,16 @@ export function DashboardPage() {
   const isStoreDraft =
     !seller || (!isStoreApproved && seller.approvalStatus === "draft");
 
+  useEffect(() => {
+    if (!isPublishPending) return;
+
+    const publishStatusPoller = window.setInterval(() => {
+      void refreshProfile();
+    }, 15000);
+
+    return () => window.clearInterval(publishStatusPoller);
+  }, [isPublishPending, refreshProfile]);
+
   async function handlePublishStore() {
     setIsPublishingStore(true); setError(""); setSuccess("");
     try {
