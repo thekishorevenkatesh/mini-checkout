@@ -201,7 +201,7 @@ export function AdminPage() {
               <AppIcon name="dashboard" className="text-[13px]" />
               Admin Access
             </div>
-            <h1 className="font-heading text-3xl font-bold text-slate-900 dark:text-slate-100">{t("auth.login", "Login")} (Admin)</h1>
+            <h1 className="font-heading text-3xl font-bold text-slate-900 dark:text-slate-100"> Admin {t("auth.login", "Login")}</h1>
             <p className="text-sm leading-6 text-slate-500 dark:text-slate-300">Review seller requests and approve registrations.</p>
           </div>
           <form onSubmit={handleLogin} className="space-y-4">
