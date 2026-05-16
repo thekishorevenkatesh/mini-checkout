@@ -1299,7 +1299,7 @@ export function PublicStorePage() {
     {showCart && <div className="fixed inset-0 z-40 bg-black/40 backdrop-blur-[1px]" onClick={() => setShowCart(false)} />}
 
     {/* Cart Drawer � bottom on mobile/tablet, right on desktop */}
-    <div className={`fixed z-50 overflow-y-auto bg-white transition-transform duration-300 ease-in-out bottom-0 left-0 right-0 max-h-[88vh] rounded-t-3xl shadow-2xl dark:border-l dark:border-teal-900/40 dark:bg-gradient-to-b dark:from-slate-950 dark:to-slate-900 lg:bottom-0 lg:left-auto lg:top-0 lg:h-screen lg:w-[460px] lg:rounded-none lg:rounded-l-3xl ${showCart ? "translate-y-0 lg:translate-x-0 lg:translate-y-0" : "translate-y-full lg:translate-x-full lg:translate-y-0"}`}>
+    <div className={`fixed z-50 bg-white transition-transform duration-300 ease-in-out bottom-0 left-0 right-0 max-h-[88vh] rounded-t-3xl shadow-2xl dark:border-l dark:border-teal-900/40 dark:bg-gradient-to-b dark:from-slate-950 dark:to-slate-900 lg:bottom-0 lg:left-auto lg:top-0 lg:flex lg:h-[100dvh] lg:max-h-[100dvh] lg:w-[460px] lg:flex-col lg:rounded-none lg:rounded-l-3xl ${showCart ? "translate-y-0 lg:translate-x-0 lg:translate-y-0" : "translate-y-full lg:translate-x-full lg:translate-y-0"}`}>
       <div className="mx-auto mt-3 h-1 w-10 rounded-full bg-slate-300 dark:bg-slate-600 lg:hidden" />
       <div className="sticky top-0 z-10 flex items-center justify-between bg-white/95 px-5 py-4 border-b border-slate-200 backdrop-blur dark:border-teal-900/30 dark:bg-slate-950/95">
         <div>
@@ -1310,7 +1310,7 @@ export function PublicStorePage() {
           <AppIcon name="close" className="text-[11px]" />
         </button>
       </div>
-      <div className="space-y-5 p-5">
+      <div className="space-y-5 overflow-y-auto p-5 lg:flex-1">
 <div>
           <h2 className="font-heading text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100">{t("store.checkout", "Checkout")}</h2>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Review your cart, enter delivery details, then pay.</p>

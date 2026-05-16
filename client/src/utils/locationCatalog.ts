@@ -121,6 +121,14 @@ const LOCATION_CATALOG = {
   },
 } as const;
 
+const CITY_ALIASES: Record<string, string> = {
+  bangalore: "Bengaluru",
+  bombay: "Mumbai",
+  calcutta: "Kolkata",
+  madras: "Chennai",
+  trivandrum: "Thiruvananthapuram",
+};
+
 function normalizeValue(value: string) {
   return value.trim().toLowerCase();
 }
@@ -156,6 +164,11 @@ function findStateKey(country: string, state: string) {
   ) || "";
 }
 
+function normalizeCityQuery(city: string) {
+  const cleanCity = normalizeValue(city);
+  return CITY_ALIASES[cleanCity] ? normalizeValue(CITY_ALIASES[cleanCity]) : cleanCity;
+}
+
 export function getCountrySuggestions(query = "") {
   return filterSuggestions(Object.keys(LOCATION_CATALOG), query);
 }
@@ -177,4 +190,24 @@ export function getCitySuggestions(country: string, state: string, query = "") {
     : Object.values(states).flatMap((entries) => [...entries]);
 
   return filterSuggestions(cities, query);
+}
+
+export function inferLocationFromCity(city: string) {
+  const cleanCity = normalizeCityQuery(city);
+  if (!cleanCity) return null;
+
+  for (const [country, states] of Object.entries(LOCATION_CATALOG)) {
+    for (const [state, cities] of Object.entries(states)) {
+      const matchedCity = cities.find((entry: string) => normalizeValue(entry) === cleanCity);
+      if (matchedCity) {
+        return {
+          city: matchedCity,
+          state,
+          country,
+        };
+      }
+    }
+  }
+
+  return null;
 }

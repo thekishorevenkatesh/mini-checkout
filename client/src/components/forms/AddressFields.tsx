@@ -3,6 +3,7 @@ import {
   getCitySuggestions,
   getCountrySuggestions,
   getStateSuggestions,
+  inferLocationFromCity,
 } from "../../utils/locationCatalog";
 
 type AddressFieldKey = keyof AddressParts;
@@ -23,6 +24,26 @@ function updateAddressField(
   nextValue: string
 ) {
   onChange({ ...value, [field]: nextValue });
+}
+
+function updateCityField(
+  value: AddressParts,
+  onChange: (next: AddressParts) => void,
+  nextCity: string
+) {
+  const matchedLocation = inferLocationFromCity(nextCity);
+
+  if (!matchedLocation) {
+    onChange({ ...value, city: nextCity });
+    return;
+  }
+
+  onChange({
+    ...value,
+    city: matchedLocation.city,
+    state: matchedLocation.state,
+    country: matchedLocation.country,
+  });
 }
 
 export function AddressFields({
@@ -70,7 +91,7 @@ export function AddressFields({
           list="city-suggestions"
           className={inputClassName}
           value={value.city}
-          onChange={(event) => updateAddressField(value, onChange, "city", event.target.value)}
+          onChange={(event) => updateCityField(value, onChange, event.target.value)}
           placeholder={value.country ? "Start typing city" : "Select or type country first"}
         />
       </label>
@@ -106,7 +127,7 @@ export function AddressFields({
       </label>
       {showSuggestionHint ? (
         <p className="sm:col-span-2 text-xs text-slate-500">
-          Country, state, and city show dropdown suggestions. You can still type a custom value if it is not listed.
+          City, state, and country show suggestions. Matching a known city can auto-fill its state and country.
         </p>
       ) : null}
 
