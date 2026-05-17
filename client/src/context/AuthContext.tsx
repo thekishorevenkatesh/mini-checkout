@@ -62,7 +62,7 @@ interface AuthContextShape {
   seller: Seller | null;
   token: string | null;
   loading: boolean;
-  sendOtp: (input: SendOtpInput) => Promise<{ isNew: boolean; hasEmail: boolean; otp?: string }>;
+  sendOtp: (input: SendOtpInput) => Promise<{ isNew: boolean; hasEmail: boolean; message: string }>;
   verifyOtp: (input: VerifyOtpInput) => Promise<{ isProfileComplete: boolean }>;
   register: (input: RegisterInput) => Promise<void>;
   logout: () => void;
@@ -116,7 +116,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const response = await api.post<{
       isNew: boolean;
       hasEmail: boolean;
-      otp?: string;
+      message: string;
     }>("/auth/send-otp", input);
     return response.data;
   }

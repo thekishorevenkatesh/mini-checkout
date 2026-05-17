@@ -3,9 +3,11 @@ const jwt = require("jsonwebtoken");
 const Seller = require("../models/Seller");
 const auth = require("../middleware/auth");
 const { slugify } = require("../utils/slug");
-const { generateOtp } = require("../utils/otp");
+const Product = require("../models/Product");
+const Order = require("../models/Order");
+const { generateOtp, hashOtp, verifyOtp: verifyHashedOtp } = require("../utils/otp");
 const { getPolicyContent } = require("../utils/policyDefaults");
-// const { sendOtpEmail } = require("../utils/mailer"); // Email disabled for demo
+const { sendOtpEmail } = require("../utils/mailer");
 
 const router = express.Router();
 
@@ -44,71 +46,104 @@ async function createUniqueSellerSlug(businessName, ignoreSellerId = null) {
   }
 }
 
+function normalizePhone(phone) {
+  return String(phone || "").trim();
+}
+
+function normalizeEmail(email) {
+  return String(email || "").trim().toLowerCase();
+}
+
+function isValidEmail(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+async function storeAndSendOtp({ seller, email, purpose, targetId = null }) {
+  const otp = generateOtp();
+  seller.otp = hashOtp(otp);
+  seller.otpExpiry = new Date(Date.now() + 10 * 60 * 1000);
+  seller.otpPurpose = purpose;
+  seller.otpTargetId = targetId;
+  await seller.save();
+  await sendOtpEmail(email, otp, seller.businessName);
+}
+
 // ─── POST /auth/send-otp ───────────────────────────────────────────────────
-// Accepts phone or email. Generates OTP, sends via email (if email provided).
-// For phone-only accounts without email, OTP is returned in response (dev mode).
+// Email is mandatory and used as the OTP destination.
 router.post("/send-otp", async (req, res) => {
   try {
     const { phone, email, intent } = req.body;
+    const normalizedPhone = normalizePhone(phone);
+    const normalizedEmail = normalizeEmail(email);
 
-    if (!phone && !email) {
-      return res
-        .status(400)
-        .json({ message: "Phone or email is required" });
+    if (!normalizedPhone) {
+      return res.status(400).json({ message: "Phone number is required" });
+    }
+    if (!normalizedEmail) {
+      return res.status(400).json({ message: "Email address is required" });
+    }
+    if (!isValidEmail(normalizedEmail)) {
+      return res.status(400).json({ message: "Enter a valid email address" });
     }
 
-    const query = phone
-      ? { phone: String(phone).trim() }
-      : { businessEmail: String(email).trim().toLowerCase() };
+    let seller = null;
+    const normalizedIntent = String(intent || "").trim();
 
-    let seller = await Seller.findOne(query);
-    const isNew = !seller;
+    if (normalizedIntent === "login") {
+      seller = await Seller.findOne({
+        phone: normalizedPhone,
+        businessEmail: normalizedEmail,
+      });
 
-    if (isNew) {
-      if (String(intent || "").trim() === "login") {
+      if (!seller) {
         return res.status(404).json({
-          message: "No account found. Please register first.",
+          message: "No account found with this phone and email combination. Please register first.",
           redirectTo: "register",
         });
       }
+    } else {
+      const existingByPhone = await Seller.findOne({ phone: normalizedPhone });
+      const existingByEmail = await Seller.findOne({ businessEmail: normalizedEmail });
 
-      // Pre-create a placeholder so we can attach the OTP
-      if (!phone) {
-        return res.status(404).json({
-          message: "No account found with this email. Please register first.",
+      if (existingByEmail && existingByEmail.phone !== normalizedPhone) {
+        return res.status(409).json({
+          message: "This email address is already linked to another account.",
         });
       }
-      seller = new Seller({
-        slug: await createUniqueSellerSlug(String(phone).trim()),
-        businessName: String(phone).trim(), // temp — will be updated on register
-        phone: String(phone).trim(),
-      });
+
+      seller = existingByPhone || existingByEmail;
+
+      if (!seller) {
+        seller = new Seller({
+          slug: await createUniqueSellerSlug(normalizedPhone),
+          businessName: normalizedPhone,
+          phone: normalizedPhone,
+          businessEmail: normalizedEmail,
+        });
+      } else if (!seller.businessEmail) {
+        seller.businessEmail = normalizedEmail;
+      } else if (seller.businessEmail !== normalizedEmail) {
+        return res.status(409).json({
+          message: "This phone number is already linked to a different email address.",
+        });
+      }
     }
 
-    const otp = generateOtp();
-    // Store plain OTP in DB for demo purposes (visible in MongoDB)
-    seller.otp = otp;
-    seller.otpExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 min
-    await seller.save();
-
-    // Email sending disabled for demo — OTP is returned in response & stored in DB
-    // const targetEmail = email || seller.businessEmail;
-    // if (targetEmail) {
-    //   await sendOtpEmail(targetEmail, otp, seller.businessName);
-    // }
+    await storeAndSendOtp({
+      seller,
+      email: normalizedEmail,
+      purpose: "auth",
+    });
 
     return res.json({
-      message: "OTP generated (demo mode — email disabled)",
-      isNew,
-      hasEmail: false,
-      otp, // visible for demo; remove this + re-enable email in production
+      message: "OTP sent to your email address.",
+      isNew: normalizedIntent !== "login" && seller.businessName === normalizedPhone,
+      hasEmail: true,
     });
   } catch (error) {
     console.error("[send-otp error]", error);
     return res.status(500).json({
       message: "Could not send OTP",
-      detail: error?.message || String(error), // dev-only: remove before going to prod
-      code: error?.code,
     });
   }
 });
@@ -117,18 +152,25 @@ router.post("/send-otp", async (req, res) => {
 router.post("/verify-otp", async (req, res) => {
   try {
     const { phone, email, otp } = req.body;
+    const normalizedPhone = normalizePhone(phone);
+    const normalizedEmail = normalizeEmail(email);
 
     if (!otp) {
       return res.status(400).json({ message: "OTP is required" });
     }
+    if (!normalizedPhone) {
+      return res.status(400).json({ message: "Phone number is required" });
+    }
+    if (!normalizedEmail) {
+      return res.status(400).json({ message: "Email address is required" });
+    }
 
-    const query = phone
-      ? { phone: String(phone).trim() }
-      : { businessEmail: String(email).trim().toLowerCase() };
+    const seller = await Seller.findOne({
+      phone: normalizedPhone,
+      businessEmail: normalizedEmail,
+    });
 
-    const seller = await Seller.findOne(query);
-
-    if (!seller || !seller.otp || !seller.otpExpiry) {
+    if (!seller || !seller.otp || !seller.otpExpiry || seller.otpPurpose !== "auth") {
       return res
         .status(400)
         .json({ message: "No OTP requested. Please request a new OTP." });
@@ -140,14 +182,14 @@ router.post("/verify-otp", async (req, res) => {
         .json({ message: "OTP expired. Please request a new one." });
     }
 
-    // Plain comparison for demo (no hashing)
-    if (String(otp).trim() !== String(seller.otp).trim()) {
+    if (!verifyHashedOtp(String(otp).trim(), seller.otp)) {
       return res.status(400).json({ message: "Invalid OTP." });
     }
 
-    // Clear OTP
     seller.otp = null;
     seller.otpExpiry = null;
+    seller.otpPurpose = null;
+    seller.otpTargetId = null;
     await seller.save();
 
     const isProfileComplete = Boolean(
@@ -198,6 +240,22 @@ router.post("/register", auth, async (req, res) => {
       return res.status(404).json({ message: "Seller not found" });
     }
 
+    const nextBusinessEmail = normalizeEmail(businessEmail || seller.businessEmail);
+    if (!nextBusinessEmail) {
+      return res.status(400).json({ message: "Business email is required" });
+    }
+    if (!isValidEmail(nextBusinessEmail)) {
+      return res.status(400).json({ message: "Enter a valid business email address" });
+    }
+
+    const duplicateSeller = await Seller.findOne({
+      businessEmail: nextBusinessEmail,
+      _id: { $ne: seller._id },
+    }).select("_id");
+    if (duplicateSeller) {
+      return res.status(409).json({ message: "This email address is already linked to another account." });
+    }
+
     seller.businessName = String(businessName).trim();
     if (businessCategory) seller.businessCategory = String(businessCategory).trim();
     seller.slug = await createUniqueSellerSlug(
@@ -205,7 +263,7 @@ router.post("/register", auth, async (req, res) => {
       seller._id.toString()
     );
 
-    if (businessEmail) seller.businessEmail = String(businessEmail).trim().toLowerCase();
+    seller.businessEmail = nextBusinessEmail;
     if (businessAddress) seller.businessAddress = String(businessAddress).trim();
     if (businessGST) seller.businessGST = String(businessGST).trim();
     if (upiId) seller.upiId = String(upiId).trim();
@@ -282,9 +340,26 @@ router.put("/me", auth, async (req, res) => {
       return res.status(404).json({ message: "Seller not found" });
     }
 
+    const nextBusinessEmail = normalizeEmail(businessEmail);
+
     if (businessName) seller.businessName = String(businessName).trim();
     if (businessCategory !== undefined) seller.businessCategory = String(businessCategory).trim();
-    if (businessEmail) seller.businessEmail = String(businessEmail).trim().toLowerCase();
+    if (!nextBusinessEmail) {
+      return res.status(400).json({ message: "Business email is required" });
+    }
+    if (!isValidEmail(nextBusinessEmail)) {
+      return res.status(400).json({ message: "Enter a valid business email address" });
+    }
+
+    const duplicateSeller = await Seller.findOne({
+      businessEmail: nextBusinessEmail,
+      _id: { $ne: seller._id },
+    }).select("_id");
+    if (duplicateSeller) {
+      return res.status(409).json({ message: "This email address is already linked to another account." });
+    }
+
+    seller.businessEmail = nextBusinessEmail;
     if (businessAddress !== undefined) seller.businessAddress = String(businessAddress).trim();
     if (businessGST !== undefined) seller.businessGST = String(businessGST).trim();
     if (typeof upiId === "string") seller.upiId = upiId.trim();
@@ -310,6 +385,70 @@ router.put("/me", auth, async (req, res) => {
     return res.json({ seller: withPolicyDefaults(seller) });
   } catch (error) {
     return res.status(500).json({ message: "Unable to update profile" });
+  }
+});
+
+router.post("/request-delete-otp", auth, async (req, res) => {
+  try {
+    const seller = await Seller.findById(req.sellerId);
+    if (!seller) {
+      return res.status(404).json({ message: "Seller not found" });
+    }
+
+    if (!seller.businessEmail || !isValidEmail(seller.businessEmail)) {
+      return res.status(400).json({
+        message: "Add a valid business email in your profile before deleting the account.",
+      });
+    }
+
+    await storeAndSendOtp({
+      seller,
+      email: seller.businessEmail,
+      purpose: "profile_delete",
+    });
+
+    return res.json({
+      message: "A verification OTP has been sent to your business email.",
+      email: seller.businessEmail,
+    });
+  } catch (error) {
+    console.error("[request-delete-otp error]", error);
+    return res.status(500).json({ message: "Could not send deletion OTP" });
+  }
+});
+
+router.post("/delete-account", auth, async (req, res) => {
+  try {
+    const { otp } = req.body;
+    if (!otp) {
+      return res.status(400).json({ message: "OTP is required" });
+    }
+
+    const seller = await Seller.findById(req.sellerId);
+    if (!seller) {
+      return res.status(404).json({ message: "Seller not found" });
+    }
+
+    if (!seller.otp || !seller.otpExpiry || seller.otpPurpose !== "profile_delete") {
+      return res.status(400).json({ message: "Request a fresh deletion OTP to continue." });
+    }
+
+    if (seller.otpExpiry < new Date()) {
+      return res.status(400).json({ message: "OTP expired. Please request a new one." });
+    }
+
+    if (!verifyHashedOtp(String(otp).trim(), seller.otp)) {
+      return res.status(400).json({ message: "Invalid OTP." });
+    }
+
+    await Product.deleteMany({ seller: seller._id });
+    await Order.deleteMany({ seller: seller._id });
+    await Seller.deleteOne({ _id: seller._id });
+
+    return res.json({ message: "Profile deleted successfully." });
+  } catch (error) {
+    console.error("[delete-account error]", error);
+    return res.status(500).json({ message: "Unable to delete profile" });
   }
 });
 

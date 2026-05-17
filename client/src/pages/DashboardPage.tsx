@@ -168,6 +168,10 @@ function normalizeImageUrl(url: string) {
   return `https://${trimmed}`;
 }
 
+function isValidEmail(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
 function expandImageSource(value: unknown): string[] {
   if (Array.isArray(value)) {
     return value.flatMap(expandImageSource);
@@ -274,6 +278,24 @@ export function DashboardPage() {
   const [returnRefundPolicy, setReturnRefundPolicy] = useState<string>(DEFAULT_POLICY_CONTENT.returnRefundPolicy);
   const [termsAndConditions, setTermsAndConditions] = useState<string>(DEFAULT_POLICY_CONTENT.termsAndConditions);
   const [isSavingPolicies, setIsSavingPolicies] = useState(false);
+
+  // ── Delete confirmation states
+  const [showDeleteProfileConfirm, setShowDeleteProfileConfirm] = useState(false);
+  const [showDeleteStoreConfirm, setShowDeleteStoreConfirm] = useState(false);
+  const [showDeleteProductConfirm, setShowDeleteProductConfirm] = useState(false);
+  const [isDeletingProfile, setIsDeletingProfile] = useState(false);
+  const [isDeletingStore, setIsDeletingStore] = useState(false);
+  const [isDeletingProduct, setIsDeletingProduct] = useState(false);
+  const [isSendingDeleteStoreOtp, setIsSendingDeleteStoreOtp] = useState(false);
+  const [deleteStoreOtp, setDeleteStoreOtp] = useState("");
+  const [deleteStoreOtpSentTo, setDeleteStoreOtpSentTo] = useState("");
+  const [isSendingDeleteProfileOtp, setIsSendingDeleteProfileOtp] = useState(false);
+  const [deleteProfileOtp, setDeleteProfileOtp] = useState("");
+  const [deleteProfileOtpSentTo, setDeleteProfileOtpSentTo] = useState("");
+  const [isSendingDeleteProductOtp, setIsSendingDeleteProductOtp] = useState(false);
+  const [deleteProductOtp, setDeleteProductOtp] = useState("");
+  const [deleteProductOtpSentTo, setDeleteProductOtpSentTo] = useState("");
+  const [productPendingDelete, setProductPendingDelete] = useState<Product | null>(null);
 
   // ── Store options
   const [storeLogo, setStoreLogo] = useState(seller?.businessLogo || "");
@@ -533,7 +555,16 @@ export function DashboardPage() {
 
   // ── Profile save
   async function handleProfileSave(e: FormEvent) {
-    e.preventDefault(); setIsSavingProfile(true); setError(""); setSuccess("");
+    e.preventDefault(); setError(""); setSuccess("");
+    if (!profileEmail.trim()) {
+      setError("Business email is required.");
+      return;
+    }
+    if (!isValidEmail(profileEmail)) {
+      setError("Enter a valid business email address.");
+      return;
+    }
+    setIsSavingProfile(true);
     try {
       await updateProfile({
         businessName: profileName.trim(),
@@ -617,6 +648,91 @@ export function DashboardPage() {
       setError("Could not save policies.");
     } finally {
       setIsSavingPolicies(false);
+    }
+  }
+
+  // ── Delete profile
+  function showDeleteProfileModal() {
+    setDeleteProfileOtp("");
+    setDeleteProfileOtpSentTo("");
+    setError("");
+    setSuccess("");
+    setShowDeleteProfileConfirm(true);
+  }
+
+  async function requestDeleteProfileOtp() {
+    setIsSendingDeleteProfileOtp(true); setError(""); setSuccess("");
+    try {
+      const response = await api.post<{ message: string; email: string }>("/auth/request-delete-otp");
+      setDeleteProfileOtpSentTo(response.data.email);
+      setSuccess(response.data.message);
+    } catch (error) {
+      setError(getApiErrorMessage(error, "Could not send deletion OTP."));
+    } finally {
+      setIsSendingDeleteProfileOtp(false);
+    }
+  }
+
+  async function confirmDeleteProfile() {
+    if (deleteProfileOtp.trim().length !== 6) {
+      setError("Enter the 6-digit OTP sent to your email.");
+      return;
+    }
+
+    setIsDeletingProfile(true); setError(""); setSuccess("");
+    try {
+      await api.post("/auth/delete-account", { otp: deleteProfileOtp.trim() });
+      setSuccess("Profile deleted successfully.");
+      window.setTimeout(() => {
+        logout();
+      }, 1000);
+    } catch (error) {
+      setError(getApiErrorMessage(error, "Could not delete profile."));
+    } finally {
+      setIsDeletingProfile(false);
+    }
+  }
+
+  // ── Delete store
+  function showDeleteStoreModal() {
+    setDeleteStoreOtp("");
+    setDeleteStoreOtpSentTo("");
+    setError("");
+    setSuccess("");
+    setShowDeleteStoreConfirm(true);
+  }
+
+  async function requestDeleteStoreOtp() {
+    setIsSendingDeleteStoreOtp(true); setError(""); setSuccess("");
+    try {
+      const response = await api.post<{ message: string; email: string }>("/store/request-delete-otp");
+      setDeleteStoreOtpSentTo(response.data.email);
+      setSuccess(response.data.message);
+    } catch (error) {
+      setError(getApiErrorMessage(error, "Could not send store deletion OTP."));
+    } finally {
+      setIsSendingDeleteStoreOtp(false);
+    }
+  }
+
+  async function confirmDeleteStore() {
+    if (deleteStoreOtp.trim().length !== 6) {
+      setError("Enter the 6-digit OTP sent to your email.");
+      return;
+    }
+    setIsDeletingStore(true); setError(""); setSuccess("");
+    try {
+      await api.post("/store/confirm-delete", { otp: deleteStoreOtp.trim() });
+      await refreshProfile();
+      await loadData();
+      setSuccess("Store deleted successfully. You can set up again.");
+      setShowDeleteStoreConfirm(false);
+      setDeleteStoreOtp("");
+      setDeleteStoreOtpSentTo("");
+    } catch (error) {
+      setError(getApiErrorMessage(error, "Could not delete store."));
+    } finally {
+      setIsDeletingStore(false);
     }
   }
 
@@ -784,10 +900,51 @@ export function DashboardPage() {
     try { await api.patch(`/products/${id}/toggle`, {}); await loadData(); }
     catch { setError("Could not toggle product."); }
   }
-  async function handleDeleteProduct(id: string) {
-    if (!window.confirm("Delete this product? This cannot be undone.")) return;
-    try { await api.delete(`/products/${id}`); await loadData(); setSuccess("Product deleted."); }
-    catch { setError("Could not delete product."); }
+  function handleDeleteProduct(product: Product) {
+    setProductPendingDelete(product);
+    setDeleteProductOtp("");
+    setDeleteProductOtpSentTo("");
+    setError("");
+    setSuccess("");
+    setShowDeleteProductConfirm(true);
+  }
+
+  async function requestDeleteProductOtp() {
+    if (!productPendingDelete) return;
+    setIsSendingDeleteProductOtp(true); setError(""); setSuccess("");
+    try {
+      const response = await api.post<{ message: string; email: string }>(`/products/${productPendingDelete._id}/request-delete-otp`);
+      setDeleteProductOtpSentTo(response.data.email);
+      setSuccess(response.data.message);
+    } catch (error) {
+      setError(getApiErrorMessage(error, "Could not send product deletion OTP."));
+    } finally {
+      setIsSendingDeleteProductOtp(false);
+    }
+  }
+
+  async function confirmDeleteProduct() {
+    if (!productPendingDelete) return;
+    if (deleteProductOtp.trim().length !== 6) {
+      setError("Enter the 6-digit OTP sent to your email.");
+      return;
+    }
+    setIsDeletingProduct(true); setError(""); setSuccess("");
+    try {
+      await api.post(`/products/${productPendingDelete._id}/confirm-delete`, {
+        otp: deleteProductOtp.trim(),
+      });
+      await loadData();
+      setSuccess("Product deleted.");
+      setShowDeleteProductConfirm(false);
+      setProductPendingDelete(null);
+      setDeleteProductOtp("");
+      setDeleteProductOtpSentTo("");
+    } catch (error) {
+      setError(getApiErrorMessage(error, "Could not delete product."));
+    } finally {
+      setIsDeletingProduct(false);
+    }
   }
 
   // ── Order status
@@ -797,8 +954,23 @@ export function DashboardPage() {
   }
 
   // ── CSV export
-  function handleExport() {
-    window.open(`${api.defaults.baseURL}/orders/my/export`, "_blank");
+  async function handleExport() {
+    try {
+      const response = await api.get("/orders/my/export", {
+        responseType: "blob",
+      });
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement("a");
+      link.href = url;
+      link.setAttribute("download", `orders-export-${new Date().toISOString().split("T")[0]}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      link.parentNode?.removeChild(link);
+      window.URL.revokeObjectURL(url);
+      setSuccess("Orders exported successfully.");
+    } catch {
+      setError("Could not export orders.");
+    }
   }
 
   const tabs: { key: Tab; label: string; icon: Parameters<typeof AppIcon>[0]["name"] }[] = [
@@ -810,6 +982,16 @@ export function DashboardPage() {
     { key: "profile", label: t("nav.profile", "Profile"), icon: "profile" },
     { key: "policies", label: t("nav.policies", "Policies"), icon: "policies" },
   ];
+  const reportAverageOrderValue = report && report.totalOrders > 0
+    ? Math.round(report.totalRevenue / report.totalOrders)
+    : 0;
+  const reportTopProduct = report?.topProducts?.[0] || null;
+  const reportTopProductRevenueShare = report && report.totalRevenue > 0 && reportTopProduct
+    ? Math.min(100, Math.round((reportTopProduct.revenue / report.totalRevenue) * 100))
+    : 0;
+  const reportTotalUnits = report
+    ? report.topProducts.reduce((sum, product) => sum + product.unitsSold, 0)
+    : 0;
   return (
     <main className="mx-auto w-full max-w-7xl space-y-4 px-3 py-5 sm:px-4 sm:py-8">
       {/* Header */}
@@ -1696,7 +1878,7 @@ export function DashboardPage() {
                       <AppIcon name={prod.isActive ? "pending" : "check"} className="text-[10px]" />
                       {prod.isActive ? "Deactivate" : "Activate"}
                     </button>
-                    <button onClick={() => handleDeleteProduct(prod._id)}
+                    <button onClick={() => handleDeleteProduct(prod)}
                       className="inline-flex items-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-100 transition"
                     ><AppIcon name="close" className="text-[10px]" /> Delete</button>
                   </div>
@@ -1716,6 +1898,107 @@ export function DashboardPage() {
       )}
 
       {/* ═══════════════════════════════════════ TAB: ORDERS ══ */}
+      {showDeleteProductConfirm && productPendingDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm dark:bg-black/60">
+          <div className="relative w-full max-w-md rounded-[28px] border border-white/70 bg-white shadow-xl dark:border-slate-800 dark:bg-slate-900">
+            <div className="p-6">
+              <div className="mb-4 flex items-center gap-3">
+                <span className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-rose-500 to-orange-500 text-white shadow-sm">
+                  <AppIcon name="trash" className="text-[14px]" />
+                </span>
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-rose-500">Protected delete</p>
+                  <h2 className="text-lg font-bold text-slate-900 dark:text-white">Delete product with OTP</h2>
+                </div>
+              </div>
+
+              <div className="mb-5 rounded-2xl border border-slate-200 bg-slate-50/80 p-4 dark:border-slate-800 dark:bg-slate-950/60">
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Product</p>
+                <p className="mt-1 text-sm font-semibold text-slate-900 dark:text-white">{productPendingDelete.title}</p>
+                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">This removal is permanent and cannot be undone.</p>
+              </div>
+
+              <div className="mb-5 rounded-2xl border border-rose-100 bg-rose-50/80 p-4 dark:border-rose-900/40 dark:bg-rose-950/20">
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-rose-500">Step 1</p>
+                <p className="mt-1 text-sm text-slate-700 dark:text-slate-200">
+                  Send a one-time password to <span className="font-semibold">{deleteProductOtpSentTo || seller?.businessEmail || "your saved business email"}</span>.
+                </p>
+              </div>
+
+              {deleteProductOtpSentTo ? (
+                <div className="mb-5 rounded-2xl border border-sky-100 bg-sky-50/80 p-4 dark:border-sky-900/40 dark:bg-sky-950/20">
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-600">Step 2</p>
+                  <label className="mt-2 block space-y-2">
+                    <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">Enter the 6-digit OTP</span>
+                    <input
+                      className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-center text-xl font-bold tracking-[0.3em] text-slate-900 outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50 dark:border-slate-700 dark:bg-slate-950 dark:text-white"
+                      placeholder="------"
+                      maxLength={6}
+                      value={deleteProductOtp}
+                      onChange={(e) => setDeleteProductOtp(e.target.value.replace(/\D/g, ""))}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={requestDeleteProductOtp}
+                    disabled={isSendingDeleteProductOtp || isDeletingProduct}
+                    className="mt-3 text-xs font-semibold text-sky-700 underline underline-offset-4 disabled:opacity-60 dark:text-sky-300"
+                  >
+                    {isSendingDeleteProductOtp ? "Sending..." : "Resend OTP"}
+                  </button>
+                </div>
+              ) : null}
+
+              <div className="flex gap-3">
+                <button
+                  onClick={() => {
+                    setShowDeleteProductConfirm(false);
+                    setProductPendingDelete(null);
+                    setDeleteProductOtp("");
+                    setDeleteProductOtpSentTo("");
+                  }}
+                  disabled={isDeletingProduct || isSendingDeleteProductOtp}
+                  className="flex-1 rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 disabled:opacity-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-800"
+                >
+                  Cancel
+                </button>
+                {deleteProductOtpSentTo ? (
+                  <button
+                    onClick={confirmDeleteProduct}
+                    disabled={isDeletingProduct || deleteProductOtp.trim().length !== 6}
+                    className="flex-1 inline-flex items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-rose-600 to-red-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:from-rose-500 hover:to-red-500 disabled:opacity-50"
+                  >
+                    {isDeletingProduct ? (
+                      <>
+                        <AppIcon name="pending" className="text-[11px]" />
+                        Verifying...
+                      </>
+                    ) : (
+                      "Verify OTP & Delete"
+                    )}
+                  </button>
+                ) : (
+                  <button
+                    onClick={requestDeleteProductOtp}
+                    disabled={isSendingDeleteProductOtp}
+                    className="flex-1 inline-flex items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-teal-600 to-sky-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:from-teal-500 hover:to-sky-500 disabled:opacity-50"
+                  >
+                    {isSendingDeleteProductOtp ? (
+                      <>
+                        <AppIcon name="pending" className="text-[11px]" />
+                        Sending...
+                      </>
+                    ) : (
+                      "Send OTP"
+                    )}
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {tab === "orders" && (
         <article className="rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card dark:border-teal-900/35 dark:bg-gradient-to-br dark:from-slate-950 dark:to-slate-900">
           {/* Header */}
@@ -1965,58 +2248,198 @@ export function DashboardPage() {
       )}
 
 
-      {/* ══════════════════════════════════════ TAB: REPORTS ══ */}
+      {/* Reports */}
       {tab === "reports" && (
-        <div className="space-y-4">
-          <article className="rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card dark:border-teal-900/35 dark:bg-gradient-to-br dark:from-slate-950 dark:to-slate-900">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <h2 className="font-heading text-xl font-bold text-slate-900">Sales Report</h2>
-              <div className="flex gap-2">
-                {[7, 30].map(d => (
-                  <button key={d} onClick={() => setReportDays(d)}
-                    className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${reportDays === d ? "bg-gradient-to-r from-emerald-500 via-teal-500 to-sky-500 text-white shadow-md" : "border border-slate-200 bg-white text-slate-600 hover:border-slate-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-teal-700"}`}>
-                    {d === 7 ? "7 Days" : "30 Days"}
-                  </button>
-                ))}
-                <button onClick={handleExport} className="inline-flex items-center gap-2 rounded-xl bg-teal-600 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-500 transition"><AppIcon name="download" className="text-[10px]" />Export CSV</button>
+        <div className="space-y-5">
+          <section className="overflow-hidden rounded-[30px] border border-white/70 bg-gradient-to-br from-white via-emerald-50/70 to-sky-50/80 p-5 shadow-card dark:border-teal-900/35 dark:bg-gradient-to-br dark:from-slate-950 dark:via-slate-900 dark:to-slate-900">
+            <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
+              <div className="max-w-2xl">
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-600">Analytics overview</p>
+                <h2 className="mt-2 font-heading text-3xl font-bold tracking-tight text-slate-900 dark:text-white">Sales performance at a glance</h2>
+                <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-slate-400">Track order volume, revenue quality, and top-selling products in the same visual language as the rest of your dashboard.</p>
               </div>
-            </div>
-            {loadingReport && <p className="mt-4 text-sm text-slate-500">Loading report...</p>}
-            {report && !loadingReport && (
-              <>
-                <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900/80">
-                    <p className="text-xs uppercase tracking-wide text-slate-500">Orders ({reportDays}d)</p>
-                    <p className="mt-1 text-3xl font-bold text-slate-900">{report.totalOrders}</p>
-                  </div>
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900/80">
-                    <p className="text-xs uppercase tracking-wide text-slate-500">Revenue ({reportDays}d)</p>
-                    <p className="mt-1 text-3xl font-bold text-teal-700">₹{report.totalRevenue.toLocaleString("en-IN")}</p>
-                  </div>
-                </div>
-                <h3 className="mt-5 text-sm font-bold text-slate-700">Top Selling Products</h3>
-                {report.topProducts.length === 0 && <p className="mt-2 text-sm text-slate-500">No sales data for this period.</p>}
-                <div className="mt-2 space-y-2">
-                  {report.topProducts.map((p, i) => (
-                    <div key={i} className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-700 dark:bg-slate-900/80">
-                      <div className="flex items-center gap-3">
-                        <span className="text-lg font-bold text-slate-300">#{i + 1}</span>
-                        <p className="font-semibold text-slate-800">{p.title}</p>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-sm font-semibold text-slate-900">{p.unitsSold} units sold</p>
-                        <p className="text-xs text-teal-700">₹{p.revenue.toLocaleString("en-IN")}</p>
-                      </div>
-                    </div>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                <div className="inline-flex rounded-2xl border border-white/80 bg-white/85 p-1 shadow-sm dark:border-slate-800 dark:bg-slate-950/80">
+                  {[7, 30].map((d) => (
+                    <button
+                      key={d}
+                      onClick={() => setReportDays(d)}
+                      className={reportDays === d ? "rounded-xl bg-gradient-to-r from-emerald-500 via-teal-500 to-sky-500 px-4 py-2 text-sm font-semibold text-white shadow-sm" : "rounded-xl px-4 py-2 text-sm font-semibold text-slate-600 transition hover:text-slate-900 dark:text-slate-300 dark:hover:text-white"}
+                    >
+                      {d === 7 ? "Last 7 days" : "Last 30 days"}
+                    </button>
                   ))}
                 </div>
-              </>
-            )}
-          </article>
+                <button onClick={handleExport} className="inline-flex items-center justify-center gap-2 rounded-2xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-950 dark:hover:bg-white">
+                  <AppIcon name="download" className="text-[11px]" /> Export Report
+                </button>
+              </div>
+            </div>
+          </section>
+
+          {loadingReport ? (
+            <div className="rounded-[28px] border border-white/70 bg-white/90 p-10 text-center shadow-card dark:border-teal-900/35 dark:bg-gradient-to-br dark:from-slate-950 dark:to-slate-900">
+              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-500 to-sky-500 text-white shadow-sm">
+                <AppIcon name="pending" className="text-[14px]" />
+              </div>
+              <p className="mt-4 text-sm font-semibold text-slate-700 dark:text-slate-200">Preparing your report...</p>
+              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Pulling orders, revenue, and product performance for the selected window.</p>
+            </div>
+          ) : report ? (
+            <>
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                <article className="rounded-[26px] border border-white/70 bg-gradient-to-br from-white via-slate-50 to-slate-100/80 p-5 shadow-card dark:border-teal-900/35 dark:from-slate-950 dark:via-slate-900 dark:to-slate-900">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Total Orders</p>
+                      <p className="mt-1 text-xs text-slate-500">Confirmed non-cancelled orders</p>
+                    </div>
+                    <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-700 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"><AppIcon name="orders" className="text-[12px]" /></span>
+                  </div>
+                  <p className="mt-6 text-3xl font-bold tracking-tight text-slate-900 dark:text-white">{report.totalOrders}</p>
+                  <p className="mt-2 text-xs text-slate-500">{"Across the last " + reportDays + " days"}</p>
+                </article>
+                <article className="rounded-[26px] border border-white/70 bg-gradient-to-br from-white via-emerald-50/80 to-teal-50/70 p-5 shadow-card dark:border-teal-900/35 dark:from-slate-950 dark:via-slate-900 dark:to-slate-900">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Total Revenue</p>
+                      <p className="mt-1 text-xs text-slate-500">Value captured in period</p>
+                    </div>
+                    <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-emerald-200 bg-emerald-50 text-emerald-700 shadow-sm dark:border-emerald-900/60 dark:bg-emerald-950/50 dark:text-emerald-300"><AppIcon name="reports" className="text-[12px]" /></span>
+                  </div>
+                  <p className="mt-6 text-3xl font-bold tracking-tight text-emerald-700 dark:text-emerald-300">₹{report.totalRevenue.toLocaleString("en-IN")}</p>
+                  <p className="mt-2 text-xs text-slate-500">Revenue for the active range</p>
+                </article>
+                <article className="rounded-[26px] border border-white/70 bg-gradient-to-br from-white via-sky-50/75 to-cyan-50/70 p-5 shadow-card dark:border-teal-900/35 dark:from-slate-950 dark:via-slate-900 dark:to-slate-900">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Avg. Order Value</p>
+                      <p className="mt-1 text-xs text-slate-500">Revenue per completed order</p>
+                    </div>
+                    <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-sky-200 bg-sky-50 text-sky-700 shadow-sm dark:border-sky-900/60 dark:bg-sky-950/45 dark:text-sky-300"><AppIcon name="dashboard" className="text-[12px]" /></span>
+                  </div>
+                  <p className="mt-6 text-3xl font-bold tracking-tight text-slate-900 dark:text-white">₹{reportAverageOrderValue.toLocaleString("en-IN")}</p>
+                  <p className="mt-2 text-xs text-slate-500">{"Based on " + (report.totalOrders || 0) + " orders"}</p>
+                </article>
+                <article className="rounded-[26px] border border-white/70 bg-gradient-to-br from-white via-amber-50/80 to-orange-50/70 p-5 shadow-card dark:border-teal-900/35 dark:from-slate-950 dark:via-slate-900 dark:to-slate-900">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Units Sold</p>
+                      <p className="mt-1 text-xs text-slate-500">Total product quantities moved</p>
+                    </div>
+                    <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-amber-200 bg-amber-50 text-amber-700 shadow-sm dark:border-amber-900/60 dark:bg-amber-950/45 dark:text-amber-300"><AppIcon name="products" className="text-[12px]" /></span>
+                  </div>
+                  <p className="mt-6 text-3xl font-bold tracking-tight text-slate-900 dark:text-white">{reportTotalUnits}</p>
+                  <p className="mt-2 text-xs text-slate-500">{"From " + report.topProducts.length + " selling product" + (report.topProducts.length === 1 ? "" : "s")}</p>
+                </article>
+              </div>
+
+              <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
+                <article className="rounded-[28px] border border-white/70 bg-white/90 p-5 shadow-card dark:border-teal-900/35 dark:bg-gradient-to-br dark:from-slate-950 dark:to-slate-900">
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Top products</p>
+                      <h3 className="mt-1 font-heading text-xl font-bold text-slate-900 dark:text-white">Best-selling catalogue items</h3>
+                      <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">See which products are driving the strongest revenue in this selected period.</p>
+                    </div>
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3 text-right dark:border-slate-800 dark:bg-slate-900/70">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Top performer</p>
+                      <p className="mt-1 text-sm font-semibold text-slate-900 dark:text-white">{reportTopProduct?.title || "No sales yet"}</p>
+                      <p className="mt-1 text-xs text-slate-500">{reportTopProduct ? "₹" + reportTopProduct.revenue.toLocaleString("en-IN") + " revenue" : "No revenue in this window"}</p>
+                    </div>
+                  </div>
+
+                  {report.topProducts.length === 0 ? (
+                    <div className="mt-5 rounded-3xl border border-dashed border-slate-200 bg-slate-50/80 p-8 text-center dark:border-slate-800 dark:bg-slate-900/60">
+                      <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-950"><AppIcon name="reports" className="text-[12px]" /></div>
+                      <p className="mt-4 text-sm font-semibold text-slate-700 dark:text-slate-200">No sales data for this period</p>
+                      <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Once orders come in, your top products and performance mix will appear here.</p>
+                    </div>
+                  ) : (
+                    <div className="mt-5 space-y-3">
+                      {report.topProducts.map((product, index) => {
+                        const leaderRevenue = report.topProducts[0]?.revenue || 1;
+                        const revenueWidth = Math.max(10, Math.min(100, (product.revenue / leaderRevenue) * 100));
+                        const rankClass = index === 0 ? "bg-gradient-to-br from-emerald-500 to-teal-600 text-white" : index === 1 ? "bg-gradient-to-br from-sky-500 to-cyan-600 text-white" : "bg-gradient-to-br from-amber-400 to-orange-500 text-white";
+                        return (
+                          <div key={product.title + "-" + index} className="rounded-2xl border border-slate-100 bg-slate-50/80 p-4 transition hover:border-emerald-200 hover:bg-white dark:border-slate-800 dark:bg-slate-900/70 dark:hover:border-teal-800">
+                            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-3">
+                                  <span className={"inline-flex h-10 w-10 items-center justify-center rounded-2xl text-sm font-bold shadow-sm " + rankClass}>#{index + 1}</span>
+                                  <div className="min-w-0">
+                                    <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">{product.title}</p>
+                                    <p className="text-xs text-slate-500">{product.unitsSold} unit{product.unitsSold === 1 ? "" : "s"} sold</p>
+                                  </div>
+                                </div>
+                                <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
+                                  <div className="h-full rounded-full bg-gradient-to-r from-emerald-500 via-teal-500 to-sky-500" style={{ width: String(revenueWidth) + "%" }} />
+                                </div>
+                              </div>
+                              <div className="grid shrink-0 grid-cols-2 gap-3 lg:w-[230px]">
+                                <div className="rounded-2xl border border-white/80 bg-white px-3 py-2 text-center shadow-sm dark:border-slate-800 dark:bg-slate-950/70">
+                                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Revenue</p>
+                                  <p className="mt-1 text-sm font-bold text-emerald-700 dark:text-emerald-300">₹{product.revenue.toLocaleString("en-IN")}</p>
+                                </div>
+                                <div className="rounded-2xl border border-white/80 bg-white px-3 py-2 text-center shadow-sm dark:border-slate-800 dark:bg-slate-950/70">
+                                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Share</p>
+                                  <p className="mt-1 text-sm font-bold text-slate-900 dark:text-white">{report.totalRevenue > 0 ? Math.round((product.revenue / report.totalRevenue) * 100) : 0}%</p>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </article>
+
+                <div className="space-y-4">
+                  <article className="rounded-[28px] border border-white/70 bg-gradient-to-br from-slate-900 via-slate-900 to-emerald-950 p-5 text-white shadow-card dark:border-teal-900/35">
+                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-300">Performance snapshot</p>
+                    <h3 className="mt-2 font-heading text-xl font-bold">Revenue concentration</h3>
+                    <p className="mt-2 text-sm leading-6 text-slate-300">{reportTopProduct ? reportTopProduct.title + " contributes " + reportTopProductRevenueShare + "% of your total revenue in this range." : "Your next order will start shaping this report."}</p>
+                    <div className="mt-5 rounded-3xl border border-white/10 bg-white/5 p-4 backdrop-blur-sm">
+                      <div className="flex items-end justify-between gap-3">
+                        <div>
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">Lead product revenue</p>
+                          <p className="mt-1 text-3xl font-bold">{reportTopProduct ? "₹" + reportTopProduct.revenue.toLocaleString("en-IN") : "₹0"}</p>
+                        </div>
+                        <span className="rounded-full border border-emerald-400/25 bg-emerald-400/10 px-3 py-1 text-xs font-semibold text-emerald-200">{"Last " + reportDays + " days"}</span>
+                      </div>
+                      <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/10">
+                        <div className="h-full rounded-full bg-gradient-to-r from-emerald-400 via-teal-300 to-sky-300" style={{ width: String(Math.max(8, reportTopProductRevenueShare)) + "%" }} />
+                      </div>
+                    </div>
+                  </article>
+
+                  <article className="rounded-[28px] border border-white/70 bg-white/90 p-5 shadow-card dark:border-teal-900/35 dark:bg-gradient-to-br dark:from-slate-950 dark:to-slate-900">
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Report summary</p>
+                    <div className="mt-4 space-y-3">
+                      {[
+                        { label: "Active period", value: "Last " + reportDays + " days" },
+                        { label: "Products generating sales", value: String(report.topProducts.length) },
+                        { label: "Total units sold", value: String(reportTotalUnits) },
+                        { label: "Average revenue per order", value: "₹" + reportAverageOrderValue.toLocaleString("en-IN") },
+                      ].map((item) => (
+                        <div key={item.label} className="flex items-center justify-between gap-3 rounded-2xl border border-slate-100 bg-slate-50/80 px-4 py-3 dark:border-slate-800 dark:bg-slate-900/70">
+                          <span className="text-sm text-slate-500 dark:text-slate-400">{item.label}</span>
+                          <span className="text-sm font-semibold text-slate-900 dark:text-white">{item.value}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </article>
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="rounded-[28px] border border-white/70 bg-white/90 p-10 text-center shadow-card dark:border-teal-900/35 dark:bg-gradient-to-br dark:from-slate-950 dark:to-slate-900">
+              <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Report data is not available yet.</p>
+              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Try refreshing after some orders are placed.</p>
+            </div>
+          )}
         </div>
       )}
-
-      {/* ══════════════════════════════════════ TAB: PROFILE ══ */}
       {tab === "profile" && (
         <div className="mx-auto max-w-3xl space-y-5">
           {/* Account banner */}
@@ -2154,12 +2577,282 @@ export function DashboardPage() {
               {isSavingProfile ? "Saving…" : "💾 Save Profile"}
             </button>
           </form>
+
+          <article className="mt-8 rounded-3xl border border-white/70 bg-white/90 p-6 shadow-card dark:border-teal-900/35 dark:bg-gradient-to-br dark:from-slate-950 dark:to-slate-900">
+            <div className="mb-5 flex items-start gap-3">
+              <span className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-400 via-orange-500 to-rose-500 text-white shadow-sm">
+                <AppIcon name="pending" className="text-[12px]" />
+              </span>
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-amber-600">Account protection</p>
+                <h3 className="font-heading text-lg font-bold text-slate-900 dark:text-white">Sensitive account actions</h3>
+                
+              </div>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="rounded-2xl border border-amber-100 bg-gradient-to-br from-amber-50 to-white p-4 dark:border-amber-900/30 dark:from-amber-950/20 dark:to-slate-900">
+                <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">Reset store data</p>
+                <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">
+                  Clears products and storefront settings, but keeps your seller account so you can set it up again.
+                </p>
+                <button
+                  type="button"
+                  onClick={showDeleteStoreModal}
+                  className="mt-4 group flex w-full items-center justify-center gap-2 rounded-xl border border-amber-300 bg-white px-4 py-3 text-sm font-semibold text-amber-700 transition hover:bg-amber-50 hover:border-amber-400 dark:border-amber-700/60 dark:bg-slate-900/60 dark:text-amber-300 dark:hover:bg-amber-950/30"
+                >
+                  <AppIcon name="trash" className="text-[13px]" />
+                  Delete Store & Products
+                </button>
+              </div>
+
+              <div className="rounded-2xl border border-rose-100 bg-gradient-to-br from-rose-50 to-white p-4 dark:border-rose-900/30 dark:from-rose-950/20 dark:to-slate-900">
+                <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">Delete entire account</p>
+                <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">
+                  Permanently removes your profile, products, and order history after email OTP verification.
+                </p>
+                <button
+                  type="button"
+                  onClick={showDeleteProfileModal}
+                  className="mt-4 group flex w-full items-center justify-center gap-2 rounded-xl border border-rose-300 bg-white px-4 py-3 text-sm font-semibold text-rose-700 transition hover:bg-rose-50 hover:border-rose-400 dark:border-rose-700/60 dark:bg-slate-900/60 dark:text-rose-300 dark:hover:bg-rose-950/30"
+                >
+                  <AppIcon name="trash" className="text-[13px]" />
+                  Delete Profile
+                </button>
+              </div>
+            </div>
+
+           
+          </article>
+
+          {/* Delete Store Confirmation Modal */}
+          {showDeleteStoreConfirm && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm dark:bg-black/60">
+              <div className="relative w-full max-w-md rounded-[28px] border border-white/70 bg-white shadow-xl dark:border-slate-800 dark:bg-slate-900">
+                <div className="p-6">
+                  <div className="mb-4 flex items-center gap-3">
+                    <span className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-500 to-orange-500 text-white shadow-sm">
+                      <AppIcon name="trash" className="text-[14px]" />
+                    </span>
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.24em] text-amber-500">Protected delete</p>
+                      <h2 className="text-lg font-bold text-slate-900 dark:text-white">Delete store with OTP</h2>
+                    </div>
+                  </div>
+
+                  <p className="mb-2 text-sm font-medium text-slate-600 dark:text-slate-300">This will:</p>
+                  <ul className="mb-5 space-y-2 text-sm text-slate-600 dark:text-slate-400">
+                    <li className="flex items-start gap-2">
+                      <span className="mt-0.5 text-amber-600">•</span>
+                      <span>Delete all {products.length} product(s) from your store</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="mt-0.5 text-amber-600">•</span>
+                      <span>Reset all store customizations and settings</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="mt-0.5 text-amber-600">•</span>
+                      <span>Allow you to start setting up again from scratch</span>
+                    </li>
+                  </ul>
+
+                  <div className="mb-5 rounded-2xl border border-amber-100 bg-amber-50/80 p-4 dark:border-amber-900/40 dark:bg-amber-950/20">
+                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-500">Step 1</p>
+                    <p className="mt-1 text-sm text-slate-700 dark:text-slate-200">
+                      Send a one-time password to <span className="font-semibold">{deleteStoreOtpSentTo || seller?.businessEmail || 'your saved business email'}</span>.
+                    </p>
+                  </div>
+
+                  {deleteStoreOtpSentTo ? (
+                    <div className="mb-5 rounded-2xl border border-sky-100 bg-sky-50/80 p-4 dark:border-sky-900/40 dark:bg-sky-950/20">
+                      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-600">Step 2</p>
+                      <label className="mt-2 block space-y-2">
+                        <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">Enter the 6-digit OTP</span>
+                        <input
+                          className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-center text-xl font-bold tracking-[0.3em] text-slate-900 outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50 dark:border-slate-700 dark:bg-slate-950 dark:text-white"
+                          placeholder="------"
+                          maxLength={6}
+                          value={deleteStoreOtp}
+                          onChange={(e) => setDeleteStoreOtp(e.target.value.replace(/\D/g, ''))}
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        onClick={requestDeleteStoreOtp}
+                        disabled={isSendingDeleteStoreOtp || isDeletingStore}
+                        className="mt-3 text-xs font-semibold text-sky-700 underline underline-offset-4 disabled:opacity-60 dark:text-sky-300"
+                      >
+                        {isSendingDeleteStoreOtp ? 'Sending...' : 'Resend OTP'}
+                      </button>
+                    </div>
+                  ) : null}
+
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => {
+                        setShowDeleteStoreConfirm(false);
+                        setDeleteStoreOtp('');
+                        setDeleteStoreOtpSentTo('');
+                      }}
+                      disabled={isDeletingStore || isSendingDeleteStoreOtp}
+                      className="flex-1 rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 disabled:opacity-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-800"
+                    >
+                      Cancel
+                    </button>
+                    {deleteStoreOtpSentTo ? (
+                      <button
+                        onClick={confirmDeleteStore}
+                        disabled={isDeletingStore || deleteStoreOtp.trim().length !== 6}
+                        className="flex-1 inline-flex items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-amber-600 to-orange-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:from-amber-500 hover:to-orange-500 disabled:opacity-50"
+                      >
+                        {isDeletingStore ? (
+                          <>
+                            <AppIcon name="pending" className="text-[11px]" />
+                            Verifying...
+                          </>
+                        ) : (
+                          'Verify OTP & Delete'
+                        )}
+                      </button>
+                    ) : (
+                      <button
+                        onClick={requestDeleteStoreOtp}
+                        disabled={isSendingDeleteStoreOtp}
+                        className="flex-1 inline-flex items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-teal-600 to-sky-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:from-teal-500 hover:to-sky-500 disabled:opacity-50"
+                      >
+                        {isSendingDeleteStoreOtp ? (
+                          <>
+                            <AppIcon name="pending" className="text-[11px]" />
+                            Sending...
+                          </>
+                        ) : (
+                          'Send OTP'
+                        )}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Delete Profile Confirmation Modal */}
+          {showDeleteProfileConfirm && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm dark:bg-black/60">
+              <div className="relative w-full max-w-md rounded-[28px] border border-white/70 bg-white shadow-xl dark:border-slate-800 dark:bg-slate-900">
+                <div className="p-6">
+                  <div className="mb-4 flex items-center gap-3">
+                    <span className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-rose-500 to-orange-500 text-white shadow-sm">
+                      <AppIcon name="trash" className="text-[14px]" />
+                    </span>
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.24em] text-rose-500">Protected delete</p>
+                      <h2 className="text-lg font-bold text-slate-900 dark:text-white">Delete profile with OTP</h2>
+                    </div>
+                  </div>
+
+                  <p className="mb-2 text-sm font-medium text-slate-600 dark:text-slate-300">This will permanently:</p>
+                  <ul className="mb-5 space-y-2 text-sm text-slate-600 dark:text-slate-400">
+                    <li className="flex items-start gap-2">
+                      <span className="mt-0.5 text-rose-600">•</span>
+                      <span>Delete your account and all profile information</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="mt-0.5 text-rose-600">•</span>
+                      <span>Remove all {products.length} product(s)</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="mt-0.5 text-rose-600">•</span>
+                      <span>Delete all {orders.length} order record(s)</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="mt-0.5 text-rose-600">•</span>
+                      <span>Log you out immediately</span>
+                    </li>
+                  </ul>
+
+                  <div className="mb-5 rounded-2xl border border-rose-100 bg-rose-50/80 p-4 dark:border-rose-900/40 dark:bg-rose-950/20">
+                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-rose-500">Step 1</p>
+                    <p className="mt-1 text-sm text-slate-700 dark:text-slate-200">
+                      Send a one-time password to <span className="font-semibold">{deleteProfileOtpSentTo || seller?.businessEmail || 'your saved business email'}</span>.
+                    </p>
+                  </div>
+
+                  {deleteProfileOtpSentTo ? (
+                    <div className="mb-5 rounded-2xl border border-sky-100 bg-sky-50/80 p-4 dark:border-sky-900/40 dark:bg-sky-950/20">
+                      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-600">Step 2</p>
+                      <label className="mt-2 block space-y-2">
+                        <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">Enter the 6-digit OTP</span>
+                        <input
+                          className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-center text-xl font-bold tracking-[0.3em] text-slate-900 outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50 dark:border-slate-700 dark:bg-slate-950 dark:text-white"
+                          placeholder="------"
+                          maxLength={6}
+                          value={deleteProfileOtp}
+                          onChange={(e) => setDeleteProfileOtp(e.target.value.replace(/\D/g, ''))}
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        onClick={requestDeleteProfileOtp}
+                        disabled={isSendingDeleteProfileOtp || isDeletingProfile}
+                        className="mt-3 text-xs font-semibold text-sky-700 underline underline-offset-4 disabled:opacity-60 dark:text-sky-300"
+                      >
+                        {isSendingDeleteProfileOtp ? 'Sending...' : 'Resend OTP'}
+                      </button>
+                    </div>
+                  ) : null}
+
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => {
+                        setShowDeleteProfileConfirm(false);
+                        setDeleteProfileOtp('');
+                        setDeleteProfileOtpSentTo('');
+                      }}
+                      disabled={isDeletingProfile || isSendingDeleteProfileOtp}
+                      className="flex-1 rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 disabled:opacity-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-800"
+                    >
+                      Cancel
+                    </button>
+                    {deleteProfileOtpSentTo ? (
+                      <button
+                        onClick={confirmDeleteProfile}
+                        disabled={isDeletingProfile || deleteProfileOtp.trim().length !== 6}
+                        className="flex-1 inline-flex items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-rose-600 to-red-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:from-rose-500 hover:to-red-500 disabled:opacity-50"
+                      >
+                        {isDeletingProfile ? (
+                          <>
+                            <AppIcon name="pending" className="text-[11px]" />
+                            Verifying...
+                          </>
+                        ) : (
+                          'Verify OTP & Delete'
+                        )}
+                      </button>
+                    ) : (
+                      <button
+                        onClick={requestDeleteProfileOtp}
+                        disabled={isSendingDeleteProfileOtp}
+                        className="flex-1 inline-flex items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-teal-600 to-sky-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:from-teal-500 hover:to-sky-500 disabled:opacity-50"
+                      >
+                        {isSendingDeleteProfileOtp ? (
+                          <>
+                            <AppIcon name="pending" className="text-[11px]" />
+                            Sending...
+                          </>
+                        ) : (
+                          'Send OTP'
+                        )}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
-
-
-      {/* ═════════════════════════════════════ TAB: POLICIES ══ */}
       {tab === "policies" && (
         <article className="mx-auto max-w-4xl rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card dark:border-teal-900/35 dark:bg-gradient-to-br dark:from-slate-950 dark:to-slate-900">
           <h2 className="font-heading text-xl font-bold text-slate-900">Store Policies</h2>
@@ -2204,3 +2897,4 @@ export function DashboardPage() {
     </main>
   );
 }
+

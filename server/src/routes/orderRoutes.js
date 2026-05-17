@@ -5,7 +5,7 @@ const Seller = require("../models/Seller");
 const auth = require("../middleware/auth");
 
 const router = express.Router();
-const validStatuses = ["pending", "paid", "confirmed", "cancelled"];
+const validStatuses = ["pending", "paid", "delivered", "cancelled"];
 
 function mapToObject(value) {
   return value instanceof Map ? Object.fromEntries(value.entries()) : (value || {});

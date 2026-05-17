@@ -105,13 +105,11 @@ export function LoginPage() {
   const [phone, setPhone] = useState<PhoneParts>({ countryCode: DEFAULT_COUNTRY_CODE, number: "" });
   const [email, setEmail] = useState("");
   const [otp, setOtp] = useState("");
-  const [devOtp, setDevOtp] = useState("");
 
   // Business / onboarding fields (Register mode Step 1 + Login mode Step 3)
   const [businessName, setBusinessName] = useState("");
   const [businessCategory, setBusinessCategory] = useState<BusinessCategoryOption>("Fashion Accessories");
   const [businessCategoryOther, setBusinessCategoryOther] = useState("");
-  const [businessEmail, setBusinessEmail] = useState("");
   const [businessAddress, setBusinessAddress] = useState<AddressParts>(EMPTY_ADDRESS);
   const [businessGST, setBusinessGST] = useState("");
   const [upiId, setUpiId] = useState("");
@@ -143,8 +141,10 @@ export function LoginPage() {
       ? "Enter a valid 10-digit phone number."
       : "";
   const emailError =
-    email.trim().length > 0 && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
-      ? "Enter a valid email address."
+    email.trim().length === 0
+      ? "Email address is required."
+      : !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
+        ? "Enter a valid email address."
       : "";
   const businessNameError =
     (mode === "register" || step === "profile") && businessName.length > 0 && businessName.trim().length < 3
@@ -176,7 +176,6 @@ export function LoginPage() {
     setError("");
     setInfo("");
     setOtp("");
-    setDevOtp("");
     setBusinessCategory("Fashion Accessories");
     setBusinessCategoryOther("");
     setPolicyChecks(Object.fromEntries(DEFAULT_VENDOR_POLICY_POINTS.map((_, index) => [String(index), false])));
@@ -190,7 +189,6 @@ export function LoginPage() {
     setMode("register");
     setStep("contact");
     setOtp("");
-    setDevOtp("");
     setError("");
     setInfo(message);
   }
@@ -201,6 +199,7 @@ export function LoginPage() {
     setError("");
     if (!phone.number.trim()) { setError("Phone number is required."); return; }
     if (phoneDigits.length !== 10) { setError("Enter a valid 10-digit phone number."); return; }
+    if (!email.trim()) { setError("Email address is required."); return; }
     if (emailError) { setError(emailError); return; }
     if (mode === "register" && !businessName.trim()) {
       setError("Business name is required.");
@@ -218,11 +217,10 @@ export function LoginPage() {
     try {
       const result = await sendOtp({
         phone: phoneDigits,
-        email: email.trim() || undefined,
+        email: email.trim(),
         intent: mode,
       });
-      if (result.otp) setDevOtp(result.otp);
-      setInfo("OTP generated. Enter it below to continue.");
+      setInfo(result.message || "OTP sent to your email. Enter it below to continue.");
       setStep("otp");
     } catch (err) {
       if (axios.isAxiosError(err) && err.response?.data?.redirectTo === "register") {
@@ -245,7 +243,7 @@ export function LoginPage() {
     try {
       const { isProfileComplete } = await verifyOtp({
         phone: phoneDigits || undefined,
-        email: email.trim() || undefined,
+        email: email.trim(),
         otp: otp.trim(),
       });
 
@@ -255,7 +253,7 @@ export function LoginPage() {
           businessName: businessName.trim(),
           businessCategory: selectedBusinessCategory || undefined,
           termsAccepted: allPoliciesAccepted,
-          businessEmail: businessEmail.trim() || undefined,
+          businessEmail: email.trim(),
           businessAddress: formatAddress(businessAddress) || undefined,
           businessGST: businessGST.trim() || undefined,
           upiId: upiId.trim() || undefined,
@@ -296,7 +294,7 @@ export function LoginPage() {
         businessName: businessName.trim(),
         businessCategory: selectedBusinessCategory || undefined,
         termsAccepted: allPoliciesAccepted,
-        businessEmail: businessEmail.trim() || undefined,
+        businessEmail: email.trim(),
         businessAddress: formatAddress(businessAddress) || undefined,
         businessGST: businessGST.trim() || undefined,
         upiId: upiId.trim() || undefined,
@@ -346,8 +344,8 @@ export function LoginPage() {
         </h1>
         <p className="mx-auto max-w-xl text-base leading-7 text-slate-600 sm:text-lg lg:mx-0 dark:text-slate-300">
           {mode === "login"
-            ? "Enter your registered phone, verify with OTP, and jump straight into your Dukan dashboard."
-            : "Register your phone, fill in your business details, verify with OTP, and share your MyDukan link on WhatsApp — all in under 2 minutes."}
+            ? "Enter your registered phone and email, verify with OTP, and jump straight into your Dukan dashboard."
+            : "Register with your phone and email, verify with OTP, and share your MyDukan link on WhatsApp — all in under 2 minutes."}
         </p>
 
         <div className="grid gap-3 text-left sm:grid-cols-3">
@@ -433,8 +431,8 @@ export function LoginPage() {
             </h2>
             <p className="mt-1.5 text-sm text-slate-500">
               {mode === "login"
-                ? "Enter your phone number. We'll send a one-time password."
-                : "Fill in your business details and verify your phone with OTP."}
+                ? "Enter your registered phone number and email address. We'll send a one-time password to your email."
+                : "Fill in your business details and verify your account with an email OTP."}
             </p>
 
             <form
@@ -466,7 +464,7 @@ export function LoginPage() {
               {/* Email */}
               <label className="block space-y-1">
                 <span className="text-sm font-semibold text-slate-700">
-                  {mode === "login" ? "Email (optional, for OTP)" : "Personal email (optional)"}
+                  Email address *
                 </span>
                 <input
                   type="email"
@@ -474,6 +472,7 @@ export function LoginPage() {
                   placeholder="you@example.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
+                  required
                 />
                 {emailError && <span className="text-xs text-rose-600">{emailError}</span>}
               </label>
@@ -527,18 +526,6 @@ export function LoginPage() {
                       />
                     </label>
                   )}
-
-                  {/* Business Email */}
-                  <label className="block space-y-1">
-                    <span className="text-sm font-semibold text-slate-700">Business email</span>
-                    <input
-                      type="email"
-                      className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50"
-                      placeholder="shop@example.com"
-                      value={businessEmail}
-                      onChange={(e) => setBusinessEmail(e.target.value)}
-                    />
-                  </label>
 
                   {/* UPI ID */}
                   <label className="block space-y-1">
@@ -647,7 +634,7 @@ export function LoginPage() {
             <h2 className="font-heading text-2xl font-bold text-slate-900">Verify OTP</h2>
             <p className="mt-1.5 text-sm text-slate-500">
               Enter the 6-digit code sent to{" "}
-              <span className="font-semibold text-slate-700">{formatPhone(phone)}</span>.
+              <span className="font-semibold text-slate-700">{email.trim()}</span>.
             </p>
             {info && (
               <p className="mt-3 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-700">
@@ -668,19 +655,6 @@ export function LoginPage() {
                 />
                 {otpError && <span className="text-xs text-rose-600">{otpError}</span>}
               </label>
-
-              {devOtp && (
-                <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 space-y-1">
-                  <p className="inline-flex items-center gap-2 text-xs font-bold text-amber-800"><span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-amber-500"><AppIcon name="brand" className="text-[9px]" /></span>MyDukan - Demo Mode</p>
-                  <p className="text-xs text-amber-700">
-                    Your OTP:{" "}
-                    <strong className="text-lg tracking-widest">{devOtp}</strong>
-                  </p>
-                  <p className="text-xs text-amber-600">
-                    Enable SMTP in server/.env to send OTP via email.
-                  </p>
-                </div>
-              )}
 
               <Button
                 type="submit"
@@ -759,16 +733,15 @@ export function LoginPage() {
                   />
                 </label>
               )}
-              {/* Business Email */}
               <label className="block space-y-1">
                 <span className="text-sm font-semibold text-slate-700">Business email</span>
                 <input
                   type="email"
-                  className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50"
-                  placeholder="shop@example.com"
-                  value={businessEmail}
-                  onChange={(e) => setBusinessEmail(e.target.value)}
+                  className="w-full rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5 text-sm text-slate-500 outline-none"
+                  value={email}
+                  readOnly
                 />
+                <span className="text-xs text-slate-400">This email will be used for login and account verification.</span>
               </label>
               {/* UPI ID */}
               <label className="block space-y-1">

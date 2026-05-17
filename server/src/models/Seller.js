@@ -181,6 +181,15 @@ const sellerSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    otpPurpose: {
+      type: String,
+      enum: ["auth", "profile_delete", "product_delete", "store_delete"],
+      default: null,
+    },
+    otpTargetId: {
+      type: String,
+      default: null,
+    },
   },
   {
     timestamps: true,

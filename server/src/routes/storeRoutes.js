@@ -3,6 +3,8 @@ const Seller = require("../models/Seller");
 const Product = require("../models/Product");
 const auth = require("../middleware/auth");
 const { getPolicyContent } = require("../utils/policyDefaults");
+const { generateOtp, hashOtp, verifyOtp: verifyHashedOtp } = require("../utils/otp");
+const { sendOtpEmail } = require("../utils/mailer");
 
 const router = express.Router();
 
@@ -32,6 +34,10 @@ function getMissingPublishFields(seller) {
   return checks
     .filter(([, value]) => !String(value || "").trim())
     .map(([field]) => field);
+}
+
+function isValidEmail(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || "").trim());
 }
 
 // ─── GET /store/public/:sellerSlug — Full store config (no auth) ──────────
@@ -141,6 +147,111 @@ router.put("/options", auth, async (req, res) => {
   } catch (error) {
     return res.status(500).json({ message: "Unable to update store options" });
   }
+});
+
+// ─── DELETE /store — Delete all store data (products & options reset) ──────
+router.delete("/", auth, async (req, res) => {
+  return res.status(400).json({
+    message: "Store deletion now requires email OTP verification.",
+  });
+});
+
+router.post("/request-delete-otp", auth, async (req, res) => {
+  try {
+    const seller = await Seller.findById(req.sellerId);
+    if (!seller) {
+      return res.status(404).json({ message: "Seller not found" });
+    }
+
+    if (!seller.businessEmail || !isValidEmail(seller.businessEmail)) {
+      return res.status(400).json({
+        message: "Add a valid business email in your profile before deleting the store.",
+      });
+    }
+
+    const otp = generateOtp();
+    seller.otp = hashOtp(otp);
+    seller.otpExpiry = new Date(Date.now() + 10 * 60 * 1000);
+    seller.otpPurpose = "store_delete";
+    seller.otpTargetId = "__store__";
+    await seller.save();
+    await sendOtpEmail(seller.businessEmail, otp, seller.businessName);
+
+    return res.json({
+      message: "A verification OTP has been sent to your business email.",
+      email: seller.businessEmail,
+    });
+  } catch (error) {
+    console.error("[request-store-delete-otp error]", error);
+    return res.status(500).json({ message: "Unable to send store deletion OTP" });
+  }
+});
+
+router.post("/confirm-delete", auth, async (req, res) => {
+  try {
+    const { otp } = req.body;
+    if (!otp) {
+      return res.status(400).json({ message: "OTP is required" });
+    }
+
+    const seller = await Seller.findById(req.sellerId);
+    if (!seller) {
+      return res.status(404).json({ message: "Seller not found" });
+    }
+
+    if (
+      !seller.otp ||
+      !seller.otpExpiry ||
+      seller.otpPurpose !== "store_delete" ||
+      seller.otpTargetId !== "__store__"
+    ) {
+      return res.status(400).json({ message: "Request a fresh deletion OTP to continue." });
+    }
+
+    if (seller.otpExpiry < new Date()) {
+      return res.status(400).json({ message: "OTP expired. Please request a new one." });
+    }
+
+    if (!verifyHashedOtp(String(otp).trim(), seller.otp)) {
+      return res.status(400).json({ message: "Invalid OTP." });
+    }
+
+    await Product.deleteMany({ seller: seller._id });
+
+    seller.banners = [];
+    seller.socialLinks = [];
+    seller.categories = [];
+    seller.deliveryMode = "always_free";
+    seller.defaultDeliveryCharge = 0;
+    seller.freeDeliveryThreshold = 500;
+    seller.paymentMode = "prepaid_only";
+    seller.businessLogo = "";
+    seller.favicon = "";
+    seller.whatsappNumber = "";
+    seller.callNumber = "";
+    seller.storePublished = false;
+    seller.approvalStatus = "draft";
+    seller.publishRequestedAt = null;
+    seller.approvedAt = null;
+    seller.approvedBy = "";
+    seller.otp = null;
+    seller.otpExpiry = null;
+    seller.otpPurpose = null;
+    seller.otpTargetId = null;
+
+    await seller.save();
+    return res.json({ message: "Store deleted successfully. You can set up again." });
+  } catch (error) {
+    console.error("[confirm-store-delete error]", error);
+    return res.status(500).json({ message: "Unable to delete store" });
+  }
+});
+
+// ─── DELETE /seller — Delete seller profile completely ────────────────────
+router.delete("/seller", auth, async (req, res) => {
+  return res.status(400).json({
+    message: "Profile deletion now requires email OTP verification.",
+  });
 });
 
 module.exports = router;

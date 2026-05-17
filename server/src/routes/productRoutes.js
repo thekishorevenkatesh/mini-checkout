@@ -4,6 +4,8 @@ const Product = require("../models/Product");
 const Seller = require("../models/Seller");
 const auth = require("../middleware/auth");
 const { getPolicyContent } = require("../utils/policyDefaults");
+const { generateOtp, hashOtp, verifyOtp: verifyHashedOtp } = require("../utils/otp");
+const { sendOtpEmail } = require("../utils/mailer");
 
 const router = express.Router();
 const PRODUCT_TITLE_MAX_LENGTH = 60;
@@ -174,6 +176,10 @@ function normalizeImageUrls(imageUrls, fallbackImageUrl = "") {
 
 function normalizeProductTitle(value = "") {
   return String(value || "").trim().slice(0, PRODUCT_TITLE_MAX_LENGTH);
+}
+
+function isValidEmail(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || "").trim());
 }
 
 // ─── POST /products — Create product (auth) ───────────────────────────────
@@ -488,8 +494,14 @@ router.put("/:productId", auth, async (req, res) => {
 
 // ─── DELETE /products/:productId — Delete product (auth) ─────────────────
 router.delete("/:productId", auth, async (req, res) => {
+  return res.status(400).json({
+    message: "Product deletion now requires email OTP verification.",
+  });
+});
+
+router.post("/:productId/request-delete-otp", auth, async (req, res) => {
   try {
-    const product = await Product.findOneAndDelete({
+    const product = await Product.findOne({
       _id: req.params.productId,
       seller: req.sellerId,
     });
@@ -498,8 +510,84 @@ router.delete("/:productId", auth, async (req, res) => {
       return res.status(404).json({ message: "Product not found" });
     }
 
-    return res.json({ message: "Product deleted" });
+    const seller = await Seller.findById(req.sellerId);
+    if (!seller) {
+      return res.status(404).json({ message: "Seller not found" });
+    }
+
+    if (!seller.businessEmail || !isValidEmail(seller.businessEmail)) {
+      return res.status(400).json({
+        message: "Add a valid business email in your profile before deleting a product.",
+      });
+    }
+
+    const otp = generateOtp();
+    seller.otp = hashOtp(otp);
+    seller.otpExpiry = new Date(Date.now() + 10 * 60 * 1000);
+    seller.otpPurpose = "product_delete";
+    seller.otpTargetId = product._id.toString();
+    await seller.save();
+    await sendOtpEmail(seller.businessEmail, otp, seller.businessName);
+
+    return res.json({
+      message: "A verification OTP has been sent to your business email.",
+      email: seller.businessEmail,
+      productTitle: product.title,
+    });
   } catch (error) {
+    console.error("[request-product-delete-otp error]", error);
+    return res.status(500).json({ message: "Unable to send product deletion OTP" });
+  }
+});
+
+router.post("/:productId/confirm-delete", auth, async (req, res) => {
+  try {
+    const { otp } = req.body;
+    if (!otp) {
+      return res.status(400).json({ message: "OTP is required" });
+    }
+
+    const product = await Product.findOne({
+      _id: req.params.productId,
+      seller: req.sellerId,
+    });
+
+    if (!product) {
+      return res.status(404).json({ message: "Product not found" });
+    }
+
+    const seller = await Seller.findById(req.sellerId);
+    if (!seller) {
+      return res.status(404).json({ message: "Seller not found" });
+    }
+
+    if (
+      !seller.otp ||
+      !seller.otpExpiry ||
+      seller.otpPurpose !== "product_delete" ||
+      seller.otpTargetId !== product._id.toString()
+    ) {
+      return res.status(400).json({ message: "Request a fresh deletion OTP to continue." });
+    }
+
+    if (seller.otpExpiry < new Date()) {
+      return res.status(400).json({ message: "OTP expired. Please request a new one." });
+    }
+
+    if (!verifyHashedOtp(String(otp).trim(), seller.otp)) {
+      return res.status(400).json({ message: "Invalid OTP." });
+    }
+
+    seller.otp = null;
+    seller.otpExpiry = null;
+    seller.otpPurpose = null;
+    seller.otpTargetId = null;
+    await seller.save();
+
+    await product.deleteOne();
+    return res.json({ message: "Product deleted successfully." });
+  } catch (error) {
+    console.error("[confirm-product-delete error]", error);
     return res.status(500).json({ message: "Unable to delete product" });
   }
 });
