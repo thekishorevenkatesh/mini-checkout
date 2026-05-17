@@ -135,17 +135,23 @@ export function LoginPage() {
     if (error) showError(error);
   }, [error, showError]);
 
-  const phoneDigits = phone.number.replace(/\D/g, "");
-  const phoneError =
-    phone.number.length > 0 && phoneDigits.length !== 10
+const phoneDigits = phone.number.replace(/\D/g, "");
+
+const phoneError =
+  phone.number.trim().length === 0
+    ? "Phone number is required."
+    : phoneDigits.length !== 10
       ? "Enter a valid 10-digit phone number."
       : "";
-  const emailError =
-    email.trim().length === 0
+
+const emailError =
+  phoneError
+    ? "" // don't validate email until phone is valid
+    : email.trim().length === 0
       ? "Email address is required."
       : !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
         ? "Enter a valid email address."
-      : "";
+        : "";
   const businessNameError =
     (mode === "register" || step === "profile") && businessName.length > 0 && businessName.trim().length < 3
       ? "Business name should be at least 3 characters."
