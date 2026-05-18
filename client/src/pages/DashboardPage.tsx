@@ -10,7 +10,6 @@ import { useToast } from "../context/ToastContext";
 import { BUSINESS_CATEGORY_OPTIONS } from "../constants/businessCategories";
 import { DEFAULT_POLICY_CONTENT } from "../constants/policyDefaults";
 import {
-  DEFAULT_COUNTRY_CODE,
   formatAddress,
   formatPhone,
   parseAddress,
