@@ -341,17 +341,17 @@ const emailError =
           <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-teal-600 text-white dark:bg-teal-500">
             <AppIcon name="brand" className="text-[12px]" />
           </span>
-          MyDukan
+          Zensos
         </p>
         <h1 className="font-heading text-4xl font-bold leading-tight tracking-tight text-slate-900 sm:text-5xl dark:text-slate-100">
           {mode === "login"
-            ? "Welcome back to MyDukan."
-            : "Open your Dukan and start selling today."}
+            ? "Welcome back to Zensos."
+            : "Open your Zensos store and start selling today."}
         </h1>
         <p className="mx-auto max-w-xl text-base leading-7 text-slate-600 sm:text-lg lg:mx-0 dark:text-slate-300">
           {mode === "login"
-            ? "Enter your registered phone and email, verify with OTP, and jump straight into your Dukan dashboard."
-            : "Register with your phone and email, verify with OTP, and share your MyDukan link on WhatsApp — all in under 2 minutes."}
+            ? "Enter your registered phone and email, verify with OTP, and jump straight into your store dashboard."
+            : "Register with your phone and email, verify with OTP, and share your Zensos link on WhatsApp — all in under 2 minutes."}
         </p>
 
         <div className="grid gap-3 text-left sm:grid-cols-3">
@@ -452,7 +452,8 @@ const emailError =
                   <input
                     className="min-w-0 rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-900 outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50"
                     value={phone.countryCode}
-                    onChange={(e) => setPhone((prev) => ({ ...prev, countryCode: e.target.value }))}
+                    readOnly
+                    disabled
                     placeholder="+91"
                     required
                   />
@@ -554,7 +555,7 @@ const emailError =
                   <label className="block space-y-1">
                     <span className="text-sm font-semibold text-slate-700">WhatsApp number</span>
                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-[96px_minmax(0,1fr)]">
-                      <input className="min-w-0 rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50" value={whatsappNumber.countryCode} onChange={(e) => setWhatsappNumber((prev) => ({ ...prev, countryCode: e.target.value }))} placeholder="+91" />
+                      <input className="min-w-0 rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50" value={whatsappNumber.countryCode} readOnly disabled placeholder="+91" />
                       <input className="min-w-0 rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50" placeholder="9876543210" value={whatsappNumber.number} onChange={(e) => setWhatsappNumber((prev) => ({ ...prev, number: e.target.value.replace(/\D/g, "").slice(0, 10) }))} />
                     </div>
                   </label>
@@ -788,7 +789,7 @@ const emailError =
               <label className="block space-y-1">
                 <span className="text-sm font-semibold text-slate-700">WhatsApp number</span>
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-[96px_minmax(0,1fr)]">
-                  <input className="min-w-0 rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50" value={whatsappNumber.countryCode} onChange={(e) => setWhatsappNumber((prev) => ({ ...prev, countryCode: e.target.value }))} placeholder="+91" />
+                  <input className="min-w-0 rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50" value={whatsappNumber.countryCode} readOnly disabled placeholder="+91" />
                   <input className="min-w-0 rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50" placeholder="9876543210" value={whatsappNumber.number} onChange={(e) => setWhatsappNumber((prev) => ({ ...prev, number: e.target.value.replace(/\D/g, "").slice(0, 15) }))} />
                 </div>
               </label>
@@ -796,7 +797,7 @@ const emailError =
               <label className="block space-y-1">
                 <span className="text-sm font-semibold text-slate-700">Call number</span>
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-[96px_minmax(0,1fr)]">
-                  <input className="min-w-0 rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50" value={callNumber.countryCode} onChange={(e) => setCallNumber((prev) => ({ ...prev, countryCode: e.target.value }))} placeholder="+91" />
+                  <input className="min-w-0 rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50" value={callNumber.countryCode} readOnly disabled placeholder="+91" />
                   <input className="min-w-0 rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50" placeholder="9876543210" value={callNumber.number} onChange={(e) => setCallNumber((prev) => ({ ...prev, number: e.target.value.replace(/\D/g, "").slice(0, 15) }))} />
                 </div>
               </label>
@@ -839,7 +840,7 @@ const emailError =
       </section>
     </main>
     <footer className="px-3 pb-2 text-center text-xs text-slate-400 sm:px-4">
-      <span className="inline-flex items-center gap-1 font-semibold text-slate-500"><span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-slate-900"><AppIcon name="brand" className="text-[9px]" /></span>MyDukan</span> - Your Store. Your Link. Your Sales.
+      <span className="inline-flex items-center gap-1 font-semibold text-slate-500"><span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-slate-900"><AppIcon name="brand" className="text-[9px]" /></span>Zensos</span> - Your Store. Your Link. Your Sales.
     </footer>
     {showTermsModal && (
       <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/50 px-3 py-3 backdrop-blur-[2px] sm:items-center sm:px-4 sm:py-6">

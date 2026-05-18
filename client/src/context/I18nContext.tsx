@@ -53,7 +53,7 @@ type I18nContextShape = {
   supportedLanguages: { code: Language; label: string }[];
 };
 
-const STORAGE_KEY = "mydukan_language";
+const STORAGE_KEY = "zensos_language";
 const I18nContext = createContext<I18nContextShape | undefined>(undefined);
 
 function getInitialLanguage(): Language {

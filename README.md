@@ -1,12 +1,12 @@
-# MyDukan 🛍️
+# Zensos 🛍️
 
 > **Your Store. Your Link. Your Sales.**
 
-MyDukan is a free platform for small sellers and home businesses to create their own online store in minutes — no technical knowledge needed. Share your store link on WhatsApp, accept UPI payments, and manage orders from a clean dashboard.
+Zensos is a free platform for small sellers and home businesses to create their own online store in minutes — no technical knowledge needed. Share your store link on WhatsApp, accept UPI payments, and manage orders from a clean dashboard.
 
 ---
 
-## ✨ What MyDukan Does
+## ✨ What Zensos Does
 
 | For Sellers | For Customers |
 |---|---|
@@ -35,7 +35,7 @@ MyDukan is a free platform for small sellers and home businesses to create their
 ## 📁 Project Structure
 
 ```
-mydukan/
+zensos/
 ├── client/    ← Vite + React SPA
 │   └── src/
 │       ├── pages/LoginPage.tsx         ← OTP login + registration
@@ -118,7 +118,7 @@ VITE_IMGBB_API_KEY=your_key_here
 
 ## ☁️ Deploy on Vercel
 
-MyDukan deploys as **two separate Vercel projects** from the same repo.
+Zensos deploys as **two separate Vercel projects** from the same repo.
 
 ### Backend (Node.js Serverless)
 1. New Vercel project → Root Directory: `server`
@@ -154,4 +154,4 @@ MyDukan deploys as **two separate Vercel projects** from the same repo.
 
 ---
 
-*MyDukan — Apni Dukan, Online.* 🛍️
+*Zensos — Apni Dukan, Online.* 🛍️

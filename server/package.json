@@ -1,5 +1,5 @@
 {
-  "name": "mydukan-server",
+  "name": "zensos-server",
   "version": "1.0.0",
   "main": "src/server.js",
   "scripts": {

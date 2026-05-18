@@ -8,7 +8,7 @@ type ThemeContextShape = {
   setTheme: (value: Theme) => void;
 };
 
-const STORAGE_KEY = "mydukan_theme";
+const STORAGE_KEY = "zensos_theme";
 const ThemeContext = createContext<ThemeContextShape | undefined>(undefined);
 
 function getInitialTheme(): Theme {

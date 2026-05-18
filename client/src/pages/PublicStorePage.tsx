@@ -50,8 +50,8 @@ const SOCIAL_ICONS: Record<string, Parameters<typeof AppIcon>[0]["name"]> = {
   Other: "link",
 };
 
-const DEFAULT_APP_FAVICON = "/favicon.svg";
-const ADMIN_TOKEN_KEY = "mydukan_admin_token";
+const DEFAULT_APP_FAVICON = "/zensos.png";
+const ADMIN_TOKEN_KEY = "zensos_admin_token";
 
 function createTransactionRef() {
   return `ORD-${Date.now()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
@@ -307,11 +307,6 @@ function BannerCarousel({ banners }: { banners: { imageUrl: string; title?: stri
   return (
     <div className="relative overflow-hidden rounded-2xl border border-white/60 shadow-md ring-1 ring-slate-200/50 dark:border-slate-700 dark:ring-slate-700/50">
       <img src={normalizeImageUrl(banners[idx].imageUrl)} alt={banners[idx].title || "Banner"} className="h-48 w-full object-cover sm:h-64" />
-      {banners[idx].title && (
-        <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent px-4 py-3">
-          <p className="text-sm font-semibold text-white">{banners[idx].title}</p>
-        </div>
-      )}
       {banners.length > 1 && (
         <div className="absolute bottom-2 right-3 flex gap-1">
           {banners.map((_, i) => (
@@ -376,6 +371,7 @@ export function PublicStorePage() {
   const [showFilterDropdown, setShowFilterDropdown] = useState(false);
   const [filterDropdownStyle, setFilterDropdownStyle] = useState<{ top: number; left: number } | null>(null);
   const searchBarRef = useRef<HTMLDivElement | null>(null);
+  const filterDropdownRef = useRef<HTMLDivElement | null>(null);
   const [expandedProductId, setExpandedProductId] = useState<string | null>(null);
   const [cartFeedback, setCartFeedback] = useState("");
   const [, setVariantErrorProductId] = useState<string | null>(null);
@@ -470,9 +466,20 @@ export function PublicStorePage() {
     const handleScroll = () => updateFilterDropdownStyle();
     window.addEventListener("resize", handleResize);
     window.addEventListener("scroll", handleScroll, true);
+
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (filterDropdownRef.current?.contains(target)) return;
+      if (searchBarRef.current?.contains(target)) return;
+      setShowFilterDropdown(false);
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+
     return () => {
       window.removeEventListener("resize", handleResize);
       window.removeEventListener("scroll", handleScroll, true);
+      document.removeEventListener("mousedown", handleClickOutside);
     };
   }, [showFilterDropdown]);
 
@@ -1067,11 +1074,11 @@ export function PublicStorePage() {
             <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-teal-600 text-white dark:bg-teal-500">
               <AppIcon name="brand" className="text-[12px]" />
             </span>
-            MyDukan
+            Zensos
           </p>
           <h1 className="font-heading text-2xl font-bold text-slate-900 dark:text-slate-100">Store Not Found</h1>
           <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-slate-300">{error || "This seller link is unavailable."}</p>
-          <Link to="/login" className="mt-5 inline-flex items-center gap-2 rounded-2xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-950 dark:hover:bg-white"><AppIcon name="login" className="text-[14px]" />Sign In to MyDukan</Link>
+          <Link to="/login" className="mt-5 inline-flex items-center gap-2 rounded-2xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-950 dark:hover:bg-white"><AppIcon name="login" className="text-[14px]" />Sign In to Zensos</Link>
         </div>
       </main>
     );
@@ -1174,6 +1181,7 @@ export function PublicStorePage() {
             {/* Filter dropdown */}
             {showFilterDropdown && filterDropdownStyle && createPortal(
               <div className="rounded-2xl border border-slate-200 bg-white shadow-xl overflow-hidden dark:border-teal-900/40 dark:bg-slate-950"
+                ref={filterDropdownRef}
                 style={{
                   position: "fixed",
                   top: filterDropdownStyle.top,
@@ -1485,7 +1493,7 @@ export function PublicStorePage() {
           <label className="block space-y-1">
             <span className="text-sm font-semibold text-slate-700">Phone number *</span>
             <div className="flex gap-2">
-              <input className="w-24 rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400" value={customerPhone.countryCode} onChange={(e) => { setCustomerPhone((prev) => ({ ...prev, countryCode: e.target.value })); resetSavedProgress(); }} placeholder="+91" required />
+              <input className="w-24 rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400" value={customerPhone.countryCode} readOnly disabled placeholder="+91" required />
               <input
                 type="tel"
                 inputMode="numeric"
@@ -1657,8 +1665,8 @@ export function PublicStorePage() {
       const vgs = getNormalizedVariantGroups(product);
       const hasDraftSelections = Object.values(popupVariantQuantities).some((entry) => entry.quantity > 0);
       return (
-        <div className="fixed inset-0 z-[60] flex items-end justify-center sm:items-center bg-black/50 backdrop-blur-[2px] px-4 pb-4 sm:p-4">
-          <div className="w-full max-w-sm rounded-3xl bg-white p-5 shadow-2xl dark:border dark:border-teal-900/40 dark:bg-gradient-to-b dark:from-slate-950 dark:to-slate-900">
+        <div className="fixed inset-0 z-[60] flex items-end justify-center sm:items-center bg-black/50 backdrop-blur-[2px] px-4 pb-4 sm:p-4" onClick={() => setVariantPopupProductId(null)}>
+          <div className="w-full max-w-sm rounded-3xl bg-white p-5 shadow-2xl dark:border dark:border-teal-900/40 dark:bg-gradient-to-b dark:from-slate-950 dark:to-slate-900" onClick={(e) => e.stopPropagation()}>
             <div className="mb-4 flex items-start justify-between gap-3">
               <div><p className="text-xs font-bold uppercase tracking-wider text-teal-600">Select Options</p>
                 <h3 className="mt-0.5 font-heading text-base font-bold text-slate-900 dark:text-slate-100 line-clamp-2">{product.title}</h3></div>
@@ -1801,7 +1809,7 @@ export function PublicStorePage() {
         </button>
       </div>
       <p>
-        Powered by <span className="inline-flex items-center gap-1 font-semibold text-slate-500"><span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-teal-600"><AppIcon name="brand" className="text-[9px]" /></span>MyDukan</span>
+        Powered by <span className="inline-flex items-center gap-1 font-semibold text-slate-500"><span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-teal-600"><AppIcon name="brand" className="text-[9px]" /></span>Zensos</span>
       </p>
     </footer>
     {activePolicy && (

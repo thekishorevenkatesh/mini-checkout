@@ -11,7 +11,7 @@ import type { Seller } from "../types";
 type ApprovalStatus = "pending" | "approved" | "rejected";
 type SortBy = "latest" | "oldest" | "business";
 
-const ADMIN_TOKEN_KEY = "mydukan_admin_token";
+const ADMIN_TOKEN_KEY = "zensos_admin_token";
 
 function statusBadge(status: ApprovalStatus) {
   if (status === "approved") return "bg-emerald-100 text-emerald-700 border-emerald-200";

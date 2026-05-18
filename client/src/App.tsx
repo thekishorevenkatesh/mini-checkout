@@ -14,20 +14,12 @@ export default function App() {
       <ToastProvider>
         <div className="min-h-screen">
           <header className="app-shell-header sticky top-0 z-40 px-3 py-3 sm:px-4">
-            <div className="mx-auto flex w-full max-w-7xl flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center gap-3">
-                <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-900 text-white shadow-sm dark:bg-slate-100 dark:text-slate-900">
-                  <span className="text-sm font-black tracking-tight">M</span>
-                </span>
-                <div>
-                  <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">
-                    Commerce Suite
-                  </p>
-                  <p className="text-sm font-semibold tracking-[0.01em] text-slate-800 dark:text-slate-100">
-                    MyDukan
-                  </p>
-                </div>
-              </div>
+            <div className="mx-auto flex w-full max-w-7xl items-center justify-between">
+              <img
+                src="/zensos-final-version.png"
+                alt="Zensos logo"
+                className="h-18 w-24 object-contain "
+              />
               <GlobalControls />
             </div>
           </header>

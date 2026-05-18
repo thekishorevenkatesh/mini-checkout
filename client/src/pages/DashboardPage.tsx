@@ -30,14 +30,22 @@ type ProductFormVariant = {
 
 type ProductForm = {
   title: string; description: string; price: string; mrp: string; packSize: string; uom: string;
-  imageUrls: string[]; notes: string; category: string;
+  imageUrls: string[]; notes: string; categories: string[]; categoryInput: string;
   variants: ProductFormVariant[];
 };
 const PRODUCT_TITLE_MAX_LENGTH = 60;
 const emptyProductForm: ProductForm = {
   title: "", description: "", price: "", mrp: "", packSize: "", uom: "",
-  imageUrls: [""], notes: "", category: "", variants: [],
+  imageUrls: [""], notes: "", categories: [], categoryInput: "", variants: [],
 };
+
+function parseCategoryTags(rawCategory: string) {
+  return rawCategory.split(",").map((tag) => tag.trim()).filter(Boolean);
+}
+
+function joinCategoryTags(tags: string[]) {
+  return tags.map((tag) => tag.trim()).filter(Boolean).join(", ");
+}
 
 const statusClasses: Record<OrderStatus, string> = {
   pending:   "bg-amber-100 text-amber-700 border-amber-200",
@@ -126,15 +134,15 @@ function ImageUploadField({
 
   return (
     <div className="space-y-1.5">
-      <div className="flex gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <input
-          className="flex-1 rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400"
+          className="flex-1 min-w-0 rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400"
           placeholder={placeholder}
           value={value}
           onChange={e => onChange(e.target.value)}
         />
         <label
-          className={`flex cursor-pointer items-center gap-1.5 rounded-xl border border-emerald-100 bg-emerald-50/80 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-emerald-100 dark:border-teal-900/40 dark:bg-slate-900/80 dark:text-slate-200 dark:hover:bg-slate-800 ${uploading ? "pointer-events-none opacity-50" : ""}`}
+          className={`flex shrink-0 cursor-pointer items-center gap-1.5 rounded-xl border border-emerald-100 bg-emerald-50/80 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-emerald-100 dark:border-teal-900/40 dark:bg-slate-900/80 dark:text-slate-200 dark:hover:bg-slate-800 ${uploading ? "pointer-events-none opacity-50" : ""}`}
         >
           <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 dark:from-teal-500 dark:to-sky-500">
             <AppIcon name={uploading ? "pending" : "upload"} className="text-[10px]" />
@@ -319,7 +327,6 @@ export function DashboardPage() {
 
   // ── Categories
   const [categories, setCategories] = useState<string[]>(seller?.categories || []);
-  const [newCategory, setNewCategory] = useState("");
 
   // ── Reports
   const [reportDays, setReportDays] = useState(30);
@@ -745,6 +752,21 @@ export function DashboardPage() {
   const [categorySuggestions, setCategorySuggestions] = useState<string[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
 
+  async function deleteSellerCategory(category: string) {
+    try {
+      const updated = categories.filter((item) => item !== category);
+      setCategories(updated);
+      setCategorySuggestions((prev) => prev.filter((item) => item !== category));
+      await api.put("/store/options", { categories: updated });
+      showSuccess(`Category “${category}” removed.`);
+    } catch (error) {
+      showError(`Could not delete category “${category}”.`);
+      // restore state on failure if needed
+      setCategories((prev) => (prev.includes(category) ? prev : [...prev, category]));
+      setCategorySuggestions((prev) => (prev.includes(category) ? prev : [category, ...prev]));
+    }
+  }
+
   // ── Product: start edit
   function handleStartEdit(prod: Product) {
     setEditingProduct(prod);
@@ -778,7 +800,8 @@ export function DashboardPage() {
       uom: prod.uom || "",
       imageUrls: getProductImages(prod).length > 0 ? getProductImages(prod) : [""],
       notes: prod.notes || "",
-      category: prod.category || "",
+      categories: parseCategoryTags(prod.category || ""),
+      categoryInput: "",
       variants: variantRows,
     });
     // Scroll to form
@@ -842,7 +865,9 @@ export function DashboardPage() {
         return;
       }
 
-      const catTrimmed = productForm.category.trim();
+      const selectedCategories = productForm.categories.map((c) => c.trim()).filter(Boolean);
+      const newCategories = selectedCategories.filter((c) => !categories.includes(c));
+      const catTrimmed = joinCategoryTags(selectedCategories);
       const normalizedTitle = productForm.title.trim().slice(0, PRODUCT_TITLE_MAX_LENGTH);
       if (!normalizedTitle) {
         setError("Product title is required.");
@@ -873,21 +898,21 @@ export function DashboardPage() {
         setEditingProduct(null);
       } else {
         await api.post("/products", payload);
-        if (catTrimmed && !categories.includes(catTrimmed)) {
-          const updated = [...categories, catTrimmed];
-          setCategories(updated);
-          // also persist the new category
-          await api.put("/store/options", {
-            businessLogo: storeLogo.trim(), favicon: storeFavicon.trim(),
-            whatsappNumber: formatPhone(storeWhatsapp), callNumber: formatPhone(storeCall),
-            banners, socialLinks, categories: updated,
-            deliveryMode: storeDeliveryMode,
-            defaultDeliveryCharge: Math.max(0, Number(storeDeliveryCharge) || 0),
-            freeDeliveryThreshold: Math.max(0, Number(storeFreeDeliveryThreshold) || 0),
-            paymentMode: storePaymentMode,
-          });
-        }
         setSuccess("Product added.");
+      }
+
+      if (newCategories.length) {
+        const updated = [...categories, ...newCategories];
+        setCategories(updated);
+        await api.put("/store/options", {
+          businessLogo: storeLogo.trim(), favicon: storeFavicon.trim(),
+          whatsappNumber: formatPhone(storeWhatsapp), callNumber: formatPhone(storeCall),
+          banners, socialLinks, categories: updated,
+          deliveryMode: storeDeliveryMode,
+          defaultDeliveryCharge: Math.max(0, Number(storeDeliveryCharge) || 0),
+          freeDeliveryThreshold: Math.max(0, Number(storeFreeDeliveryThreshold) || 0),
+          paymentMode: storePaymentMode,
+        });
       }
       setProductForm(emptyProductForm);
       await loadData();
@@ -1002,7 +1027,7 @@ export function DashboardPage() {
           )}
           <div>
           
-            <h1 className="font-heading text-xl font-bold text-slate-900 sm:text-2xl">{seller?.businessName || "My Dukan"}</h1>
+            <h1 className="font-heading text-xl font-bold text-slate-900 sm:text-2xl">{seller?.businessName || "Zensos"}</h1>
           </div>
         </div>
         <div className="flex w-full flex-wrap gap-2 sm:w-auto">
@@ -1224,9 +1249,9 @@ export function DashboardPage() {
 
       {/* ══════════════════════════════════ TAB: STORE OPTIONS ══ */}
       {tab === "store" && (
-        <div className="grid gap-6 lg:grid-cols-2">
+        <div className="grid gap-6 min-w-0 lg:grid-cols-2">
           {/* Branding */}
-          <article className="rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card space-y-4 dark:border-teal-900/35 dark:bg-gradient-to-br dark:from-slate-950 dark:to-slate-900">
+          <article className="min-w-0 rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card space-y-4 dark:border-teal-900/35 dark:bg-gradient-to-br dark:from-slate-950 dark:to-slate-900">
             <h2 className="font-heading text-xl font-bold text-slate-900">Branding & Contact</h2>
             <label className="block space-y-1">
               <span className="text-sm font-semibold text-slate-700">Business Logo URL</span>
@@ -1239,16 +1264,16 @@ export function DashboardPage() {
             </label>
             <label className="block space-y-1">
               <span className="text-sm font-semibold text-slate-700">WhatsApp Number</span>
-              <div className="flex gap-2">
-                <input className="w-24 rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400" placeholder="+91" value={storeWhatsapp.countryCode} onChange={e => setStoreWhatsapp((prev) => ({ ...prev, countryCode: e.target.value || DEFAULT_COUNTRY_CODE }))} />
-                <input className="flex-1 rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400" placeholder="9876543210" value={storeWhatsapp.number} onChange={e => setStoreWhatsapp((prev) => ({ ...prev, number: e.target.value.replace(/\D/g, "").slice(0, 15) }))} />
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                <input className="w-full max-w-[8rem] rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400" placeholder="+91" value={storeWhatsapp.countryCode} readOnly />
+                <input className="flex-1 min-w-0 rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400" placeholder="9876543210" value={storeWhatsapp.number} onChange={e => setStoreWhatsapp((prev) => ({ ...prev, number: e.target.value.replace(/\D/g, "").slice(0, 15) }))} />
               </div>
             </label>
             <label className="block space-y-1">
               <span className="text-sm font-semibold text-slate-700">Call Number</span>
-              <div className="flex gap-2">
-                <input className="w-24 rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400" placeholder="+91" value={storeCall.countryCode} onChange={e => setStoreCall((prev) => ({ ...prev, countryCode: e.target.value || DEFAULT_COUNTRY_CODE }))} />
-                <input className="flex-1 rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400" placeholder="9876543210" value={storeCall.number} onChange={e => setStoreCall((prev) => ({ ...prev, number: e.target.value.replace(/\D/g, "").slice(0, 15) }))} />
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                <input className="w-full max-w-[8rem] rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400" placeholder="+91" value={storeCall.countryCode} readOnly />
+                <input className="flex-1 min-w-0 rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400" placeholder="9876543210" value={storeCall.number} onChange={e => setStoreCall((prev) => ({ ...prev, number: e.target.value.replace(/\D/g, "").slice(0, 15) }))} />
               </div>
             </label>
             <label className="block space-y-1">
@@ -1321,14 +1346,14 @@ export function DashboardPage() {
             <div className="border-t border-slate-100 pt-4 space-y-3">
               <p className="text-sm font-semibold text-slate-700">Social & Online Links</p>
               {socialLinks.map((s, i) => (
-                <div key={i} className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2 text-sm">
-                  <span className="font-semibold text-slate-700 w-24 shrink-0">{s.platform}</span>
-                  <span className="flex-1 text-slate-500 truncate">{s.url}</span>
+                <div key={i} className="flex flex-col gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2 text-sm sm:flex-row sm:items-center">
+                  <span className="font-semibold text-slate-700 w-full sm:w-24 shrink-0">{s.platform}</span>
+                  <span className="flex-1 min-w-0 text-slate-500 truncate">{s.url}</span>
                   <button onClick={() => setSocialLinks(prev => prev.filter((_, j) => j !== i))} className="inline-flex items-center justify-center rounded-lg bg-rose-600 px-2 py-1 text-xs font-semibold text-white"><AppIcon name="close" className="text-[8px]" /></button>
                 </div>
               ))}
-              <div className="flex gap-2">
-                <select className="rounded-lg border border-slate-200 px-2 py-2 text-sm outline-none bg-white" value={newSocialPlatform} onChange={e => setNewSocialPlatform(e.target.value)}>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <select className="w-full rounded-lg border border-slate-200 px-2 py-2 text-sm outline-none bg-white sm:w-auto" value={newSocialPlatform} onChange={e => setNewSocialPlatform(e.target.value)}>
                   {SOCIAL_PLATFORMS.map(p => <option key={p}>{p}</option>)}
                 </select>
                 <input className="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-slate-400" placeholder="https://..." value={newSocialUrl} onChange={e => setNewSocialUrl(e.target.value)} />
@@ -1341,7 +1366,7 @@ export function DashboardPage() {
           </article>
 
           {/* Banners — max 5 */}
-          <article className="rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card space-y-3 dark:border-teal-900/35 dark:bg-gradient-to-br dark:from-slate-950 dark:to-slate-900">
+          <article className="min-w-0 rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card space-y-3 dark:border-teal-900/35 dark:bg-gradient-to-br dark:from-slate-950 dark:to-slate-900">
             <div className="flex items-center justify-between">
               <h2 className="font-heading text-xl font-bold text-slate-900">Store Banners</h2>
               <span className={`rounded-full px-3 py-1 text-xs font-bold border ${
@@ -1360,32 +1385,33 @@ export function DashboardPage() {
                   onDragOver={e => handleBannerDragOver(e, i)}
                   onDrop={() => handleBannerDrop(i)}
                   onDragEnd={resetBannerDragState}
-                  className={`flex items-center gap-2 rounded-xl border bg-slate-50 p-2 transition ${
+                  className={`flex flex-col gap-2 rounded-xl border bg-slate-50 p-2 transition ${
                     dragOverBannerIndex === i
                       ? "border-teal-300 ring-2 ring-teal-100"
                       : "border-slate-200"
                   } ${draggedBannerIndex === i ? "opacity-70" : ""}`}
                 >
-                  <div className="flex flex-col items-center gap-1 px-1 text-slate-400 shrink-0 cursor-grab active:cursor-grabbing">
-                    <span className="text-[10px] font-bold uppercase tracking-[0.2em]">Drag</span>
-                    <span className="text-sm leading-none">⋮⋮</span>
-                  </div>
-                  {b.imageUrl && <img src={normalizeImageUrl(b.imageUrl)} alt="" className="h-12 w-20 rounded-lg object-cover" />}
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-semibold text-slate-700 truncate">{b.title || `Banner ${i + 1}`}</p>
-                    <p className="text-xs text-slate-400 truncate">{b.imageUrl}</p>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <span className="rounded-full border border-teal-200 bg-teal-50 px-2 py-1 text-[11px] font-bold text-teal-700">
-                      Position {i + 1}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setBanners(prev => prev.filter((_, j) => j !== i))}
-                      className="text-rose-600 text-xs font-semibold px-2 py-1 rounded-lg border border-rose-200 bg-rose-50"
-                    >
-                      Remove
-                    </button>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                    <div className="flex flex-col items-center gap-1 px-1 text-slate-400 shrink-0 cursor-grab active:cursor-grabbing">
+                      <span className="text-sm leading-none">⋮⋮</span>
+                    </div>
+                    {b.imageUrl && <img src={normalizeImageUrl(b.imageUrl)} alt="" className="h-12 w-20 rounded-lg object-cover" />}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-semibold text-slate-700 truncate">{b.title || `Banner ${i + 1}`}</p>
+                      <p className="text-xs text-slate-400 truncate">{b.imageUrl}</p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 shrink-0">
+                      <span className="rounded-full border border-teal-200 bg-teal-50 px-2 py-1 text-[11px] font-bold text-teal-700">
+                        Position {i + 1}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setBanners(prev => prev.filter((_, j) => j !== i))}
+                        className="text-rose-600 text-xs font-semibold px-2 py-1 rounded-lg border border-rose-200 bg-rose-50"
+                      >
+                        Remove
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -1427,10 +1453,10 @@ export function DashboardPage() {
 
       {/* ══════════════════════════════════════ TAB: PRODUCTS ══ */}
       {tab === "products" && (
-        <div className="grid gap-6 lg:grid-cols-2 lg:items-stretch">
+        <div className="grid gap-6 xl:grid-cols-2 xl:items-stretch">
           {/* Add / Edit product form */}
-          <article className="rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card dark:border-teal-900/35 dark:bg-gradient-to-br dark:from-slate-950 dark:to-slate-900">
-            <div className="flex items-center justify-between gap-2">
+          <article className="min-w-0 rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card dark:border-teal-900/35 dark:bg-gradient-to-br dark:from-slate-950 dark:to-slate-900">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <h2 className="font-heading text-xl font-bold text-slate-900">
                 {editingProduct ? "✏️ Edit Product" : "Add New Product"}
               </h2>
@@ -1469,89 +1495,117 @@ export function DashboardPage() {
                   />
                   <p className="text-xs text-slate-500">Keep the title short so it fits nicely in the store card.</p>
                 </label>
-                <label className="block space-y-1">
+                <label className="relative block space-y-1">
                   <span className="text-sm font-semibold text-slate-700">Category</span>
-                  <div className="relative">
-                    <input
-                      className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400"
-                      placeholder="Type or select a category…"
-                      value={productForm.category}
-                      autoComplete="off"
-                      onChange={e => {
-                        const val = e.target.value;
-                        setProductForm(p => ({ ...p, category: val }));
-                        const q = val.trim().toLowerCase();
-                        setCategorySuggestions(
-                          q ? categories.filter(c => c.toLowerCase().includes(q)) : categories
-                        );
-                        setShowSuggestions(true);
-                      }}
-                      onFocus={() => {
-                        setCategorySuggestions(
-                          productForm.category.trim()
-                            ? categories.filter(c => c.toLowerCase().includes(productForm.category.toLowerCase()))
-                            : categories
-                        );
-                        setShowSuggestions(true);
-                      }}
-                      onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
-                    />
-                    {showSuggestions && (categorySuggestions.length > 0 || (productForm.category.trim() && !categories.includes(productForm.category.trim()))) && (
-                      <ul className="absolute z-30 mt-1 w-full rounded-xl border border-slate-200 bg-white shadow-lg overflow-hidden">
-                        {categorySuggestions.map(c => (
-                          <li
-                            key={c}
-                            onMouseDown={() => {
-                              setProductForm(p => ({ ...p, category: c }));
+                  <div className="rounded-2xl border border-slate-200 bg-white px-3 py-2">
+                    <div className="flex flex-wrap gap-2">
+                      {productForm.categories.map((tag) => (
+                        <button
+                          key={tag}
+                          type="button"
+                          onClick={() => setProductForm(p => ({ ...p, categories: p.categories.filter((item) => item !== tag) }))}
+                          className="inline-flex items-center gap-1 rounded-full border border-teal-200 bg-teal-50 px-2 py-1 text-xs font-semibold text-teal-700 hover:bg-teal-100 transition"
+                        >
+                          <span className="max-w-[120px] truncate">{tag}</span>
+                          <AppIcon name="close" className="text-[8px]" />
+                        </button>
+                      ))}
+                      <input
+                        className="min-w-[6rem] flex-1 bg-transparent text-sm outline-none placeholder:text-slate-400"
+                        placeholder="Type or select categories…"
+                        value={productForm.categoryInput}
+                        autoComplete="off"
+                        onChange={e => {
+                          const val = e.target.value;
+                          setProductForm(p => ({ ...p, categoryInput: val }));
+                          const q = val.trim().toLowerCase();
+                          setCategorySuggestions(
+                            q
+                              ? categories.filter(c => c.toLowerCase().includes(q) && !productForm.categories.includes(c))
+                              : categories.filter(c => !productForm.categories.includes(c))
+                          );
+                          setShowSuggestions(true);
+                        }}
+                        onFocus={() => {
+                          const q = productForm.categoryInput.trim().toLowerCase();
+                          setCategorySuggestions(
+                            q
+                              ? categories.filter(c => c.toLowerCase().includes(q) && !productForm.categories.includes(c))
+                              : categories.filter(c => !productForm.categories.includes(c))
+                          );
+                          setShowSuggestions(true);
+                        }}
+                        onKeyDown={e => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            const nextCategory = productForm.categoryInput.trim();
+                            if (nextCategory) {
+                              setProductForm(p => ({
+                                ...p,
+                                categories: p.categories.includes(nextCategory) ? p.categories : [...p.categories, nextCategory],
+                                categoryInput: "",
+                              }));
+                              if (!categories.includes(nextCategory)) {
+                                setCategories(prev => [...prev, nextCategory]);
+                              }
                               setShowSuggestions(false);
-                            }}
-                            className="cursor-pointer px-4 py-2 text-sm text-slate-700 hover:bg-teal-50 hover:text-teal-800 transition"
-                          >{c}</li>
-                        ))}
-                        {productForm.category.trim() && !categories.includes(productForm.category.trim()) && (
-                          <li
-                            onMouseDown={() => {
-                              const c = productForm.category.trim();
-                              setCategories(prev => prev.includes(c) ? prev : [...prev, c]);
-                              setShowSuggestions(false);
-                            }}
-                            className="cursor-pointer px-4 py-2 text-sm font-semibold text-teal-700 bg-teal-50 border-t border-slate-100 hover:bg-teal-100 transition"
-                          >➕ Create "{productForm.category.trim()}"</li>
-                        )}
-                      </ul>
-                    )}
+                            }
+                          }
+                        }}
+                        onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
+                      />
+                    </div>
                   </div>
+                  {showSuggestions && (categorySuggestions.length > 0 || (productForm.categoryInput.trim() && !categories.includes(productForm.categoryInput.trim()))) && (
+                    <ul className="absolute left-0 right-0 z-30 mt-1 w-full max-w-full rounded-xl border border-slate-200 bg-white shadow-lg overflow-hidden">
+                      {categorySuggestions.map(c => (
+                        <li key={c} className="flex items-center justify-between gap-3 px-4 py-2 text-sm transition bg-white hover:bg-teal-50">
+                          <button
+                            type="button"
+                            onMouseDown={() => {
+                              setProductForm(p => ({
+                                ...p,
+                                categories: p.categories.includes(c) ? p.categories : [...p.categories, c],
+                                categoryInput: "",
+                              }));
+                              setShowSuggestions(false);
+                            }}
+                            className="text-left flex-1 text-slate-700 hover:text-teal-800"
+                          >
+                            {c}
+                          </button>
+                          <button
+                            type="button"
+                            onMouseDown={async (event) => {
+                              event.stopPropagation();
+                              event.preventDefault();
+                              await deleteSellerCategory(c);
+                            }}
+                            className="flex h-7 w-7 items-center justify-center rounded-full border border-rose-200 bg-rose-50 text-rose-600 transition hover:bg-rose-100 hover:text-rose-700"
+                            aria-label={`Delete category ${c}`}
+                          >
+                            <AppIcon name="trash" className="h-3.5 w-3.5" />
+                          </button>
+                        </li>
+                      ))}
+                      {productForm.categoryInput.trim() && !categories.includes(productForm.categoryInput.trim()) && (
+                        <li
+                          onMouseDown={() => {
+                            const c = productForm.categoryInput.trim();
+                            setProductForm(p => ({
+                              ...p,
+                              categories: p.categories.includes(c) ? p.categories : [...p.categories, c],
+                              categoryInput: "",
+                            }));
+                            setCategories(prev => prev.includes(c) ? prev : [...prev, c]);
+                            setShowSuggestions(false);
+                          }}
+                          className="cursor-pointer px-4 py-2 text-sm font-semibold text-teal-700 bg-teal-50 border-t border-slate-100 hover:bg-teal-100 transition"
+                        >➕ Create "{productForm.categoryInput.trim()}"</li>
+                      )}
+                    </ul>
+                  )}
                 </label>
-
-                {/* Quick-add new category inline */}
-                <div className="flex gap-2 items-center pt-1">
-                  <input
-                    id="quick-new-category"
-                    className="flex-1 rounded-xl border border-dashed border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-teal-400 placeholder:text-slate-400"
-                    placeholder="+ Add new category…"
-                    value={newCategory}
-                    onChange={e => setNewCategory(e.target.value)}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        const c = newCategory.trim();
-                        if (c && !categories.includes(c)) { setCategories(prev => [...prev, c]); }
-                        if (c) { setProductForm(p => ({ ...p, category: c })); }
-                        setNewCategory("");
-                      }
-                    }}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const c = newCategory.trim();
-                      if (c && !categories.includes(c)) { setCategories(prev => [...prev, c]); }
-                      if (c) { setProductForm(p => ({ ...p, category: c })); }
-                      setNewCategory("");
-                    }}
-                    className="rounded-xl border border-teal-200 bg-teal-50 px-3 py-2 text-sm font-semibold text-teal-700 hover:bg-teal-100 transition whitespace-nowrap"
-                  >Add</button>
-                </div>
               </div>
 
               {/* ── Section 2: Images + Description + Notes */}
@@ -1669,32 +1723,33 @@ export function DashboardPage() {
                   <p className="text-sm font-semibold text-slate-700">Product Variants &amp; Pricing</p>
                   <p className="text-xs text-slate-500 mt-0.5">Each variant has a value, unit of measure (UOM), price, and its own active status.</p>
                 </div>
-                {productForm.variants.length > 0 && (
-                  <div className="hidden grid-cols-[1fr_80px_100px_92px_32px] gap-1.5 px-1 sm:grid">
-                    <span className="text-xs font-semibold text-slate-500">Pack Size</span>
-                    <span className="text-xs font-semibold text-slate-500">UOM</span>
-                    <span className="text-xs font-semibold text-slate-500">Price (₹)</span>
-                    <span className="text-xs font-semibold text-slate-500">Status</span>
-                    <span />
-                  </div>
-                )}
-                {productForm.variants.map((v, i) => (
-                  <div key={i} className="grid gap-2 rounded-xl border border-slate-200 bg-white p-3 sm:grid-cols-[1fr_80px_100px_92px_32px] sm:items-center sm:gap-1.5 sm:rounded-none sm:border-0 sm:bg-transparent sm:p-0">
-                    <input
-                      className="rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm outline-none focus:border-slate-400"
+                <div className="overflow-x-auto">
+                  {productForm.variants.length > 0 && (
+                    <div className="hidden min-w-[28rem] grid-cols-[minmax(0,1fr)_minmax(0,80px)_minmax(0,100px)_minmax(0,92px)_minmax(0,32px)] gap-1.5 px-1 sm:grid">
+                      <span className="text-xs font-semibold text-slate-500">Pack Size</span>
+                      <span className="text-xs font-semibold text-slate-500">UOM</span>
+                      <span className="text-xs font-semibold text-slate-500">Price (₹)</span>
+                      <span className="text-xs font-semibold text-slate-500">Status</span>
+                      <span />
+                    </div>
+                  )}
+                  {productForm.variants.map((v, i) => (
+                    <div key={i} className="min-w-[28rem] grid gap-2 rounded-xl border border-slate-200 bg-white p-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,80px)_minmax(0,100px)_minmax(0,92px)_minmax(0,32px)] sm:items-center sm:gap-1.5 sm:rounded-none sm:border-0 sm:bg-transparent sm:p-0">
+                      <input
+                        className="min-w-0 rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm outline-none focus:border-slate-400"
                       placeholder="e.g. 500 (for 500g)"
                       value={v.label}
                       onChange={e => setProductForm(p => { const vv = [...p.variants]; vv[i] = { ...vv[i], label: e.target.value }; return { ...p, variants: vv }; })}
                     />
                     <input
-                      className="rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm outline-none focus:border-slate-400"
+                      className="min-w-0 rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm outline-none focus:border-slate-400"
                       placeholder="g / ml"
                       value={v.uom}
                       onChange={e => setProductForm(p => { const vv = [...p.variants]; vv[i] = { ...vv[i], uom: e.target.value }; return { ...p, variants: vv }; })}
                     />
                     <input
                       type="number" min={0}
-                      className="rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm outline-none focus:border-slate-400"
+                      className="min-w-0 rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm outline-none focus:border-slate-400"
                       placeholder="499"
                       value={v.amount}
                       onChange={e => setProductForm(p => { const vv = [...p.variants]; vv[i] = { ...vv[i], amount: e.target.value }; return { ...p, variants: vv }; })}
@@ -1729,6 +1784,7 @@ export function DashboardPage() {
                   className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-100 transition"
                 >+ Add Variant</button>
               </div>
+              </div>
 
               <div className="flex flex-wrap justify-between gap-2 pt-1">
                 {editingProduct && (
@@ -1751,19 +1807,19 @@ export function DashboardPage() {
           </article>
 
           {/* Product catalog */}
-          <div className="h-full">
-          <article className="h-full flex flex-col rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card dark:border-teal-900/35 dark:bg-gradient-to-br dark:from-slate-950 dark:to-slate-900">
+          <div className="h-full min-w-0">
+          <article className="min-w-0 h-full flex flex-col rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card dark:border-teal-900/35 dark:bg-gradient-to-br dark:from-slate-950 dark:to-slate-900">
             {/* Catalog header + search */}
-            <div className="flex items-center justify-between gap-2 mb-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
               <h2 className="font-heading text-xl font-bold text-slate-900">Product Catalog</h2>
               <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-bold text-slate-500">{products.length}</span>
             </div>
             {/* Search bar with filter icon */}
             <div className="relative">
-              <div className="flex items-center gap-2 rounded-xl border border-emerald-100 bg-emerald-50/70 px-3 py-2 dark:border-slate-700 dark:bg-slate-900/75">
+              <div className="flex flex-wrap items-center gap-2 rounded-xl border border-emerald-100 bg-emerald-50/70 px-3 py-2 dark:border-slate-700 dark:bg-slate-900/75">
                 <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 dark:from-teal-500 dark:to-sky-500"><AppIcon name="search" className="text-[10px]" /></span>
                 <input
-                  className="flex-1 bg-transparent text-sm outline-none placeholder:text-slate-400"
+                  className="flex-1 min-w-0 bg-transparent text-sm outline-none placeholder:text-slate-400"
                   placeholder="Search products…"
                   value={catalogSearch}
                   onChange={e => setCatalogSearch(e.target.value)}
@@ -1842,7 +1898,7 @@ export function DashboardPage() {
                   <div className="flex items-start gap-2">
                     {getProductImages(prod)[0] && <img src={getProductImages(prod)[0]} alt="" className="h-12 w-12 rounded-lg object-cover" />}
                     <div className="flex-1 min-w-0">
-                      <p className="font-semibold text-slate-800 truncate">{prod.title}</p>
+                      <p className="font-semibold text-slate-800 truncate break-words">{prod.title}</p>
                       {prod.category && (
                         <span className="inline-block mt-0.5 rounded-full border border-teal-200 bg-teal-50 px-2 py-0.5 text-xs font-semibold text-teal-700">{prod.category}</span>
                       )}
@@ -2513,14 +2569,14 @@ export function DashboardPage() {
                 <div className="space-y-1">
                   <span className="text-sm font-semibold text-slate-700">WhatsApp number</span>
                   <div className="flex gap-2">
-                    <input className="w-20 rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-teal-400" value={storeWhatsapp.countryCode} onChange={e => setStoreWhatsapp(p => ({...p, countryCode: e.target.value}))} placeholder="+91" />
+                    <input className="w-20 rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-teal-400" value={storeWhatsapp.countryCode} readOnly disabled placeholder="+91" />
                     <input className="flex-1 rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-teal-400" placeholder="9876543210" value={storeWhatsapp.number} onChange={e => setStoreWhatsapp(p => ({...p, number: e.target.value.replace(/\D/g,"").slice(0,15)}))} />
                   </div>
                 </div>
                 <div className="space-y-1">
                   <span className="text-sm font-semibold text-slate-700">Call number</span>
                   <div className="flex gap-2">
-                    <input className="w-20 rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-teal-400" value={storeCall.countryCode} onChange={e => setStoreCall(p => ({...p, countryCode: e.target.value}))} placeholder="+91" />
+                    <input className="w-20 rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-teal-400" value={storeCall.countryCode} readOnly disabled placeholder="+91" />
                     <input className="flex-1 rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-teal-400" placeholder="9876543210" value={storeCall.number} onChange={e => setStoreCall(p => ({...p, number: e.target.value.replace(/\D/g,"").slice(0,15)}))} />
                   </div>
                 </div>

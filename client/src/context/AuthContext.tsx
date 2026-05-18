@@ -70,8 +70,8 @@ interface AuthContextShape {
   updateProfile: (input: UpdateProfileInput) => Promise<void>;
 }
 
-const TOKEN_KEY = "mydukan_token";
-const SELLER_KEY = "mydukan_seller";
+const TOKEN_KEY = "zensos_token";
+const SELLER_KEY = "zensos_seller";
 const AuthContext = createContext<AuthContextShape | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
