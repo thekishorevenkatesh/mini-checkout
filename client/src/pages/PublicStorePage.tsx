@@ -986,6 +986,15 @@ export function PublicStorePage() {
       unitPrice: number;
     },
   ) {
+    if (details.quantity <= 0 && variantPopupProductId) {
+      const product = products.find(p => p._id === variantPopupProductId);
+      const activeVariant = product && hasCompleteVariantSelection(product, popupVariants)
+        ? findMatchingVariant(product, popupVariants)
+        : null;
+      if (activeVariant?.variantId === variantId) {
+        setPopupVariants(product ? withAutoSelectedSingleVariants(product, {}) : {});
+      }
+    }
     setPopupVariantQuantities(prev => {
       if (details.quantity <= 0) {
         const next = { ...prev };
@@ -1440,17 +1449,40 @@ export function PublicStorePage() {
         </div>
 
         {/* Order summary */}
-        {selectedItems.length === 0 ? (
+        {cartEntries.length === 0 ? (
           <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">Add one or more products to cart.</p>
         ) : (
-          <div className="rounded-2xl border border-slate-200/90 bg-gradient-to-b from-slate-50 to-white p-4 space-y-2 dark:border-slate-700 dark:from-slate-900 dark:to-slate-900">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">Order Summary</p>
-            {selectedItems.map(p => (
-              <div key={p._id} className="flex items-center justify-between gap-2 text-sm text-slate-700">
-                <span className="max-w-[65%] break-words">{p.title} × {cart[p._id]?.quantity}</span>
-                <span className="font-semibold text-slate-900">₹{getProductUnitPricing(p, cart[p._id]?.variants || {}).price * (cart[p._id]?.quantity || 1)}</span>
-              </div>
-            ))}
+          <div className="rounded-2xl border border-slate-200/90 bg-gradient-to-b from-slate-50 to-white p-4 space-y-3 dark:border-slate-700 dark:from-slate-900 dark:to-slate-900">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">Order Summary</p>
+              <span className="rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-500 ring-1 ring-inset ring-slate-200 dark:bg-slate-950 dark:text-slate-300 dark:ring-slate-700">
+                {cartEntries.length} item{cartEntries.length > 1 ? "s" : ""}
+              </span>
+            </div>
+            <div className="space-y-2">
+              {cartEntries.map(({ cartItemId, product, item }) => (
+                <div key={cartItemId} className="rounded-xl border border-slate-200 bg-white/90 p-3 shadow-sm dark:border-slate-700 dark:bg-slate-950/70">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="break-words text-sm font-semibold text-slate-900 dark:text-slate-100">{product.title}</p>
+                      <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                        {item.variantId ? `${item.variantTitle} • Qty ${item.quantity}` : `Qty ${item.quantity}`}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">₹{item.unitPrice * item.quantity}</p>
+                      <button
+                        type="button"
+                        onClick={() => removeProduct(cartItemId)}
+                        className="mt-1 text-xs font-semibold text-rose-600 transition hover:text-rose-500"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
             <div className="border-t border-slate-200 pt-2 space-y-1">
               <div className="flex justify-between text-sm text-slate-600">
                 <span>Items total</span><span>₹{itemsTotal}</span>
@@ -1663,22 +1695,41 @@ export function PublicStorePage() {
       const product = products.find(p => p._id === variantPopupProductId);
       if (!product) return null;
       const vgs = getNormalizedVariantGroups(product);
-      const hasDraftSelections = Object.values(popupVariantQuantities).some((entry) => entry.quantity > 0);
+      const selectedVariantEntries = Object.entries(popupVariantQuantities)
+        .filter(([, entry]) => entry.quantity > 0)
+        .sort(([, a], [, b]) => a.variantTitle.localeCompare(b.variantTitle));
+      const hasDraftSelections = selectedVariantEntries.length > 0;
       return (
-        <div className="fixed inset-0 z-[60] flex items-end justify-center sm:items-center bg-black/50 backdrop-blur-[2px] px-4 pb-4 sm:p-4" onClick={() => setVariantPopupProductId(null)}>
-          <div className="w-full max-w-sm rounded-3xl bg-white p-5 shadow-2xl dark:border dark:border-teal-900/40 dark:bg-gradient-to-b dark:from-slate-950 dark:to-slate-900" onClick={(e) => e.stopPropagation()}>
-            <div className="mb-4 flex items-start justify-between gap-3">
-              <div><p className="text-xs font-bold uppercase tracking-wider text-teal-600">Select Options</p>
-                <h3 className="mt-0.5 font-heading text-base font-bold text-slate-900 dark:text-slate-100 line-clamp-2">{product.title}</h3></div>
-              <button type="button" onClick={() => setVariantPopupProductId(null)} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 dark:from-teal-500 dark:to-sky-500">
-                <AppIcon name="close" className="text-[10px]" />
+        <div className="fixed inset-0 z-[60] flex items-end justify-center bg-slate-950/45 px-3 py-3 backdrop-blur-sm sm:items-center sm:px-4 sm:py-4" onClick={() => setVariantPopupProductId(null)}>
+          <div className="flex max-h-[calc(100vh-1.5rem)] w-full max-w-3xl flex-col overflow-hidden rounded-[30px] border border-slate-200/80 bg-white shadow-[0_24px_80px_rgba(15,23,42,0.18)] dark:border-slate-800 dark:bg-slate-950 sm:max-h-[calc(100vh-2rem)]" onClick={(e) => e.stopPropagation()}>
+            <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-200 px-5 py-4 dark:border-slate-800 sm:px-7 sm:py-5">
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-[0.24em] text-teal-700 dark:text-teal-300">Select Variants</p>
+                <h3 className="mt-1 font-heading text-xl font-bold text-slate-900 dark:text-slate-100 line-clamp-2">{product.title}</h3>
+              </div>
+              <button type="button" onClick={() => setVariantPopupProductId(null)} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 text-white transition hover:from-emerald-400 hover:to-teal-500 dark:from-teal-500 dark:to-sky-500">
+                <AppIcon name="close" className="text-[11px]" />
               </button>
             </div>
-            <div className="space-y-3">
+            <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-7 sm:py-6">
+            <div className="grid gap-4">
+              <div className="min-h-0">
+                <div className="rounded-[24px] border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-900/40 sm:p-5">
+                  <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="text-base font-semibold text-slate-900 dark:text-slate-100">Choose product variants</p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-5">
               {vgs.map(v => (
                 <div key={v.label}>
-                  <p className="mb-1.5 text-xs font-bold uppercase tracking-wide text-slate-500">{v.label}</p>
-                  <div className="flex flex-wrap gap-2">
+                  <div className="mb-3">
+                    <div>
+                      <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">{v.label}</p>
+                    </div>
+                  </div>
+                  <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
                     {v.options.map(opt => {
                       const optPrice = product.variantPrices?.[getVariantPriceKey(v.label, opt)];
                       const optOut = Array.isArray(product.variantItems) && product.variantItems.length > 0
@@ -1695,36 +1746,22 @@ export function PublicStorePage() {
                       const optionDraftQuantity = optionDraft?.quantity || 0;
                       if (optionMatchedVariant && optionDraft && optionDraftQuantity > 0) {
                         return (
-                          <div
+                          <button
                             key={opt}
-                            className="inline-flex items-center gap-3 rounded-xl bg-emerald-600 px-2 py-1.5 text-sm font-bold text-white"
+                            type="button"
+                            onClick={() => {
+                              setPopupVariants(nextSelections);
+                              setPopupVariantError("");
+                            }}
+                            className="rounded-2xl border border-emerald-300 bg-emerald-50 p-3.5 text-left transition dark:border-emerald-800 dark:bg-emerald-950/20"
                           >
-                            <button
-                              type="button"
-                              onClick={() => setPopupVariantQuantity(optionMatchedVariant.variantId, {
-                                quantity: optionDraftQuantity - 1,
-                                selections: optionDraft.selections,
-                                variantTitle: optionDraft.variantTitle,
-                                unitPrice: optionDraft.unitPrice,
-                              })}
-                              className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/20 text-base hover:bg-white/30"
-                            >
-                              -
-                            </button>
-                            <span className="min-w-5 text-center">{optionDraftQuantity}</span>
-                            <button
-                              type="button"
-                              onClick={() => setPopupVariantQuantity(optionMatchedVariant.variantId, {
-                                quantity: optionDraftQuantity + 1,
-                                selections: optionDraft.selections,
-                                variantTitle: optionDraft.variantTitle,
-                                unitPrice: optionDraft.unitPrice,
-                              })}
-                              className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/20 text-base hover:bg-white/30"
-                            >
-                              +
-                            </button>
-                          </div>
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <p className="text-[15px] font-semibold text-emerald-900 dark:text-emerald-200">{opt}</p>
+                                <p className="mt-1 text-xs text-emerald-700/80 dark:text-emerald-300/80">{optPrice ? `${"\u20B9"}${optPrice}` : "Selected variant"}</p>
+                              </div>
+                            </div>
+                          </button>
                         );
                       }
                       return (<button key={opt} type="button" disabled={optOut}
@@ -1739,24 +1776,168 @@ export function PublicStorePage() {
                             unitPrice: optionMatchedVariant.price,
                           });
                         }}
-                        className={`rounded-xl border px-3 py-1.5 text-sm font-semibold transition disabled:opacity-40 ${isSelectedOption ? "border-emerald-500 bg-emerald-50 text-emerald-800" : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"}`}>
+                        className={`rounded-2xl border px-3 py-3 text-left text-sm font-semibold transition disabled:opacity-40 ${isSelectedOption ? "border-emerald-400 bg-emerald-50 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/20 dark:text-emerald-200" : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"}`}>
                         {opt}{optPrice ? ` - ₹${optPrice}` : ""}
                       </button>);
                     })}
                   </div>
                 </div>
               ))}
+                    <div className="rounded-[22px] border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950/60">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">Selected variants</p>
+                          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Adjust quantity right here before adding to cart.</p>
+                        </div>
+                        <span className="rounded-full bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-600 ring-1 ring-inset ring-slate-200 dark:bg-slate-900 dark:text-slate-300 dark:ring-slate-700">
+                          {selectedVariantEntries.length} selected
+                        </span>
+                      </div>
+
+                      <div className="mt-3 space-y-3">
+                        {selectedVariantEntries.length === 0 ? (
+                          <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-400">
+                            Choose a variant option to start adding combinations.
+                          </div>
+                        ) : (
+                          selectedVariantEntries.map(([variantId, draft]) => (
+                            <div key={variantId} className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3.5 dark:border-slate-800 dark:bg-slate-900/50">
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <p className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
+                                    {draft.variantTitle || getVariantDisplayTitle(product, variantId, draft.selections)}
+                                  </p>
+                                  <p className="mt-1 truncate text-xs text-slate-500 dark:text-slate-400">
+                                    {Object.entries(draft.selections).map(([label, value]) => `${label}: ${value}`).join(" | ")}
+                                  </p>
+                                </div>
+                                <p className="shrink-0 text-sm font-semibold text-slate-900 dark:text-slate-100">{"\u20B9"}{draft.unitPrice}</p>
+                              </div>
+
+                              <div className="mt-3 flex items-center justify-end">
+                                <div className="inline-flex items-center gap-1 rounded-2xl border border-emerald-200 bg-white p-1 text-emerald-700 dark:border-emerald-900/60 dark:bg-slate-950 dark:text-emerald-300">
+                                  <button
+                                    type="button"
+                                    onClick={() => setPopupVariantQuantity(variantId, {
+                                      quantity: draft.quantity - 1,
+                                      selections: draft.selections,
+                                      variantTitle: draft.variantTitle,
+                                      unitPrice: draft.unitPrice,
+                                    })}
+                                    className="flex h-8 w-8 items-center justify-center rounded-xl text-base font-bold transition hover:bg-emerald-50 dark:hover:bg-emerald-950/30"
+                                  >
+                                    -
+                                  </button>
+                                  <span className="min-w-8 text-center text-sm font-bold">{draft.quantity}</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => setPopupVariantQuantity(variantId, {
+                                      quantity: draft.quantity + 1,
+                                      selections: draft.selections,
+                                      variantTitle: draft.variantTitle,
+                                      unitPrice: draft.unitPrice,
+                                    })}
+                                    className="flex h-8 w-8 items-center justify-center rounded-xl text-base font-bold transition hover:bg-emerald-50 dark:hover:bg-emerald-950/30"
+                                  >
+                                    +
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="hidden min-h-0">
+                <div className="rounded-[24px] border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900/70 sm:p-5 xl:flex xl:max-h-[calc(100vh-15rem)] xl:flex-col">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-base font-semibold text-slate-900 dark:text-slate-100">Selected variants</p>
+                      <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Fine-tune quantities before adding to cart.</p>
+                    </div>
+                    <span className="rounded-full bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-600 ring-1 ring-inset ring-slate-200 dark:bg-slate-900 dark:text-slate-300 dark:ring-slate-700">
+                      {selectedVariantEntries.length} selected
+                    </span>
+                  </div>
+
+                  <div className="mt-4 space-y-3 xl:min-h-0 xl:flex-1 xl:overflow-y-auto xl:pr-1">
+                    {selectedVariantEntries.length === 0 ? (
+                      <div className="rounded-[22px] border border-dashed border-slate-300 bg-slate-50 px-4 py-10 text-center text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-400">
+                        Choose a variant option to start adding combinations.
+                      </div>
+                    ) : (
+                      selectedVariantEntries.map(([variantId, draft]) => {
+                        const selectionSummary = Object.entries(draft.selections)
+                          .map(([label, value]) => `${label}: ${value}`)
+                          .join(" · ");
+                        return (
+                          <div key={variantId} className="rounded-[22px] border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-900/50">
+                            <div className="flex items-start justify-between gap-4">
+                              <div className="min-w-0">
+                                <p className="truncate text-[15px] font-semibold text-slate-900 dark:text-slate-100">
+                                  {draft.variantTitle || getVariantDisplayTitle(product, variantId, draft.selections)}
+                                </p>
+                                {selectionSummary ? (
+                                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{selectionSummary}</p>
+                                ) : null}
+                              </div>
+                              <p className="shrink-0 text-sm font-bold text-slate-900 dark:text-slate-100">{"\u20B9"}{draft.unitPrice}</p>
+                            </div>
+
+                            <div className="mt-4 flex items-center justify-end">
+                              <div className="inline-flex items-center gap-1 rounded-2xl border border-slate-200 bg-white p-1 text-slate-700 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200">
+                                <button
+                                  type="button"
+                                  onClick={() => setPopupVariantQuantity(variantId, {
+                                    quantity: draft.quantity - 1,
+                                    selections: draft.selections,
+                                    variantTitle: draft.variantTitle,
+                                    unitPrice: draft.unitPrice,
+                                  })}
+                                  className="flex h-9 w-9 items-center justify-center rounded-xl text-lg font-bold transition hover:bg-slate-100 dark:hover:bg-slate-800"
+                                >
+                                  -
+                                </button>
+                                <span className="min-w-10 text-center text-sm font-bold">{draft.quantity}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => setPopupVariantQuantity(variantId, {
+                                    quantity: draft.quantity + 1,
+                                    selections: draft.selections,
+                                    variantTitle: draft.variantTitle,
+                                    unitPrice: draft.unitPrice,
+                                  })}
+                                  className="flex h-9 w-9 items-center justify-center rounded-xl text-lg font-bold transition hover:bg-slate-100 dark:hover:bg-slate-800"
+                                >
+                                  +
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              </div>
             </div>
-            {popupVariantError && <p className="mt-2 text-xs text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-2.5 py-1.5">{popupVariantError}</p>}
-            {hasDraftSelections && (
-              <button
-                type="button"
-                onClick={handlePopupAddToCart}
-                className="mt-4 w-full rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-500 transition"
-              >
-                Add to Cart
-              </button>
-            )}
+            </div>
+            <div className="shrink-0 border-t border-slate-200 bg-white px-5 py-4 dark:border-slate-800 dark:bg-slate-950 sm:px-7">
+              {popupVariantError && <p className="text-xs text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-2.5 py-1.5">{popupVariantError}</p>}
+              {hasDraftSelections && (
+                <button
+                  type="button"
+                  onClick={handlePopupAddToCart}
+                  className="mt-3 w-full rounded-2xl bg-gradient-to-r from-emerald-500 via-teal-500 to-sky-500 px-4 py-3.5 text-sm font-semibold text-white transition hover:from-emerald-400 hover:via-teal-400 hover:to-sky-400 dark:hover:from-emerald-500 dark:hover:via-teal-500 dark:hover:to-sky-500"
+                >
+                  Add to Cart
+                </button>
+              )}
+            </div>
           </div>
         </div>
       );
