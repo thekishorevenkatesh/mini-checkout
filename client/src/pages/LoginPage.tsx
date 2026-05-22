@@ -18,6 +18,7 @@ import {
   type AddressParts,
   type PhoneParts,
 } from "../utils/contactFields";
+import { compressImage } from "../utils/imageCompressor";
 
 type Mode = "login" | "register";
 type Step = "contact" | "otp" | "profile";
@@ -49,8 +50,9 @@ function ImageUploadField({
     setUploading(true);
     setUploadError("");
     try {
+      const compressedFile = await compressImage(file, 0.75, 1200, 1200, false);
       const form = new FormData();
-      form.append("image", file);
+      form.append("image", compressedFile);
       const response = await fetch(`https://api.imgbb.com/1/upload?key=${IMGBB_KEY}`, {
         method: "POST",
         body: form,

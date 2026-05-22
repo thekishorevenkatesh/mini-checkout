@@ -139,4 +139,8 @@ const orderSchema = new mongoose.Schema(
   }
 );
 
+// Optimize order list sorting and report filtering
+orderSchema.index({ seller: 1, createdAt: -1 });
+orderSchema.index({ seller: 1, paymentStatus: 1, createdAt: -1 });
+
 module.exports = mongoose.model("Order", orderSchema);

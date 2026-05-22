@@ -1,6 +1,8 @@
 const express = require("express");
 const cors = require("cors");
 const morgan = require("morgan");
+const helmet = require("helmet");
+const rateLimit = require("express-rate-limit");
 
 const authRoutes = require("./routes/authRoutes");
 const productRoutes = require("./routes/productRoutes");
@@ -10,13 +12,57 @@ const adminRoutes = require("./routes/adminRoutes");
 
 const app = express();
 
-app.use(
-  cors({
-    origin: "*",
-    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-  })
-);
+// Security headers
+app.use(helmet());
+
+// CORS configuration to allow specific origins
+const allowedOrigins = [
+  "https://mini-checkout-4u8y.vercel.app",
+  "http://localhost:5173",
+];
+
+const corsOptions = {
+  origin: (origin, callback) => {
+    // Allow requests with no origin (like mobile apps, curl, or postman)
+    if (!origin) return callback(null, true);
+
+    const isAllowed = allowedOrigins.includes(origin) ||
+                      origin.startsWith("https://mini-checkout-4u8y.vercel.app") ||
+                      origin.startsWith("http://localhost:");
+
+    if (isAllowed) {
+      return callback(null, true);
+    }
+    return callback(new Error("Not allowed by CORS"));
+  },
+  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  credentials: true,
+};
+
+app.use(cors(corsOptions));
+
+// Rate Limiters
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 300, // Limit each IP to 300 requests per 15 minutes
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Too many requests, please try again later." },
+});
+
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 30, // Limit each IP to 30 requests per 15 minutes for auth/OTP endpoints
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Too many login/OTP attempts, please try again after 15 minutes." },
+});
+
+// Apply rate limiters
+app.use("/api", apiLimiter);
+app.use("/api/auth", authLimiter);
+
 app.use(express.json({ limit: "2mb" }));
 app.use(morgan("dev"));
 

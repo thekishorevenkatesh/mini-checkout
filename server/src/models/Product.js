@@ -131,4 +131,8 @@ const productSchema = new mongoose.Schema(
   }
 );
 
+// Optimize storefront and dashboard product listing queries
+productSchema.index({ seller: 1, isActive: 1, createdAt: -1 });
+productSchema.index({ seller: 1, createdAt: -1 });
+
 module.exports = mongoose.model("Product", productSchema);

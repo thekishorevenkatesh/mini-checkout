@@ -18,6 +18,7 @@ import {
   type PhoneParts,
 } from "../utils/contactFields";
 import type { Order, OrderStatus, Product, SocialLink, Banner, PaymentMode } from "../types";
+import { compressImage } from "../utils/imageCompressor";
 
 type Tab = "dashboard" | "store" | "products" | "orders" | "reports" | "profile" | "policies";
 type ProductFormVariant = {
@@ -111,8 +112,9 @@ function ImageUploadField({
     setUploading(true);
     setUploadError("");
     try {
+     const compressedFile = await compressImage(file, 0.75, 1200, 1200, false);
       const form = new FormData();
-      form.append("image", file);
+      form.append("image", compressedFile);
       const res = await fetch(`https://api.imgbb.com/1/upload?key=${IMGBB_KEY}`, {
         method: "POST",
         body: form,
@@ -2533,7 +2535,7 @@ export function DashboardPage() {
             <div className="mb-4 flex items-center justify-between gap-3">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-teal-600">Registered details</p>
-                <h3 className="font-heading text-lg font-bold text-slate-900 dark:text-white">Seller profile snapshot</h3>
+                <h3 className="font-heading text-lg font-bold text-slate-900 dark:text-white">Seller profile</h3>
               </div>
               <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-600">
                 {seller?.createdAt ? new Date(seller.createdAt).toLocaleDateString() : "New seller"}
