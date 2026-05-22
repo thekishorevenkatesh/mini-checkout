@@ -216,6 +216,10 @@ router.post("/register", auth, async (req, res) => {
       businessAddress,
       businessGST,
       upiId,
+      bankAccountName,
+      bankName,
+      bankAccountNumber,
+      bankIfsc,
       businessLogo,
       whatsappNumber,
       callNumber,
@@ -267,6 +271,10 @@ router.post("/register", auth, async (req, res) => {
     if (businessAddress) seller.businessAddress = String(businessAddress).trim();
     if (businessGST) seller.businessGST = String(businessGST).trim();
     if (upiId) seller.upiId = String(upiId).trim();
+    if (bankAccountName) seller.bankAccountName = String(bankAccountName).trim();
+    if (bankName) seller.bankName = String(bankName).trim();
+    if (bankAccountNumber) seller.bankAccountNumber = String(bankAccountNumber).trim();
+    if (bankIfsc) seller.bankIfsc = String(bankIfsc).trim().toUpperCase();
     if (businessLogo) seller.businessLogo = String(businessLogo).trim();
     if (whatsappNumber) seller.whatsappNumber = String(whatsappNumber).trim();
     if (callNumber) seller.callNumber = String(callNumber).trim();
@@ -323,6 +331,10 @@ router.put("/me", auth, async (req, res) => {
       businessAddress,
       businessGST,
       upiId,
+      bankAccountName,
+      bankName,
+      bankAccountNumber,
+      bankIfsc,
       profileImageUrl,
       businessLogo,
       favicon,
@@ -363,6 +375,10 @@ router.put("/me", auth, async (req, res) => {
     if (businessAddress !== undefined) seller.businessAddress = String(businessAddress).trim();
     if (businessGST !== undefined) seller.businessGST = String(businessGST).trim();
     if (typeof upiId === "string") seller.upiId = upiId.trim();
+    if (typeof bankAccountName === "string") seller.bankAccountName = bankAccountName.trim();
+    if (typeof bankName === "string") seller.bankName = bankName.trim();
+    if (typeof bankAccountNumber === "string") seller.bankAccountNumber = bankAccountNumber.trim();
+    if (typeof bankIfsc === "string") seller.bankIfsc = bankIfsc.trim().toUpperCase();
     if (typeof profileImageUrl === "string") seller.profileImageUrl = profileImageUrl.trim();
     if (typeof businessLogo === "string") seller.businessLogo = businessLogo.trim();
     if (typeof favicon === "string") seller.favicon = favicon.trim();

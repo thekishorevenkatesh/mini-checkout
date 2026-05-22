@@ -53,6 +53,27 @@ const sellerSchema = new mongoose.Schema(
       trim: true,
       default: "",
     },
+    bankAccountName: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    bankName: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    bankAccountNumber: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    bankIfsc: {
+      type: String,
+      trim: true,
+      uppercase: true,
+      default: "",
+    },
     businessAddress: {
       type: String,
       trim: true,

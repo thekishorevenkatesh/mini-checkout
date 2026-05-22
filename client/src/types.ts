@@ -34,6 +34,10 @@ export interface Seller {
   phone: string;
   businessEmail: string;
   upiId: string;
+  bankAccountName?: string;
+  bankName?: string;
+  bankAccountNumber?: string;
+  bankIfsc?: string;
   profileImageUrl: string;
   businessLogo: string;
   favicon: string;

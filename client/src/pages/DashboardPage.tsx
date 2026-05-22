@@ -278,6 +278,10 @@ export function DashboardPage() {
   const [profileLogo, setProfileLogo] = useState(seller?.businessLogo || "");
   const [profileFavicon, setProfileFavicon] = useState(seller?.favicon || "");
   const [profileCategory, setProfileCategory] = useState(seller?.businessCategory || "");
+  const [profileBankAccountName, setProfileBankAccountName] = useState(seller?.bankAccountName || "");
+  const [profileBankName, setProfileBankName] = useState(seller?.bankName || "");
+  const [profileBankAccountNumber, setProfileBankAccountNumber] = useState(seller?.bankAccountNumber || "");
+  const [profileBankIfsc, setProfileBankIfsc] = useState(seller?.bankIfsc || "");
   const [profileIdProof, setProfileIdProof] = useState(seller?.idProofUrl || "");
   const [profileAddressProof, setProfileAddressProof] = useState(seller?.addressProofUrl || "");
   const [isSavingProfile, setIsSavingProfile] = useState(false);
@@ -361,6 +365,10 @@ export function DashboardPage() {
     setProfileLogo(seller.businessLogo || "");
     setProfileFavicon(seller.favicon || "");
     setProfileCategory(seller.businessCategory || "");
+    setProfileBankAccountName(seller.bankAccountName || "");
+    setProfileBankName(seller.bankName || "");
+    setProfileBankAccountNumber(seller.bankAccountNumber || "");
+    setProfileBankIfsc(seller.bankIfsc || "");
     setProfileIdProof(seller.idProofUrl || "");
     setProfileAddressProof(seller.addressProofUrl || "");
     setStoreLogo(seller.businessLogo || "");
@@ -576,6 +584,10 @@ export function DashboardPage() {
         businessName: profileName.trim(),
         businessEmail: profileEmail.trim(),
         upiId: profileUpi.trim(),
+        bankAccountName: profileBankAccountName.trim(),
+        bankName: profileBankName.trim(),
+        bankAccountNumber: profileBankAccountNumber.trim(),
+        bankIfsc: profileBankIfsc.trim().toUpperCase(),
         businessAddress: formatAddress(profileAddress),
         businessGST: profileGST.trim(),
         businessLogo: profileLogo.trim(),
@@ -2517,6 +2529,42 @@ export function DashboardPage() {
             </span>
           </div>
 
+          <article className="rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card dark:border-teal-900/35 dark:bg-gradient-to-br dark:from-slate-950 dark:to-slate-900">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-teal-600">Registered details</p>
+                <h3 className="font-heading text-lg font-bold text-slate-900 dark:text-white">Seller profile snapshot</h3>
+              </div>
+              <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-600">
+                {seller?.createdAt ? new Date(seller.createdAt).toLocaleDateString() : "New seller"}
+              </span>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {[
+                { label: "Business name", value: seller?.businessName },
+                { label: "Category", value: seller?.businessCategory },
+                { label: "Business email", value: seller?.businessEmail },
+                { label: "Registered phone", value: seller?.phone },
+                { label: "GST number", value: seller?.businessGST },
+                { label: "Business address", value: seller?.businessAddress },
+                { label: "UPI ID", value: seller?.upiId },
+                { label: "Account holder", value: seller?.bankAccountName },
+                { label: "Bank name", value: seller?.bankName },
+                { label: "Account number", value: seller?.bankAccountNumber },
+                { label: "IFSC code", value: seller?.bankIfsc },
+                { label: "WhatsApp", value: seller?.whatsappNumber },
+                { label: "Call number", value: seller?.callNumber },
+                { label: "ID proof", value: seller?.idProofUrl ? "Uploaded" : "" },
+                { label: "Address proof", value: seller?.addressProofUrl ? "Uploaded" : "" },
+              ].map(({ label, value }) => (
+                <div key={label} className="min-w-0 rounded-2xl border border-slate-100 bg-slate-50/80 px-3 py-2.5">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">{label}</p>
+                  <p className="mt-1 break-words text-sm font-semibold text-slate-800 dark:text-slate-100">{value || "Not added"}</p>
+                </div>
+              ))}
+            </div>
+          </article>
+
           <form onSubmit={handleProfileSave} className="space-y-5">
             {/* Business Identity */}
             <article className="rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card dark:border-teal-900/35 dark:bg-gradient-to-br dark:from-slate-950 dark:to-slate-900">
@@ -2543,12 +2591,38 @@ export function DashboardPage() {
                   <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-teal-400" placeholder="22AAAAA0000A1Z5" value={profileGST} onChange={e => setProfileGST(e.target.value)} />
                 </label>
                 <label className="block space-y-1">
+                  <span className="text-sm font-semibold text-slate-700">Business email</span>
+                  <input type="email" className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-teal-400" placeholder="shop@example.com" value={profileEmail} onChange={e => setProfileEmail(e.target.value)} />
+                </label>
+              </div>
+            </article>
+
+            {/* Bank & Payments */}
+            <article className="rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card dark:border-teal-900/35 dark:bg-gradient-to-br dark:from-slate-950 dark:to-slate-900">
+              <h3 className="font-heading text-base font-bold text-slate-800 mb-4 flex items-center gap-2">
+                <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600 text-sm">₹</span>
+                Bank & Payments
+              </h3>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="block space-y-1">
                   <span className="text-sm font-semibold text-slate-700">UPI ID</span>
                   <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-teal-400" placeholder="yourname@upi" value={profileUpi} onChange={e => setProfileUpi(e.target.value)} />
                 </label>
                 <label className="block space-y-1">
-                  <span className="text-sm font-semibold text-slate-700">Business email</span>
-                  <input type="email" className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-teal-400" placeholder="shop@example.com" value={profileEmail} onChange={e => setProfileEmail(e.target.value)} />
+                  <span className="text-sm font-semibold text-slate-700">Account holder name</span>
+                  <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-teal-400" placeholder="Name as per bank account" value={profileBankAccountName} onChange={e => setProfileBankAccountName(e.target.value)} />
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-sm font-semibold text-slate-700">Bank name</span>
+                  <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-teal-400" placeholder="HDFC Bank" value={profileBankName} onChange={e => setProfileBankName(e.target.value)} />
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-sm font-semibold text-slate-700">Account number</span>
+                  <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-teal-400" placeholder="123456789012" value={profileBankAccountNumber} onChange={e => setProfileBankAccountNumber(e.target.value.replace(/\D/g, ""))} />
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-sm font-semibold text-slate-700">IFSC code</span>
+                  <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm uppercase outline-none focus:border-teal-400" placeholder="HDFC0001234" value={profileBankIfsc} onChange={e => setProfileBankIfsc(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 11))} />
                 </label>
               </div>
             </article>

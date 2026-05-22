@@ -21,6 +21,7 @@ import {
 
 type Mode = "login" | "register";
 type Step = "contact" | "otp" | "profile";
+type RegisterSection = "contact" | "business" | "bank" | "address" | "kyc" | "policies";
 
 const IMGBB_KEY = import.meta.env.VITE_IMGBB_API_KEY as string | undefined;
 
@@ -100,6 +101,7 @@ export function LoginPage() {
 
   const [mode, setMode] = useState<Mode>("login");
   const [step, setStep] = useState<Step>("contact");
+  const [registerSection, setRegisterSection] = useState<RegisterSection>("contact");
 
   // Shared fields
   const [phone, setPhone] = useState<PhoneParts>({ countryCode: DEFAULT_COUNTRY_CODE, number: "" });
@@ -113,6 +115,10 @@ export function LoginPage() {
   const [businessAddress, setBusinessAddress] = useState<AddressParts>(EMPTY_ADDRESS);
   const [businessGST, setBusinessGST] = useState("");
   const [upiId, setUpiId] = useState("");
+  const [bankAccountName, setBankAccountName] = useState("");
+  const [bankName, setBankName] = useState("");
+  const [bankAccountNumber, setBankAccountNumber] = useState("");
+  const [bankIfsc, setBankIfsc] = useState("");
   const [businessLogo, setBusinessLogo] = useState("");
   const [idProofUrl, setIdProofUrl] = useState("");
   const [addressProofUrl, setAddressProofUrl] = useState("");
@@ -165,6 +171,17 @@ const emailError =
     (mode !== "register" || (businessName.trim().length >= 3 && allPoliciesAccepted));
   const canVerifyOtp = otp.length === 6;
   const canCompleteProfile = businessName.trim().length >= 3 && allPoliciesAccepted;
+  const registerSections: { key: RegisterSection; label: string }[] = [
+    { key: "contact", label: "Contact" },
+    { key: "business", label: "Business" },
+    { key: "bank", label: "Bank" },
+    { key: "address", label: "Address" },
+    { key: "kyc", label: "KYC" },
+    { key: "policies", label: "Policies" },
+  ];
+  const registerSectionIndex = registerSections.findIndex((item) => item.key === registerSection);
+  const isFirstRegisterSection = registerSectionIndex <= 0;
+  const isLastRegisterSection = registerSectionIndex === registerSections.length - 1;
 
   function errMsg(err: unknown, fallback: string) {
     if (axios.isAxiosError(err)) {
@@ -179,6 +196,7 @@ const emailError =
   function switchMode(newMode: Mode) {
     setMode(newMode);
     setStep("contact");
+    setRegisterSection("contact");
     setError("");
     setInfo("");
     setOtp("");
@@ -189,14 +207,64 @@ const emailError =
     setWhatsappNumber({ countryCode: DEFAULT_COUNTRY_CODE, number: "" });
     setCallNumber({ countryCode: DEFAULT_COUNTRY_CODE, number: "" });
     setBusinessAddress(EMPTY_ADDRESS);
+    setBankAccountName("");
+    setBankName("");
+    setBankAccountNumber("");
+    setBankIfsc("");
   }
 
   function moveToRegisterWithContext(message: string) {
     setMode("register");
     setStep("contact");
+    setRegisterSection("contact");
     setOtp("");
     setError("");
     setInfo(message);
+  }
+
+  function getRegisterSectionError(section: RegisterSection) {
+    if (section === "contact") {
+      if (!phone.number.trim()) return "Phone number is required.";
+      if (phoneDigits.length !== 10) return "Enter a valid 10-digit phone number.";
+      if (!email.trim()) return "Email address is required.";
+      if (emailError) return emailError;
+    }
+    if (section === "business") {
+      if (!businessName.trim()) return "Business name is required.";
+      if (businessName.trim().length < 3) return "Business name should be at least 3 characters.";
+      if (!selectedBusinessCategory) return "Please select business category.";
+    }
+    if (section === "kyc") {
+      if (!idProofUrl.trim()) return "Please add ID proof before continuing.";
+      if (!addressProofUrl.trim()) return "Please add address proof before continuing.";
+    }
+    if (section === "policies" && !allPoliciesAccepted) {
+      return "Please accept all vendor policy checklist items to continue.";
+    }
+    return "";
+  }
+
+  function goToRegisterSection(nextIndex: number) {
+    const next = registerSections[nextIndex]?.key;
+    if (next) {
+      setRegisterSection(next);
+      setError("");
+      setInfo("");
+    }
+  }
+
+  async function handleRegisterSectionSubmit(e: FormEvent) {
+    e.preventDefault();
+    const sectionError = getRegisterSectionError(registerSection);
+    if (sectionError) {
+      setError(sectionError);
+      return;
+    }
+    if (!isLastRegisterSection) {
+      goToRegisterSection(registerSectionIndex + 1);
+      return;
+    }
+    await handleSendOtp(e);
   }
 
   // ── Step 1: Send OTP ─────────────────────────────────────────────────────
@@ -263,6 +331,10 @@ const emailError =
           businessAddress: formatAddress(businessAddress) || undefined,
           businessGST: businessGST.trim() || undefined,
           upiId: upiId.trim() || undefined,
+          bankAccountName: bankAccountName.trim() || undefined,
+          bankName: bankName.trim() || undefined,
+          bankAccountNumber: bankAccountNumber.trim() || undefined,
+          bankIfsc: bankIfsc.trim().toUpperCase() || undefined,
           businessLogo: businessLogo.trim() || undefined,
           idProofUrl: idProofUrl.trim() || undefined,
           addressProofUrl: addressProofUrl.trim() || undefined,
@@ -304,6 +376,10 @@ const emailError =
         businessAddress: formatAddress(businessAddress) || undefined,
         businessGST: businessGST.trim() || undefined,
         upiId: upiId.trim() || undefined,
+        bankAccountName: bankAccountName.trim() || undefined,
+        bankName: bankName.trim() || undefined,
+        bankAccountNumber: bankAccountNumber.trim() || undefined,
+        bankIfsc: bankIfsc.trim().toUpperCase() || undefined,
         businessLogo: businessLogo.trim() || undefined,
         idProofUrl: idProofUrl.trim() || undefined,
         addressProofUrl: addressProofUrl.trim() || undefined,
@@ -438,15 +514,44 @@ const emailError =
             <p className="mt-1.5 text-sm text-slate-500">
               {mode === "login"
                 ? "Enter your registered phone number and email address. We'll send a one-time password to your email."
-                : "Fill in your business details and verify your account with an email OTP."}
+                : "Complete each section, then verify your account with an email OTP."}
             </p>
+            {mode === "register" && (
+              <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50/80 p-3 dark:border-slate-700 dark:bg-slate-900/70">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-teal-700">
+                    Step {registerSectionIndex + 1} of {registerSections.length}
+                  </p>
+                </div>
+                <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
+                  {registerSections.map((item, index) => (
+                    <button
+                      key={item.key}
+                      type="button"
+                      onClick={() => {
+                        if (index <= registerSectionIndex) goToRegisterSection(index);
+                      }}
+                      className={`min-h-10 rounded-xl border px-2 py-2 text-center text-[11px] font-semibold transition ${
+                        index === registerSectionIndex
+                          ? "border-teal-500 bg-white text-teal-700 shadow-sm dark:bg-slate-950"
+                          : index < registerSectionIndex
+                            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                            : "border-slate-200 bg-white/70 text-slate-400"
+                      }`}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <form
               className={`mt-5 ${mode === "register" ? "grid gap-3 sm:grid-cols-2" : "space-y-4"}`}
-              onSubmit={handleSendOtp}
+              onSubmit={mode === "register" ? handleRegisterSectionSubmit : handleSendOtp}
             >
               {/* Phone */}
-              <label className={`block space-y-1 ${mode === "register" ? "" : ""}`}>
+              <label className={`space-y-1 ${mode === "register" && registerSection !== "contact" ? "hidden" : "block"}`}>
                 <span className="text-sm font-semibold text-slate-700">Phone number *</span>
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-[96px_minmax(0,1fr)]">
                   <input
@@ -455,21 +560,21 @@ const emailError =
                     readOnly
                     disabled
                     placeholder="+91"
-                    required
+                    required={mode === "login" || registerSection === "contact"}
                   />
                   <input
                     className="min-w-0 rounded-xl border border-slate-200 bg-white px-4 py-3 text-base text-slate-900 outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50 sm:text-sm"
                     placeholder="9876543210"
                     value={phone.number}
                     onChange={(e) => setPhone((prev) => ({ ...prev, number: e.target.value.replace(/\D/g, "").slice(0, 10) }))}
-                    required
+                    required={mode === "login" || registerSection === "contact"}
                   />
                 </div>
                 {phoneError && <span className="text-xs text-rose-600">{phoneError}</span>}
               </label>
 
               {/* Email */}
-              <label className="block space-y-1">
+              <label className={`space-y-1 ${mode === "register" && registerSection !== "contact" ? "hidden" : "block"}`}>
                 <span className="text-sm font-semibold text-slate-700">
                   Email address *
                 </span>
@@ -479,7 +584,7 @@ const emailError =
                   placeholder="you@example.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  required
+                  required={mode === "login" || registerSection === "contact"}
                 />
                 {emailError && <span className="text-xs text-rose-600">{emailError}</span>}
               </label>
@@ -488,7 +593,7 @@ const emailError =
               {mode === "register" && (
                 <>
                   {/* Divider */}
-                  <div className="sm:col-span-2 flex items-center gap-3 pt-1">
+                  <div className={`sm:col-span-2 ${registerSection === "business" ? "flex" : "hidden"} items-center gap-3 pt-1`}>
                     <div className="h-px flex-1 bg-slate-200" />
                     <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">
                       Business Info
@@ -497,24 +602,24 @@ const emailError =
                   </div>
 
                   {/* Business Name */}
-                  <label className="block space-y-1 sm:col-span-2">
+                  <label className={`space-y-1 sm:col-span-2 ${registerSection === "business" ? "block" : "hidden"}`}>
                     <span className="text-sm font-semibold text-slate-700">Business name *</span>
                     <input
                       className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50"
                       placeholder="Star Astro Academy"
                       value={businessName}
                       onChange={(e) => setBusinessName(e.target.value)}
-                      required
+                      required={registerSection === "business"}
                     />
                     {businessNameError && <span className="text-xs text-rose-600">{businessNameError}</span>}
                   </label>
-                  <label className="block space-y-1 sm:col-span-2">
+                  <label className={`space-y-1 sm:col-span-2 ${registerSection === "business" ? "block" : "hidden"}`}>
                     <span className="text-sm font-semibold text-slate-700">Business category *</span>
                     <select
                       className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50"
                       value={businessCategory}
                       onChange={(e) => setBusinessCategory(e.target.value as BusinessCategoryOption)}
-                      required
+                      required={registerSection === "business"}
                     >
                       {BUSINESS_CATEGORY_OPTIONS.map((option) => (
                         <option key={option} value={option}>{option}</option>
@@ -522,20 +627,25 @@ const emailError =
                     </select>
                   </label>
                   {businessCategory === "Other" && (
-                    <label className="block space-y-1 sm:col-span-2">
+                    <label className={`space-y-1 sm:col-span-2 ${registerSection === "business" ? "block" : "hidden"}`}>
                       <span className="text-sm font-semibold text-slate-700">Enter business category *</span>
                       <input
                         className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50"
                         value={businessCategoryOther}
                         onChange={(e) => setBusinessCategoryOther(e.target.value)}
                         placeholder="Type your business category"
-                        required
+                        required={registerSection === "business"}
                       />
                     </label>
                   )}
 
-                  {/* UPI ID */}
-                  <label className="block space-y-1">
+                  <div className={`sm:col-span-2 ${registerSection === "bank" ? "flex" : "hidden"} items-center gap-3 pt-1`}>
+                    <div className="h-px flex-1 bg-slate-200" />
+                    <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Bank & Payments</span>
+                    <div className="h-px flex-1 bg-slate-200" />
+                  </div>
+
+                  <label className={`space-y-1 ${registerSection === "bank" ? "block" : "hidden"}`}>
                     <span className="text-sm font-semibold text-slate-700">UPI ID</span>
                     <input
                       className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50"
@@ -544,24 +654,79 @@ const emailError =
                       onChange={(e) => setUpiId(e.target.value)}
                     />
                   </label>
+                  <label className={`space-y-1 ${registerSection === "bank" ? "block" : "hidden"}`}>
+                    <span className="text-sm font-semibold text-slate-700">Account holder name *</span>
+                    <input
+                      className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50"
+                      placeholder="Name as per bank account"
+                      value={bankAccountName}
+                      required={registerSection === "bank"}
+                      onChange={(e) => setBankAccountName(e.target.value)}
+                    />
+                  </label>
+                  <label className={`space-y-1 ${registerSection === "bank" ? "block" : "hidden"}`}>
+                    <span className="text-sm font-semibold text-slate-700">Bank name *</span>
+                    <input
+                      className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50"
+                      placeholder="HDFC Bank"
+                      value={bankName}
+                      required={registerSection === "bank"}
+                      onChange={(e) => setBankName(e.target.value)}
+                    />
+                  </label>
+                  <label className={`space-y-1 ${registerSection === "bank" ? "block" : "hidden"}`}>
+                    <span className="text-sm font-semibold text-slate-700">Account number *</span>
+                    <input
+                      className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50"
+                      placeholder="123456789012"
+                      value={bankAccountNumber}
+                      required={registerSection === "bank"}
+                      onChange={(e) => setBankAccountNumber(e.target.value.replace(/\D/g, ""))}
+                    />
+                  </label>
+                  <label className={`space-y-1 ${registerSection === "bank" ? "block" : "hidden"}`}>
+                    <span className="text-sm font-semibold text-slate-700">IFSC code *</span>
+                    <input
+                      className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm uppercase outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50"
+                      placeholder="HDFC0001234"
+                      value={bankIfsc}
+                      required={registerSection === "bank"}
+                      onChange={(e) => setBankIfsc(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 11))}
+                    />
+                  </label>
 
-                  <AddressFields
-                    value={businessAddress}
-                    onChange={setBusinessAddress}
-                    inputClassName="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50"
-                  />
+                  <div className={`sm:col-span-2 ${registerSection === "address" ? "flex" : "hidden"} items-center gap-3 pt-1`}>
+                    <div className="h-px flex-1 bg-slate-200" />
+                    <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Address & Contact</span>
+                    <div className="h-px flex-1 bg-slate-200" />
+                  </div>
+
+                  <div className={registerSection === "address" ? "contents" : "hidden"}>
+                    <AddressFields
+                      value={businessAddress}
+                      onChange={setBusinessAddress}
+                      inputClassName="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50"
+                    />
+                  </div>
 
                   {/* WhatsApp */}
-                  <label className="block space-y-1">
+                  <label className={`space-y-1 ${registerSection === "address" ? "block" : "hidden"}`}>
                     <span className="text-sm font-semibold text-slate-700">WhatsApp number</span>
                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-[96px_minmax(0,1fr)]">
                       <input className="min-w-0 rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50" value={whatsappNumber.countryCode} readOnly disabled placeholder="+91" />
                       <input className="min-w-0 rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50" placeholder="9876543210" value={whatsappNumber.number} onChange={(e) => setWhatsappNumber((prev) => ({ ...prev, number: e.target.value.replace(/\D/g, "").slice(0, 10) }))} />
                     </div>
                   </label>
+                  <label className={`space-y-1 ${registerSection === "address" ? "block" : "hidden"}`}>
+                    <span className="text-sm font-semibold text-slate-700">Call number</span>
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-[96px_minmax(0,1fr)]">
+                      <input className="min-w-0 rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50" value={callNumber.countryCode} readOnly disabled placeholder="+91" />
+                      <input className="min-w-0 rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50" placeholder="9876543210" value={callNumber.number} onChange={(e) => setCallNumber((prev) => ({ ...prev, number: e.target.value.replace(/\D/g, "").slice(0, 10) }))} />
+                    </div>
+                  </label>
 
                   {/* GST */}
-                  <label className="block space-y-1">
+                  <label className={`space-y-1 ${registerSection === "address" ? "block" : "hidden"}`}>
                     <span className="text-sm font-semibold text-slate-700">GST number (optional)</span>
                     <input
                       className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50"
@@ -571,12 +736,12 @@ const emailError =
                     />
                   </label>
                   {/* KYC Documents */}
-                  <div className="sm:col-span-2 flex items-center gap-3 pt-1">
+                  <div className={`sm:col-span-2 ${registerSection === "kyc" ? "flex" : "hidden"} items-center gap-3 pt-1`}>
                     <div className="h-px flex-1 bg-slate-200" />
                     <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">KYC Documents</span>
                     <div className="h-px flex-1 bg-slate-200" />
                   </div>
-                  <label className="block space-y-1 sm:col-span-2">
+                  <label className={`space-y-1 sm:col-span-2 ${registerSection === "kyc" ? "block" : "hidden"}`}>
                     <span className="text-sm font-semibold text-slate-700">ID Proof <span className="text-rose-500">*</span></span>
                     <p className="text-xs text-slate-400">Aadhaar, PAN, Passport, Voter ID, Driving Licence</p>
                     <ImageUploadField
@@ -585,7 +750,7 @@ const emailError =
                       placeholder="Paste image URL of your ID proof..."
                     />
                   </label>
-                  <label className="block space-y-1 sm:col-span-2">
+                  <label className={`space-y-1 sm:col-span-2 ${registerSection === "kyc" ? "block" : "hidden"}`}>
                     <span className="text-sm font-semibold text-slate-700">Address Proof <span className="text-rose-500">*</span></span>
                     <p className="text-xs text-slate-400">Utility bill, Bank statement, Rental agreement (up to 3 months old)</p>
                     <ImageUploadField
@@ -596,7 +761,7 @@ const emailError =
                   </label>
                 </>
               )}
-              {mode === "register" && (
+              {mode === "register" && registerSection === "policies" && (
                 <div className="sm:col-span-2 space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
                   <p className="text-sm font-semibold text-slate-700">Vendor policy checklist (required)</p>
                   {DEFAULT_VENDOR_POLICY_POINTS.map((item, index) => (
@@ -620,17 +785,36 @@ const emailError =
                 </div>
               )}
 
-              <Button
-                type="submit"
-                disabled={submitting || !canSendOtp}
-                loading={submitting}
-                fullWidth
-                className={`${
-                  mode === "register" ? "sm:col-span-2" : ""
-                }`}
-              >
-                Send OTP →
-              </Button>
+              {mode === "register" ? (
+                <div className="flex flex-col-reverse gap-2 sm:col-span-2 sm:flex-row">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    fullWidth
+                    disabled={submitting || isFirstRegisterSection}
+                    onClick={() => goToRegisterSection(registerSectionIndex - 1)}
+                  >
+                    <AppIcon name="chevronLeft" className="text-[10px]" /> Back
+                  </Button>
+                  <Button
+                    type="submit"
+                    disabled={submitting || (isLastRegisterSection && !canSendOtp)}
+                    loading={submitting}
+                    fullWidth
+                  >
+                    {isLastRegisterSection ? "Send OTP ->" : "Continue ->"}
+                  </Button>
+                </div>
+              ) : (
+                <Button
+                  type="submit"
+                  disabled={submitting || !canSendOtp}
+                  loading={submitting}
+                  fullWidth
+                >
+                  Send OTP
+                </Button>
+              )}
             </form>
           </>
         )}
@@ -758,6 +942,42 @@ const emailError =
                   placeholder="seller@okaxis"
                   value={upiId}
                   onChange={(e) => setUpiId(e.target.value)}
+                />
+              </label>
+              <label className="block space-y-1">
+                <span className="text-sm font-semibold text-slate-700">Account holder name</span>
+                <input
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50"
+                  placeholder="Name as per bank account"
+                  value={bankAccountName}
+                  onChange={(e) => setBankAccountName(e.target.value)}
+                />
+              </label>
+              <label className="block space-y-1">
+                <span className="text-sm font-semibold text-slate-700">Bank name</span>
+                <input
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50"
+                  placeholder="HDFC Bank"
+                  value={bankName}
+                  onChange={(e) => setBankName(e.target.value)}
+                />
+              </label>
+              <label className="block space-y-1">
+                <span className="text-sm font-semibold text-slate-700">Account number</span>
+                <input
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50"
+                  placeholder="123456789012"
+                  value={bankAccountNumber}
+                  onChange={(e) => setBankAccountNumber(e.target.value.replace(/\D/g, ""))}
+                />
+              </label>
+              <label className="block space-y-1">
+                <span className="text-sm font-semibold text-slate-700">IFSC code</span>
+                <input
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm uppercase outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50"
+                  placeholder="HDFC0001234"
+                  value={bankIfsc}
+                  onChange={(e) => setBankIfsc(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 11))}
                 />
               </label>
               <AddressFields

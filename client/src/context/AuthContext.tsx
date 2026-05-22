@@ -29,6 +29,10 @@ interface RegisterInput {
   businessAddress?: string;
   businessGST?: string;
   upiId?: string;
+  bankAccountName?: string;
+  bankName?: string;
+  bankAccountNumber?: string;
+  bankIfsc?: string;
   businessLogo?: string;
   whatsappNumber?: string;
   callNumber?: string;
@@ -46,6 +50,10 @@ interface UpdateProfileInput {
   businessAddress?: string;
   businessGST?: string;
   upiId?: string;
+  bankAccountName?: string;
+  bankName?: string;
+  bankAccountNumber?: string;
+  bankIfsc?: string;
   profileImageUrl?: string;
   businessLogo?: string;
   favicon?: string;
