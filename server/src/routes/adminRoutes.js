@@ -1,6 +1,7 @@
 const express = require("express");
 const jwt = require("jsonwebtoken");
 const Seller = require("../models/Seller");
+const { ADMIN_SELLER_OMIT, toAdminSellerView } = require("../utils/adminSellerView");
 
 const router = express.Router();
 
@@ -53,13 +54,28 @@ router.get("/sellers", adminAuth, async (req, res) => {
         : {};
 
     const sellers = await Seller.find(query)
-      .select(
-        "businessName businessEmail phone approvalStatus createdAt updatedAt slug upiId businessAddress businessGST businessLogo favicon whatsappNumber callNumber approvedAt approvedBy idProofUrl addressProofUrl storePublished publishRequestedAt"
-      )
+      .select(ADMIN_SELLER_OMIT)
       .sort({ createdAt: -1 });
-    return res.json({ sellers });
+
+    return res.json({
+      sellers: sellers.map((seller) => toAdminSellerView(seller)),
+    });
   } catch (_error) {
     return res.status(500).json({ message: "Unable to fetch sellers" });
+  }
+});
+
+router.get("/sellers/:sellerId", adminAuth, async (req, res) => {
+  try {
+    const seller = await Seller.findById(req.params.sellerId).select(ADMIN_SELLER_OMIT);
+
+    if (!seller) {
+      return res.status(404).json({ message: "Seller not found" });
+    }
+
+    return res.json({ seller: toAdminSellerView(seller) });
+  } catch (_error) {
+    return res.status(500).json({ message: "Unable to fetch seller details" });
   }
 });
 
@@ -91,15 +107,11 @@ router.patch("/sellers/:sellerId/approval", adminAuth, async (req, res) => {
     }
 
     await seller.save();
+
+    const refreshed = await Seller.findById(seller._id).select(ADMIN_SELLER_OMIT);
+
     return res.json({
-      seller: {
-        _id: seller._id,
-        businessName: seller.businessName,
-        phone: seller.phone,
-        approvalStatus: seller.approvalStatus,
-        storePublished: seller.storePublished,
-        approvedAt: seller.approvedAt,
-      },
+      seller: toAdminSellerView(refreshed),
     });
   } catch (_error) {
     return res.status(500).json({ message: "Unable to update seller approval" });

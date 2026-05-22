@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { api } from "../api/client";
 import { AppIcon } from "../components/ui/AppIcon";
 import { Button } from "../components/ui/Button";
@@ -14,9 +14,115 @@ type SortBy = "latest" | "oldest" | "business";
 const ADMIN_TOKEN_KEY = "zensos_admin_token";
 
 function statusBadge(status: ApprovalStatus) {
-  if (status === "approved") return "bg-emerald-100 text-emerald-700 border-emerald-200";
-  if (status === "rejected") return "bg-rose-100 text-rose-700 border-rose-200";
-  return "bg-amber-100 text-amber-700 border-amber-200";
+  if (status === "approved") return "bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800";
+  if (status === "rejected") return "bg-rose-100 text-rose-700 border-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800";
+  return "bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800";
+}
+
+function displayValue(value?: string | null) {
+  const trimmed = String(value || "").trim();
+  return trimmed || "Not added";
+}
+
+function formatPaymentMode(mode?: Seller["paymentMode"]) {
+  if (mode === "cod_only") return "COD only";
+  if (mode === "both") return "Prepaid + COD";
+  if (mode === "prepaid_only") return "Prepaid only";
+  return "";
+}
+
+function formatDeliveryMode(mode?: Seller["deliveryMode"]) {
+  if (mode === "flat_rate") return "Flat delivery charge";
+  if (mode === "always_free") return "Always free delivery";
+  return "";
+}
+
+function DetailCell({ label, value }: { label: string; value?: string | null }) {
+  const text = displayValue(value);
+  const isMissing = text === "Not added";
+  return (
+    <div className="min-w-0 rounded-2xl border border-slate-100 bg-slate-50/80 px-3 py-2.5 dark:border-slate-800 dark:bg-slate-900/50">
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">{label}</p>
+      <p
+        className={`mt-1 break-words text-sm font-semibold ${
+          isMissing ? "text-slate-400 dark:text-slate-500" : "text-slate-800 dark:text-slate-100"
+        }`}
+      >
+        {text}
+      </p>
+    </div>
+  );
+}
+
+function SectionCard({
+  title,
+  eyebrow,
+  icon,
+  children,
+  className = "",
+}: {
+  title: string;
+  eyebrow?: string;
+  icon: ReactNode;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <article
+      className={`rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card dark:border-teal-900/35 dark:bg-gradient-to-br dark:from-slate-950 dark:to-slate-900 ${className}`}
+    >
+      <div className="mb-4 flex items-start justify-between gap-3">
+        <div>
+          {eyebrow ? (
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-teal-600 dark:text-teal-300">
+              {eyebrow}
+            </p>
+          ) : null}
+          <h4 className="font-heading text-base font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2 mt-0.5">
+            {icon}
+            {title}
+          </h4>
+        </div>
+      </div>
+      {children}
+    </article>
+  );
+}
+
+function DocumentPreview({
+  label,
+  hint,
+  url,
+}: {
+  label: string;
+  hint: string;
+  url?: string;
+}) {
+  const trimmed = String(url || "").trim();
+  return (
+    <div className="space-y-2 rounded-2xl border border-slate-100 bg-slate-50/60 p-3 dark:border-slate-800 dark:bg-slate-900/40">
+      <div>
+        <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">{label}</p>
+        <p className="text-xs text-slate-400">{hint}</p>
+      </div>
+      {trimmed ? (
+        <a href={trimmed} target="_blank" rel="noreferrer" className="block group">
+          <img
+            src={trimmed}
+            alt={label}
+            className="h-36 w-full rounded-xl border border-slate-200 object-cover transition group-hover:opacity-90 dark:border-slate-700"
+          />
+          <span className="mt-2 inline-flex text-xs font-semibold text-teal-700 dark:text-teal-300">
+            Open full image
+          </span>
+        </a>
+      ) : (
+        <div className="flex h-36 items-center justify-center rounded-xl border border-dashed border-slate-200 bg-white text-sm font-semibold text-slate-400 dark:border-slate-700 dark:bg-slate-950">
+          Not uploaded
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function AdminPage() {
@@ -32,6 +138,7 @@ export function AdminPage() {
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState<SortBy>("latest");
   const [selectedSeller, setSelectedSeller] = useState<Seller | null>(null);
+  const [loadingSellerDetail, setLoadingSellerDetail] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
@@ -107,6 +214,28 @@ export function AdminPage() {
     setSuccess("");
   }
 
+  async function openSellerDetail(seller: Seller) {
+    setSelectedSeller(seller);
+    if (!token) return;
+
+    setLoadingSellerDetail(true);
+    try {
+      const response = await api.get<{ seller: Seller }>(`/admin/sellers/${seller._id}`, {
+        headers: authHeaders,
+      });
+      setSelectedSeller(response.data.seller);
+    } catch {
+      setError("Unable to load full seller details.");
+    } finally {
+      setLoadingSellerDetail(false);
+    }
+  }
+
+  function closeSellerDetail() {
+    setSelectedSeller(null);
+    setLoadingSellerDetail(false);
+  }
+
   async function updateApproval(
     sellerId: string,
     nextStatus: ApprovalStatus,
@@ -116,20 +245,18 @@ export function AdminPage() {
     setError("");
     setSuccess("");
     try {
-      await api.patch(
+      const response = await api.patch<{ seller: Seller }>(
         `/admin/sellers/${sellerId}/approval`,
         { status: nextStatus },
         { headers: authHeaders }
       );
       setSuccess(`Seller marked as ${nextStatus}.`);
       await loadSellers(status);
-      if (selectedSeller?._id === sellerId) {
-        setSelectedSeller((prev) =>
-          prev ? { ...prev, approvalStatus: nextStatus } : prev
-        );
+      if (selectedSeller?._id === sellerId && response.data.seller) {
+        setSelectedSeller(response.data.seller);
       }
       if (closeModal) {
-        setSelectedSeller(null);
+        closeSellerDetail();
       }
     } catch {
       setError("Unable to update approval status.");
@@ -365,7 +492,7 @@ export function AdminPage() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex justify-end gap-2">
-                        <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => setSelectedSeller(seller)}>
+                        <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => void openSellerDetail(seller)}>
                           View
                         </Button>
                         <Button variant="success" className="px-2.5 py-1 text-xs" onClick={() => void updateApproval(seller._id, "approved")}>
@@ -407,7 +534,7 @@ export function AdminPage() {
                 </span>
               </div>
               <div className="flex flex-wrap gap-2">
-                <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => setSelectedSeller(seller)}>View</Button>
+                <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => void openSellerDetail(seller)}>View</Button>
                 <Button variant="success" className="px-2.5 py-1 text-xs" onClick={() => void updateApproval(seller._id, "approved")}>Approve</Button>
                 <Button variant="danger" className="px-2.5 py-1 text-xs" onClick={() => void updateApproval(seller._id, "rejected")}>Reject</Button>
               </div>
@@ -418,119 +545,263 @@ export function AdminPage() {
 
       {/* Seller detail modal */}
       {selectedSeller ? (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/55 px-3 py-3 sm:items-center sm:px-4">
-          <Card className="w-full max-w-6xl space-y-4 max-h-[92vh] overflow-y-auto p-4 sm:p-5">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <p className="text-xs font-bold uppercase tracking-[0.14em] text-teal-700 dark:text-teal-300">Seller Details</p>
-                <h3 className="font-heading text-2xl font-bold text-slate-900 dark:text-slate-100">{selectedSeller.businessName}</h3>
-              </div>
-              <Button variant="secondary" onClick={() => setSelectedSeller(null)} className="w-full sm:w-auto">Close</Button>
-            </div>
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/70">
-                <p className="text-xs uppercase tracking-wide text-slate-500">Business Name</p>
-                <p className="mt-1 font-semibold text-slate-900 dark:text-slate-100">{selectedSeller.businessName || "—"}</p>
-              </div>
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/70">
-                <p className="text-xs uppercase tracking-wide text-slate-500">Phone</p>
-                <p className="mt-1 font-semibold text-slate-900 dark:text-slate-100">{selectedSeller.phone}</p>
-              </div>
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/70">
-                <p className="text-xs uppercase tracking-wide text-slate-500">Email</p>
-                <p className="mt-1 font-semibold text-slate-900 dark:text-slate-100">{selectedSeller.businessEmail || "—"}</p>
-              </div>
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/70">
-                <p className="text-xs uppercase tracking-wide text-slate-500">Store Slug</p>
-                <p className="mt-1 font-semibold text-slate-900 dark:text-slate-100">{selectedSeller.slug || "—"}</p>
-                {selectedSeller.slug ? (
-                  <a
-                    href={getAdminPreviewUrl(selectedSeller)}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="mt-2 inline-flex rounded-lg border border-teal-200 bg-teal-50 px-3 py-1.5 text-xs font-semibold text-teal-700 hover:bg-teal-100"
-                  >
-                    Open Store
-                  </a>
-                ) : null}
-              </div>
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/70">
-                <p className="text-xs uppercase tracking-wide text-slate-500">UPI ID</p>
-                <p className="mt-1 font-semibold text-slate-900 dark:text-slate-100">{selectedSeller.upiId || "—"}</p>
-              </div>
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/70">
-                <p className="text-xs uppercase tracking-wide text-slate-500">GST Number</p>
-                <p className="mt-1 font-semibold text-slate-900 dark:text-slate-100">{selectedSeller.businessGST || "—"}</p>
-              </div>
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/70">
-                <p className="text-xs uppercase tracking-wide text-slate-500">WhatsApp</p>
-                <p className="mt-1 font-semibold text-slate-900 dark:text-slate-100">{selectedSeller.whatsappNumber || "—"}</p>
-              </div>
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/70">
-                <p className="text-xs uppercase tracking-wide text-slate-500">Call Number</p>
-                <p className="mt-1 font-semibold text-slate-900 dark:text-slate-100">{selectedSeller.callNumber || "—"}</p>
-              </div>
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/70 md:col-span-2 xl:col-span-3">
-                <p className="text-xs uppercase tracking-wide text-slate-500">Address</p>
-                <p className="mt-1 font-semibold text-slate-900 dark:text-slate-100">{selectedSeller.businessAddress || "—"}</p>
-              </div>
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/70">
-                <p className="text-xs uppercase tracking-wide text-slate-500">Business Logo</p>
-                {selectedSeller.businessLogo ? (
-                  <a href={selectedSeller.businessLogo} target="_blank" rel="noreferrer" className="mt-2 block">
-                    <img src={selectedSeller.businessLogo} alt="Business Logo" className="h-28 w-full rounded-xl border border-slate-200 bg-white object-contain" />
-                  </a>
-                ) : (
-                  <p className="mt-1 font-semibold text-slate-900 dark:text-slate-100">-</p>
-                )}
-              </div>
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/70">
-                <p className="text-xs uppercase tracking-wide text-slate-500">Favicon</p>
-                {selectedSeller.favicon ? (
-                  <a href={selectedSeller.favicon} target="_blank" rel="noreferrer" className="mt-2 inline-block">
-                    <img src={selectedSeller.favicon} alt="Favicon" className="h-20 w-20 rounded-xl border border-slate-200 bg-white object-contain" />
-                  </a>
-                ) : (
-                  <p className="mt-1 font-semibold text-slate-900 dark:text-slate-100">-</p>
-                )}
-              </div>
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/70">
-                <p className="text-xs uppercase tracking-wide text-slate-500">ID Proof</p>
-                {selectedSeller.idProofUrl ? (
-                  <a href={selectedSeller.idProofUrl} target="_blank" rel="noreferrer" className="mt-2 block">
-                    <img src={selectedSeller.idProofUrl} alt="ID Proof" className="h-32 w-full rounded-xl border border-slate-200 object-cover" />
-                  </a>
-                ) : (
-                  <p className="mt-1 font-semibold text-slate-900 dark:text-slate-100">-</p>
-                )}
-              </div>
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/70">
-                <p className="text-xs uppercase tracking-wide text-slate-500">Address Proof</p>
-                {selectedSeller.addressProofUrl ? (
-                  <a href={selectedSeller.addressProofUrl} target="_blank" rel="noreferrer" className="mt-2 block">
-                    <img src={selectedSeller.addressProofUrl} alt="Address Proof" className="h-32 w-full rounded-xl border border-slate-200 object-cover" />
-                  </a>
-                ) : (
-                  <p className="mt-1 font-semibold text-slate-900 dark:text-slate-100">-</p>
-                )}
-              </div>
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/70">
-                <p className="text-xs uppercase tracking-wide text-slate-500">Registered</p>
-                <p className="mt-1 font-semibold text-slate-900 dark:text-slate-100">{new Date(selectedSeller.createdAt || "").toLocaleString("en-IN")}</p>
-              </div>
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/70">
-                <p className="text-xs uppercase tracking-wide text-slate-500">Current status</p>
-                <span className={`mt-1 inline-block rounded-full border px-2.5 py-1 text-xs font-semibold capitalize ${statusBadge((selectedSeller.approvalStatus || status) as ApprovalStatus)}`}>
-                  {selectedSeller.approvalStatus || status}
-                </span>
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/55 px-3 py-3 backdrop-blur-sm sm:items-center sm:px-4"
+          onClick={closeSellerDetail}
+        >
+          <div
+            className="flex max-h-[94vh] w-full max-w-4xl flex-col overflow-hidden rounded-[28px] border border-slate-200/80 bg-white shadow-[0_24px_80px_rgba(15,23,42,0.2)] dark:border-slate-800 dark:bg-slate-950"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="shrink-0 border-b border-slate-200 bg-gradient-to-r from-white via-teal-50/60 to-sky-50/50 px-5 py-4 dark:border-slate-800 dark:from-slate-950 dark:via-slate-900 dark:to-slate-900 sm:px-6">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0">
+                  <p className="text-xs font-bold uppercase tracking-[0.18em] text-teal-700 dark:text-teal-300">
+                    Seller review
+                  </p>
+                  <h3 className="mt-1 font-heading text-2xl font-bold text-slate-900 dark:text-slate-100 truncate">
+                    {selectedSeller.businessName || "Unnamed business"}
+                  </h3>
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                    <span>Slug: <span className="font-semibold text-slate-700 dark:text-slate-200">{selectedSeller.slug || "—"}</span></span>
+                    <span className={`rounded-full border px-2.5 py-0.5 text-xs font-semibold capitalize ${statusBadge((selectedSeller.approvalStatus || status) as ApprovalStatus)}`}>
+                      {selectedSeller.approvalStatus || status}
+                    </span>
+                    {selectedSeller.createdAt ? (
+                      <span>Joined {new Date(selectedSeller.createdAt).toLocaleDateString("en-IN")}</span>
+                    ) : null}
+                  </div>
+                </div>
+                <div className="flex shrink-0 flex-wrap gap-2">
+                  {selectedSeller.slug ? (
+                    <a
+                      href={getAdminPreviewUrl(selectedSeller)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-teal-200 bg-teal-50 px-3 py-2 text-xs font-semibold text-teal-700 hover:bg-teal-100 dark:border-teal-800 dark:bg-teal-950/50 dark:text-teal-300"
+                    >
+                      <AppIcon name="website" className="text-[13px]" />
+                      Preview store
+                    </a>
+                  ) : null}
+                  <Button variant="secondary" onClick={closeSellerDetail} className="px-3 py-2 text-xs">
+                    <AppIcon name="close" className="text-[12px]" />
+                    Close
+                  </Button>
+                </div>
               </div>
             </div>
-            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-              <Button variant="success" onClick={() => void updateApproval(selectedSeller._id, "approved",true)} className="w-full sm:w-auto">Approve</Button>
-              <Button variant="danger" onClick={() => void updateApproval(selectedSeller._id, "rejected",true)} className="w-full sm:w-auto">Reject</Button>
-              <Button variant="secondary" onClick={() => void updateApproval(selectedSeller._id, "pending",true)} className="w-full sm:w-auto">Move to Pending</Button>
+
+            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
+              {loadingSellerDetail ? (
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm font-semibold text-slate-500 dark:border-slate-800 dark:bg-slate-900/50 dark:text-slate-400">
+                  Loading full seller profile…
+                </div>
+              ) : null}
+              <SectionCard
+                eyebrow="Registered details"
+                title="Business profile"
+                icon={
+                  <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-teal-50 text-teal-600 text-sm dark:bg-teal-950/60">
+                    🏢
+                  </span>
+                }
+              >
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <DetailCell label="Business name" value={selectedSeller.businessName} />
+                  <DetailCell label="Category" value={selectedSeller.businessCategory} />
+                  <DetailCell label="Business email" value={selectedSeller.businessEmail} />
+                  <DetailCell label="Registered phone" value={selectedSeller.phone} />
+                  <DetailCell label="GST number" value={selectedSeller.businessGST} />
+                  <DetailCell label="Business address" value={selectedSeller.businessAddress} />
+                </div>
+              </SectionCard>
+
+              <SectionCard
+                title="Bank & payments"
+                icon={
+                  <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600 text-sm dark:bg-emerald-950/50">
+                    ₹
+                  </span>
+                }
+              >
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <DetailCell label="UPI ID" value={selectedSeller.upiId} />
+                  <DetailCell label="Account holder" value={selectedSeller.bankAccountName} />
+                  <DetailCell label="Bank name" value={selectedSeller.bankName} />
+                  <DetailCell label="Account number" value={selectedSeller.bankAccountNumber} />
+                  <DetailCell label="IFSC code" value={selectedSeller.bankIfsc} />
+                </div>
+              </SectionCard>
+
+              <SectionCard
+                title="Contact details"
+                icon={
+                  <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-sky-600 text-white">
+                    <AppIcon name="phone" className="text-[10px]" />
+                  </span>
+                }
+              >
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <DetailCell label="WhatsApp" value={selectedSeller.whatsappNumber} />
+                  <DetailCell label="Call number" value={selectedSeller.callNumber} />
+                </div>
+              </SectionCard>
+
+              <SectionCard
+                title="Store settings"
+                icon={
+                  <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 text-sm dark:bg-indigo-950/50">
+                    <AppIcon name="store" className="text-[12px]" />
+                  </span>
+                }
+              >
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <DetailCell label="Payment mode" value={formatPaymentMode(selectedSeller.paymentMode)} />
+                  <DetailCell label="Delivery mode" value={formatDeliveryMode(selectedSeller.deliveryMode)} />
+                  <DetailCell
+                    label="Default delivery charge"
+                    value={
+                      selectedSeller.defaultDeliveryCharge != null
+                        ? `₹${selectedSeller.defaultDeliveryCharge}`
+                        : ""
+                    }
+                  />
+                  <DetailCell
+                    label="Free delivery above"
+                    value={
+                      selectedSeller.freeDeliveryThreshold != null
+                        ? `₹${selectedSeller.freeDeliveryThreshold}`
+                        : ""
+                    }
+                  />
+                  <DetailCell
+                    label="Store published"
+                    value={selectedSeller.storePublished ? "Yes" : "No"}
+                  />
+                  <DetailCell
+                    label="Approved by"
+                    value={selectedSeller.approvedBy}
+                  />
+                </div>
+              </SectionCard>
+
+              <SectionCard
+                title="Branding"
+                icon={
+                  <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-violet-50 text-violet-600 text-sm dark:bg-violet-950/50">
+                    ✦
+                  </span>
+                }
+              >
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Business logo</p>
+                    {selectedSeller.businessLogo ? (
+                      <a href={selectedSeller.businessLogo} target="_blank" rel="noreferrer" className="block">
+                        <img
+                          src={selectedSeller.businessLogo}
+                          alt="Business logo"
+                          className="h-32 w-full rounded-xl border border-slate-200 bg-white object-contain dark:border-slate-700"
+                        />
+                      </a>
+                    ) : (
+                      <div className="flex h-32 items-center justify-center rounded-xl border border-dashed border-slate-200 text-sm text-slate-400">
+                        Not uploaded
+                      </div>
+                    )}
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Favicon</p>
+                    {selectedSeller.favicon ? (
+                      <a href={selectedSeller.favicon} target="_blank" rel="noreferrer" className="inline-block">
+                        <img
+                          src={selectedSeller.favicon}
+                          alt="Favicon"
+                          className="h-24 w-24 rounded-xl border border-slate-200 bg-white object-contain dark:border-slate-700"
+                        />
+                      </a>
+                    ) : (
+                      <div className="flex h-24 w-24 items-center justify-center rounded-xl border border-dashed border-slate-200 text-sm text-slate-400">
+                        Not uploaded
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </SectionCard>
+
+              <SectionCard
+                title="KYC documents"
+                icon={
+                  <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-amber-50 text-amber-600 text-sm dark:bg-amber-950/50">
+                    🪪
+                  </span>
+                }
+              >
+                <p className="-mt-2 mb-4 text-xs text-slate-500">
+                  Verify identity and address proofs before approving the store.
+                </p>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <DocumentPreview
+                    label="ID proof"
+                    hint="Aadhaar, PAN, Passport, Voter ID, Driving Licence"
+                    url={selectedSeller.idProofUrl}
+                  />
+                  <DocumentPreview
+                    label="Address proof"
+                    hint="Utility bill, bank statement, rental agreement"
+                    url={selectedSeller.addressProofUrl}
+                  />
+                </div>
+              </SectionCard>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <DetailCell
+                  label="Publish requested"
+                  value={
+                    selectedSeller.publishRequestedAt
+                      ? new Date(selectedSeller.publishRequestedAt).toLocaleString("en-IN")
+                      : ""
+                  }
+                />
+                <DetailCell
+                  label="Approved at"
+                  value={
+                    selectedSeller.approvedAt
+                      ? new Date(selectedSeller.approvedAt).toLocaleString("en-IN")
+                      : ""
+                  }
+                />
+              </div>
             </div>
-          </Card>
+
+            <div className="shrink-0 border-t border-slate-200 bg-slate-50/80 px-4 py-3 dark:border-slate-800 dark:bg-slate-900/80 sm:px-6">
+              <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
+                <Button
+                  variant="success"
+                  onClick={() => void updateApproval(selectedSeller._id, "approved", true)}
+                  className="w-full sm:w-auto"
+                >
+                  <AppIcon name="check" className="text-[14px]" />
+                  Approve
+                </Button>
+                <Button
+                  variant="danger"
+                  onClick={() => void updateApproval(selectedSeller._id, "rejected", true)}
+                  className="w-full sm:w-auto"
+                >
+                  Reject
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() => void updateApproval(selectedSeller._id, "pending", true)}
+                  className="w-full sm:w-auto"
+                >
+                  Move to pending
+                </Button>
+              </div>
+            </div>
+          </div>
         </div>
       ) : null}
     </main>
