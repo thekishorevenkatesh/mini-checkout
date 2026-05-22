@@ -17,6 +17,12 @@ import {
   type PhoneParts,
 } from "../utils/contactFields";
 import type { PaymentMethod, Product, Seller, VariantItem } from "../types";
+import {
+  collectCategoryTabs,
+  getProductCategories,
+  groupProductsByCategory,
+  productMatchesCategory,
+} from "../utils/productCategories";
 
 type CartItem = {
   productId: string;
@@ -485,17 +491,18 @@ export function PublicStorePage() {
 
   // Derived: category list
   const categoryTabs = useMemo(() => {
-    const cats = [...new Set(products.map(p => p.category).filter(Boolean))];
+    const cats = collectCategoryTabs(products);
     return ["All", ...cats];
   }, [products]);
 
   // Filtered + sorted products for discovery UX
   const visibleProducts = useMemo(() => {
     const filtered = products.filter((p) => {
-      if (activeCategory !== "All" && p.category !== activeCategory) return false;
+      if (activeCategory !== "All" && !productMatchesCategory(p, activeCategory)) return false;
       if (searchQuery.trim()) {
         const q = searchQuery.trim().toLowerCase();
-        const text = `${p.title} ${p.description || ""} ${p.category || ""}`.toLowerCase();
+        const categoryText = getProductCategories(p).join(" ");
+        const text = `${p.title} ${p.description || ""} ${p.category || ""} ${categoryText}`.toLowerCase();
         if (!text.includes(q)) return false;
       }
       if (maxPriceFilter !== null) {
@@ -1384,12 +1391,7 @@ export function PublicStorePage() {
             );
           }
           if (activeCategory === "All" && !searchQuery.trim() && maxPriceFilter === null) {
-            const categorized = new Map<string, Product[]>();
-            for (const p of visibleProducts) {
-              const cat = p.category || "Other";
-              if (!categorized.has(cat)) categorized.set(cat, []);
-              categorized.get(cat)!.push(p);
-            }
+            const categorized = groupProductsByCategory(visibleProducts);
             return (
               <div className="space-y-6">
                 {Array.from(categorized.entries()).map(([cat, prods]) => (

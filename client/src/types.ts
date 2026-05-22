@@ -71,6 +71,7 @@ export interface Product {
   seller: Seller | string;
   title: string;
   category: string;
+  categories?: string[];
   description: string;
   imageUrl: string;
   imageUrls?: string[];

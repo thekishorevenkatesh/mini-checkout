@@ -178,6 +178,40 @@ function normalizeProductTitle(value = "") {
   return String(value || "").trim().slice(0, PRODUCT_TITLE_MAX_LENGTH);
 }
 
+function normalizeProductCategories({ category, categories } = {}) {
+  const fromArray = Array.isArray(categories)
+    ? categories.map((tag) => String(tag || "").trim()).filter(Boolean)
+    : [];
+  const fromLegacy = String(category || "")
+    .split(",")
+    .map((tag) => tag.trim())
+    .filter(Boolean);
+  const unique = [...new Set([...fromArray, ...fromLegacy])];
+
+  return {
+    categories: unique,
+    category: unique.join(", "),
+  };
+}
+
+async function syncSellerCategoryTags(seller, categoryTags = []) {
+  if (!seller || !Array.isArray(categoryTags) || categoryTags.length === 0) {
+    return;
+  }
+
+  let changed = false;
+  for (const tag of categoryTags) {
+    if (tag && !seller.categories.includes(tag)) {
+      seller.categories.push(tag);
+      changed = true;
+    }
+  }
+
+  if (changed) {
+    await seller.save();
+  }
+}
+
 function isValidEmail(email) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || "").trim());
 }
@@ -196,12 +230,14 @@ router.post("/", auth, async (req, res) => {
       price,
       mrp,
       category,
+      categories,
       variants,
       variantItems,
       variantPrices,
       variantMrps,
     } = req.body;
 
+    const normalizedCategories = normalizeProductCategories({ category, categories });
     const parsedVariants = Array.isArray(variants) ? variants : [];
     const normalizedVariantPrices = normalizeVariantPrices(variantPrices);
     const normalizedVariantMrps = normalizeVariantMrps(variantMrps);
@@ -281,18 +317,15 @@ router.post("/", auth, async (req, res) => {
       uom: uom ? String(uom).trim() : "",
       price: hasBasePrice ? Number(price) : 0,
       mrp: mrp ? Number(mrp) : 0,
-      category: category ? String(category).trim() : "",
+      category: normalizedCategories.category,
+      categories: normalizedCategories.categories,
       variants: parsedVariants,
       variantItems: nextVariantItems,
       variantPrices: normalizedVariantPrices,
       variantMrps: normalizedVariantMrps,
     });
 
-    // Ensure category is tracked in seller's categories list
-    if (category && !seller.categories.includes(String(category).trim())) {
-      seller.categories.push(String(category).trim());
-      await seller.save();
-    }
+    await syncSellerCategoryTags(seller, normalizedCategories.categories);
 
     return res.status(201).json({ product });
   } catch (error) {
@@ -385,6 +418,7 @@ router.put("/:productId", auth, async (req, res) => {
       price,
       mrp,
       category,
+      categories,
       variants,
       variantItems,
       variantPrices,
@@ -452,7 +486,14 @@ router.put("/:productId", auth, async (req, res) => {
     if (uom !== undefined) product.uom = String(uom).trim();
     if (price !== undefined) product.price = Number(price) || 0;
     if (mrp !== undefined) product.mrp = Number(mrp);
-    if (category !== undefined) product.category = String(category).trim();
+    if (category !== undefined || categories !== undefined) {
+      const normalizedCategories = normalizeProductCategories({
+        category: category !== undefined ? category : product.category,
+        categories: categories !== undefined ? categories : product.categories,
+      });
+      product.category = normalizedCategories.category;
+      product.categories = normalizedCategories.categories;
+    }
     if (Array.isArray(variants)) product.variants = variants;
     if (variantItems !== undefined) {
       product.variantItems =
@@ -477,13 +518,9 @@ router.put("/:productId", auth, async (req, res) => {
 
     await product.save();
 
-    // Keep seller categories in sync
-    if (category) {
+    if (category !== undefined || categories !== undefined) {
       const seller = await Seller.findById(req.sellerId);
-      if (seller && !seller.categories.includes(String(category).trim())) {
-        seller.categories.push(String(category).trim());
-        await seller.save();
-      }
+      await syncSellerCategoryTags(seller, product.categories);
     }
 
     return res.json({ product });

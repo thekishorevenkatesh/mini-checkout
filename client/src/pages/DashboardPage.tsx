@@ -19,6 +19,11 @@ import {
 } from "../utils/contactFields";
 import type { Order, OrderStatus, Product, SocialLink, Banner, PaymentMode } from "../types";
 import { compressImage } from "../utils/imageCompressor";
+import {
+  getProductCategories,
+  joinCategoryTags,
+  productMatchesCategory,
+} from "../utils/productCategories";
 
 type Tab = "dashboard" | "store" | "products" | "orders" | "reports" | "profile" | "policies";
 type ProductFormVariant = {
@@ -38,14 +43,6 @@ const emptyProductForm: ProductForm = {
   title: "", description: "", price: "", mrp: "", packSize: "", uom: "",
   imageUrls: [""], notes: "", categories: [], categoryInput: "", variants: [],
 };
-
-function parseCategoryTags(rawCategory: string) {
-  return rawCategory.split(",").map((tag) => tag.trim()).filter(Boolean);
-}
-
-function joinCategoryTags(tags: string[]) {
-  return tags.map((tag) => tag.trim()).filter(Boolean).join(", ");
-}
 
 const statusClasses: Record<OrderStatus, string> = {
   pending:   "bg-amber-100 text-amber-700 border-amber-200",
@@ -813,7 +810,7 @@ export function DashboardPage() {
       uom: prod.uom || "",
       imageUrls: getProductImages(prod).length > 0 ? getProductImages(prod) : [""],
       notes: prod.notes || "",
-      categories: parseCategoryTags(prod.category || ""),
+      categories: getProductCategories(prod),
       categoryInput: "",
       variants: variantRows,
     });
@@ -899,6 +896,7 @@ export function DashboardPage() {
         imageUrls: normalizedImages,
         notes: productForm.notes.trim(),
         category: catTrimmed,
+        categories: selectedCategories,
         variants: hasVariants ? [{ label: "Variant", options: variantPayload.map(v => v.option) }] : [],
         variantItems,
         variantPrices,
@@ -1902,8 +1900,9 @@ export function DashboardPage() {
               {products
                 .filter(prod => {
                   const q = catalogSearch.trim().toLowerCase();
-                  const matchSearch = !q || prod.title.toLowerCase().includes(q) || (prod.category || "").toLowerCase().includes(q);
-                  const matchCat = !catalogCategory || prod.category === catalogCategory;
+                  const categoryText = getProductCategories(prod).join(" ").toLowerCase();
+                  const matchSearch = !q || prod.title.toLowerCase().includes(q) || categoryText.includes(q) || (prod.category || "").toLowerCase().includes(q);
+                  const matchCat = productMatchesCategory(prod, catalogCategory);
                   return matchSearch && matchCat;
                 })
                 .map(prod => (
@@ -1912,9 +1911,18 @@ export function DashboardPage() {
                     {getProductImages(prod)[0] && <img src={getProductImages(prod)[0]} alt="" className="h-12 w-12 rounded-lg object-cover" />}
                     <div className="flex-1 min-w-0">
                       <p className="font-semibold text-slate-800 truncate break-words">{prod.title}</p>
-                      {prod.category && (
-                        <span className="inline-block mt-0.5 rounded-full border border-teal-200 bg-teal-50 px-2 py-0.5 text-xs font-semibold text-teal-700">{prod.category}</span>
-                      )}
+                      {getProductCategories(prod).length > 0 ? (
+                        <div className="mt-0.5 flex flex-wrap gap-1">
+                          {getProductCategories(prod).map((tag) => (
+                            <span
+                              key={`${prod._id}-${tag}`}
+                              className="inline-block rounded-full border border-teal-200 bg-teal-50 px-2 py-0.5 text-xs font-semibold text-teal-700"
+                            >
+                              {tag}
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
                       <div className="flex gap-2 mt-1">
                         <span className="text-sm font-bold text-slate-900">₹{prod.price}</span>
                         {prod.mrp > 0 && prod.mrp > prod.price && (
@@ -1955,7 +1963,11 @@ export function DashboardPage() {
               ))}
               {!loading && products.filter(p => {
                 const q = catalogSearch.trim().toLowerCase();
-                return (!q || p.title.toLowerCase().includes(q) || (p.category||'').toLowerCase().includes(q)) && (!catalogCategory || p.category === catalogCategory);
+                const categoryText = getProductCategories(p).join(" ").toLowerCase();
+                return (
+                  (!q || p.title.toLowerCase().includes(q) || categoryText.includes(q) || (p.category || "").toLowerCase().includes(q))
+                  && productMatchesCategory(p, catalogCategory)
+                );
               }).length === 0 && products.length > 0 && (
                 <p className="py-4 text-center text-sm text-slate-400">No products match your search / filter.</p>
               )}
