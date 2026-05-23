@@ -235,6 +235,7 @@ router.post("/", auth, async (req, res) => {
       variantItems,
       variantPrices,
       variantMrps,
+      isRecommended,
     } = req.body;
 
     const normalizedCategories = normalizeProductCategories({ category, categories });
@@ -323,6 +324,7 @@ router.post("/", auth, async (req, res) => {
       variantItems: nextVariantItems,
       variantPrices: normalizedVariantPrices,
       variantMrps: normalizedVariantMrps,
+      isRecommended: isRecommended === true,
     });
 
     await syncSellerCategoryTags(seller, normalizedCategories.categories);
@@ -423,6 +425,7 @@ router.put("/:productId", auth, async (req, res) => {
       variantItems,
       variantPrices,
       variantMrps,
+      isRecommended,
     } =
       req.body;
 
@@ -507,6 +510,7 @@ router.put("/:productId", auth, async (req, res) => {
     }
     if (variantPrices !== undefined) product.variantPrices = normalizeVariantPrices(variantPrices);
     if (variantMrps !== undefined) product.variantMrps = normalizeVariantMrps(variantMrps);
+    if (isRecommended !== undefined) product.isRecommended = isRecommended === true;
 
     if (variantItems === undefined && (variantPrices !== undefined || variantMrps !== undefined || Array.isArray(variants))) {
       product.variantItems = deriveVariantItemsFromLegacy(

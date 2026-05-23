@@ -1214,7 +1214,7 @@ export function PublicStorePage() {
                       sortBy === opt ? "bg-teal-50 font-semibold text-teal-800 dark:bg-teal-950 dark:text-teal-200" : "text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800"
                     }`}>
                     <span className={`h-3 w-3 rounded-full border flex-shrink-0 ${sortBy === opt ? "border-teal-500 bg-teal-500" : "border-slate-300"}`} />
-                    {opt === "latest" ? "Latest" : opt === "price_low" ? "Price: Low ? High" : opt === "price_high" ? "Price: High ? Low" : "Best Discount"}
+                    {opt === "latest" ? "Latest" : opt === "price_low" ? "Price: Low to High" : opt === "price_high" ? "Price: High to Low" : "Best Discount"}
                   </button>
                 ))}
                 {/* Price */}
@@ -1226,7 +1226,7 @@ export function PublicStorePage() {
                       maxPriceFilter === v ? "bg-teal-50 font-semibold text-teal-800 dark:bg-teal-950 dark:text-teal-200" : "text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800"
                     }`}>
                     <span className={`h-3 w-3 rounded-full border flex-shrink-0 ${maxPriceFilter === v ? "border-teal-500 bg-teal-500" : "border-slate-300"}`} />
-                    {v === null ? "All prices" : `Under ?${v}`}
+                    {v === null ? "All prices" : <>Under {"\u20B9"}{v}</>}
                   </button>
                 ))}
                 {/* Category */}
@@ -1303,6 +1303,7 @@ export function PublicStorePage() {
                   </div>
                   {/* Badges */}
                   <div className="absolute left-1.5 top-1.5 flex flex-col gap-1">
+                    {product.isRecommended && <span className="rounded-md bg-amber-500 px-1.5 py-0.5 text-[9px] font-bold text-white">REC</span>}
                     {discountPercent > 0 && <span className="rounded-md bg-emerald-500 px-1.5 py-0.5 text-[9px] font-bold text-white leading-tight">{discountPercent}%{"\n"}OFF</span>}
                     {isNewProduct && !discountPercent && <span className="rounded-md bg-sky-500 px-1.5 py-0.5 text-[9px] font-bold text-white">NEW</span>}
                     {isOutOfStock && <span className="rounded-md bg-rose-500 px-1.5 py-0.5 text-[9px] font-bold text-white">OUT</span>}
@@ -1392,8 +1393,21 @@ export function PublicStorePage() {
           }
           if (activeCategory === "All" && !searchQuery.trim() && maxPriceFilter === null) {
             const categorized = groupProductsByCategory(visibleProducts);
+            const recommendedProducts = visibleProducts.filter((product) => product.isRecommended);
             return (
               <div className="space-y-6">
+                {recommendedProducts.length > 0 && (
+                  <CategoryScrollRow
+                    title="Recommended"
+                    onSeeAll={() => setActiveCategory("All")}
+                  >
+                    {recommendedProducts.map(p => (
+                      <div key={p._id} className="w-36 shrink-0 sm:w-40">
+                        {renderCard(p)}
+                      </div>
+                    ))}
+                  </CategoryScrollRow>
+                )}
                 {Array.from(categorized.entries()).map(([cat, prods]) => (
               <CategoryScrollRow
                   key={cat}

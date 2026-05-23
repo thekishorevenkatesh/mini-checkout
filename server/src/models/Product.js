@@ -129,6 +129,11 @@ const productSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+    isRecommended: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
   },
   {
     timestamps: true,

@@ -85,6 +85,7 @@ export interface Product {
   variantPrices?: Record<string, number>;
   variantMrps?: Record<string, number>;
   isActive: boolean;
+  isRecommended?: boolean;
   createdAt: string;
 }
 

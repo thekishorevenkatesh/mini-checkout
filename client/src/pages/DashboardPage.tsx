@@ -36,12 +36,12 @@ type ProductFormVariant = {
 type ProductForm = {
   title: string; description: string; price: string; mrp: string; packSize: string; uom: string;
   imageUrls: string[]; notes: string; categories: string[]; categoryInput: string;
-  variants: ProductFormVariant[];
+  variants: ProductFormVariant[]; isRecommended: boolean;
 };
 const PRODUCT_TITLE_MAX_LENGTH = 60;
 const emptyProductForm: ProductForm = {
   title: "", description: "", price: "", mrp: "", packSize: "", uom: "",
-  imageUrls: [""], notes: "", categories: [], categoryInput: "", variants: [],
+  imageUrls: [""], notes: "", categories: [], categoryInput: "", variants: [], isRecommended: false,
 };
 
 const statusClasses: Record<OrderStatus, string> = {
@@ -761,6 +761,65 @@ export function DashboardPage() {
   // ── Category autocomplete state
   const [categorySuggestions, setCategorySuggestions] = useState<string[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const [editingCategory, setEditingCategory] = useState<string | null>(null);
+  const [editingCategoryValue, setEditingCategoryValue] = useState("");
+  const [categoryPendingDelete, setCategoryPendingDelete] = useState<string | null>(null);
+
+  function startEditSellerCategory(category: string) {
+    setEditingCategory(category);
+    setEditingCategoryValue(category);
+    setCategoryPendingDelete(null);
+    setShowSuggestions(true);
+  }
+
+  function cancelEditSellerCategory() {
+    setEditingCategory(null);
+    setEditingCategoryValue("");
+  }
+
+  function startDeleteSellerCategory(category: string) {
+    setCategoryPendingDelete(category);
+    setEditingCategory(null);
+    setEditingCategoryValue("");
+    setShowSuggestions(true);
+  }
+
+  function cancelDeleteSellerCategory() {
+    setCategoryPendingDelete(null);
+  }
+
+  async function saveSellerCategory(originalCategory: string) {
+    const nextCategory = editingCategoryValue.trim();
+    if (!nextCategory) {
+      showError("Category name is required.");
+      return;
+    }
+
+    if (nextCategory === originalCategory) {
+      cancelEditSellerCategory();
+      return;
+    }
+
+    const renameCategory = (items: string[]) => (
+      [...new Set(items.map((item) => (item === originalCategory ? nextCategory : item)).filter(Boolean))]
+    );
+
+    const previousCategories = categories;
+    try {
+      const updated = renameCategory(categories);
+      setCategories(updated);
+      setCategorySuggestions((prev) => renameCategory(prev));
+      setProductForm((prev) => ({ ...prev, categories: renameCategory(prev.categories) }));
+      setCatalogCategory((prev) => (prev === originalCategory ? nextCategory : prev));
+      await api.patch("/store/categories/rename", { from: originalCategory, to: nextCategory });
+      showSuccess(`Category "${originalCategory}" renamed to "${nextCategory}".`);
+      cancelEditSellerCategory();
+      await loadData();
+    } catch {
+      setCategories(previousCategories);
+      showError(`Could not update category "${originalCategory}".`);
+    }
+  }
 
   async function deleteSellerCategory(category: string) {
     try {
@@ -769,6 +828,7 @@ export function DashboardPage() {
       setCategorySuggestions((prev) => prev.filter((item) => item !== category));
       await api.put("/store/options", { categories: updated });
       showSuccess(`Category “${category}” removed.`);
+      setCategoryPendingDelete(null);
     } catch (error) {
       showError(`Could not delete category “${category}”.`);
       // restore state on failure if needed
@@ -813,6 +873,7 @@ export function DashboardPage() {
       categories: getProductCategories(prod),
       categoryInput: "",
       variants: variantRows,
+      isRecommended: prod.isRecommended === true,
     });
     // Scroll to form
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -901,6 +962,7 @@ export function DashboardPage() {
         variantItems,
         variantPrices,
         variantMrps,
+        isRecommended: productForm.isRecommended,
       };
 
       if (editingProduct) {
@@ -1567,36 +1629,123 @@ export function DashboardPage() {
                       />
                     </div>
                   </div>
-                  {showSuggestions && (categorySuggestions.length > 0 || (productForm.categoryInput.trim() && !categories.includes(productForm.categoryInput.trim()))) && (
+                  {(showSuggestions || editingCategory) && (categorySuggestions.length > 0 || (productForm.categoryInput.trim() && !categories.includes(productForm.categoryInput.trim()))) && (
                     <ul className="absolute left-0 right-0 z-30 mt-1 w-full max-w-full rounded-xl border border-slate-200 bg-white shadow-lg overflow-hidden">
                       {categorySuggestions.map(c => (
-                        <li key={c} className="flex items-center justify-between gap-3 px-4 py-2 text-sm transition bg-white hover:bg-teal-50">
-                          <button
-                            type="button"
-                            onMouseDown={() => {
-                              setProductForm(p => ({
-                                ...p,
-                                categories: p.categories.includes(c) ? p.categories : [...p.categories, c],
-                                categoryInput: "",
-                              }));
-                              setShowSuggestions(false);
-                            }}
-                            className="text-left flex-1 text-slate-700 hover:text-teal-800"
-                          >
-                            {c}
-                          </button>
-                          <button
-                            type="button"
-                            onMouseDown={async (event) => {
-                              event.stopPropagation();
-                              event.preventDefault();
-                              await deleteSellerCategory(c);
-                            }}
-                            className="flex h-7 w-7 items-center justify-center rounded-full border border-rose-200 bg-rose-50 text-rose-600 transition hover:bg-rose-100 hover:text-rose-700"
-                            aria-label={`Delete category ${c}`}
-                          >
-                            <AppIcon name="trash" className="h-3.5 w-3.5" />
-                          </button>
+                        <li key={c} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2 text-sm transition bg-white hover:bg-teal-50">
+                          {categoryPendingDelete === c ? (
+                            <>
+                              <div className="min-w-0 flex-1 basis-full sm:basis-auto">
+                                <p className="break-words text-sm font-semibold leading-snug text-slate-800">Delete "{c}"?</p>
+                              </div>
+                              <button
+                                type="button"
+                                onMouseDown={async (event) => {
+                                  event.stopPropagation();
+                                  event.preventDefault();
+                                  await deleteSellerCategory(c);
+                                }}
+                                className="rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-xs font-semibold text-rose-700 transition hover:bg-rose-100"
+                              >
+                                Yes
+                              </button>
+                              <button
+                                type="button"
+                                onMouseDown={(event) => {
+                                  event.stopPropagation();
+                                  event.preventDefault();
+                                  cancelDeleteSellerCategory();
+                                }}
+                                className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-50"
+                              >
+                                No
+                              </button>
+                            </>
+                          ) : editingCategory === c ? (
+                            <>
+                              <input
+                                className="min-w-0 flex-1 rounded-lg border border-teal-200 bg-white px-2 py-1.5 text-sm text-slate-700 outline-none focus:border-teal-400"
+                                value={editingCategoryValue}
+                                autoFocus
+                                onChange={(event) => setEditingCategoryValue(event.target.value)}
+                                onKeyDown={async (event) => {
+                                  if (event.key === "Enter") {
+                                    event.preventDefault();
+                                    await saveSellerCategory(c);
+                                  }
+                                  if (event.key === "Escape") {
+                                    cancelEditSellerCategory();
+                                  }
+                                }}
+                                onMouseDown={(event) => event.stopPropagation()}
+                              />
+                              <button
+                                type="button"
+                                onMouseDown={async (event) => {
+                                  event.stopPropagation();
+                                  event.preventDefault();
+                                  await saveSellerCategory(c);
+                                }}
+                                className="flex h-7 w-7 items-center justify-center rounded-full border border-emerald-200 bg-emerald-50 text-emerald-700 transition hover:bg-emerald-100"
+                                aria-label={`Save category ${c}`}
+                              >
+                                <AppIcon name="check" className="h-3.5 w-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onMouseDown={(event) => {
+                                  event.stopPropagation();
+                                  event.preventDefault();
+                                  cancelEditSellerCategory();
+                                }}
+                                className="flex h-7 w-7 items-center justify-center rounded-full border border-slate-200 bg-slate-50 text-slate-500 transition hover:bg-slate-100"
+                                aria-label={`Cancel editing category ${c}`}
+                              >
+                                <AppIcon name="close" className="h-3.5 w-3.5" />
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <button
+                                type="button"
+                                onMouseDown={() => {
+                                  setProductForm(p => ({
+                                    ...p,
+                                    categories: p.categories.includes(c) ? p.categories : [...p.categories, c],
+                                    categoryInput: "",
+                                  }));
+                                  setShowSuggestions(false);
+                                }}
+                                className="text-left flex-1 text-slate-700 hover:text-teal-800"
+                              >
+                                {c}
+                              </button>
+                              <button
+                                type="button"
+                                onMouseDown={(event) => {
+                                  event.stopPropagation();
+                                  event.preventDefault();
+                                  startEditSellerCategory(c);
+                                }}
+                                className="flex h-7 w-7 items-center justify-center rounded-full border border-sky-200 bg-sky-50 text-sky-600 transition hover:bg-sky-100 hover:text-sky-700"
+                                aria-label={`Edit category ${c}`}
+                              >
+                                <AppIcon name="edit" className="h-3.5 w-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onMouseDown={async (event) => {
+                                  event.stopPropagation();
+                                  event.preventDefault();
+                                  startDeleteSellerCategory(c);
+                                }}
+                                className="flex h-7 w-7 items-center justify-center rounded-full border border-rose-200 bg-rose-50 text-rose-600 transition hover:bg-rose-100 hover:text-rose-700"
+                                aria-label={`Delete category ${c}`}
+                              >
+                                <AppIcon name="trash" className="h-3.5 w-3.5" />
+                              </button>
+                            </>
+                          )}
                         </li>
                       ))}
                       {productForm.categoryInput.trim() && !categories.includes(productForm.categoryInput.trim()) && (
@@ -1618,6 +1767,19 @@ export function DashboardPage() {
                   )}
                 </label>
               </div>
+
+              <label className="flex items-start gap-3 rounded-2xl border border-emerald-100 bg-emerald-50/70 p-4 transition hover:border-emerald-200">
+                <input
+                  type="checkbox"
+                  checked={productForm.isRecommended}
+                  onChange={e => setProductForm(p => ({ ...p, isRecommended: e.target.checked }))}
+                  className="mt-1 h-4 w-4 rounded border-emerald-300 text-emerald-600 accent-emerald-600"
+                />
+                <span className="min-w-0">
+                  <span className="block text-sm font-semibold text-slate-800">Is it Recommended?</span>
+                  <span className="block text-xs text-slate-500">Show this product in the Recommended section at the top of the public store.</span>
+                </span>
+              </label>
 
               {/* ── Section 2: Images + Description + Notes */}
               <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-3">
@@ -1734,9 +1896,9 @@ export function DashboardPage() {
                   <p className="text-sm font-semibold text-slate-700">Product Variants &amp; Pricing</p>
                   <p className="text-xs text-slate-500 mt-0.5">Each variant has a value, unit of measure (UOM), price, and its own active status.</p>
                 </div>
-                <div className="overflow-x-auto">
+                <div className="space-y-3 overflow-x-auto sm:space-y-2">
                   {productForm.variants.length > 0 && (
-                    <div className="hidden min-w-[28rem] grid-cols-[minmax(0,1fr)_minmax(0,80px)_minmax(0,100px)_minmax(0,92px)_minmax(0,32px)] gap-1.5 px-1 sm:grid">
+                    <div className="hidden min-w-[28rem] grid-cols-[minmax(0,1fr)_minmax(0,80px)_minmax(0,100px)_minmax(0,92px)_minmax(0,32px)] gap-2.5 px-1 sm:grid">
                       <span className="text-xs font-semibold text-slate-500">Pack Size</span>
                       <span className="text-xs font-semibold text-slate-500">UOM</span>
                       <span className="text-xs font-semibold text-slate-500">Price (₹)</span>
@@ -1745,22 +1907,22 @@ export function DashboardPage() {
                     </div>
                   )}
                   {productForm.variants.map((v, i) => (
-                    <div key={i} className="min-w-[28rem] grid gap-2 rounded-xl border border-slate-200 bg-white p-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,80px)_minmax(0,100px)_minmax(0,92px)_minmax(0,32px)] sm:items-center sm:gap-1.5 sm:rounded-none sm:border-0 sm:bg-transparent sm:p-0">
+                    <div key={i} className="grid w-full gap-3 rounded-xl border border-slate-200 bg-white p-3 sm:min-w-[28rem] sm:grid-cols-[minmax(0,1fr)_minmax(0,80px)_minmax(0,100px)_minmax(0,92px)_minmax(0,32px)] sm:items-center sm:gap-2.5 sm:rounded-none sm:border-0 sm:bg-transparent sm:p-0">
                       <input
-                        className="min-w-0 rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm outline-none focus:border-slate-400"
+                        className="min-w-0 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-slate-400"
                       placeholder="e.g. 500 (for 500g)"
                       value={v.label}
                       onChange={e => setProductForm(p => { const vv = [...p.variants]; vv[i] = { ...vv[i], label: e.target.value }; return { ...p, variants: vv }; })}
                     />
                     <input
-                      className="min-w-0 rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm outline-none focus:border-slate-400"
+                      className="min-w-0 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-slate-400"
                       placeholder="g / ml"
                       value={v.uom}
                       onChange={e => setProductForm(p => { const vv = [...p.variants]; vv[i] = { ...vv[i], uom: e.target.value }; return { ...p, variants: vv }; })}
                     />
                     <input
                       type="number" min={0}
-                      className="min-w-0 rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm outline-none focus:border-slate-400"
+                      className="min-w-0 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-slate-400"
                       placeholder="499"
                       value={v.amount}
                       onChange={e => setProductForm(p => { const vv = [...p.variants]; vv[i] = { ...vv[i], amount: e.target.value }; return { ...p, variants: vv }; })}
@@ -1772,7 +1934,7 @@ export function DashboardPage() {
                         vv[i] = { ...vv[i], isActive: !vv[i].isActive };
                         return { ...p, variants: vv };
                       })}
-                      className={`inline-flex h-10 items-center justify-center rounded-lg border px-3 text-sm font-semibold transition ${
+                      className={`inline-flex h-10 w-full items-center justify-center rounded-lg border px-3 text-sm font-semibold transition sm:w-auto ${
                         v.isActive
                           ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
                           : "border-slate-200 bg-slate-100 text-slate-600 hover:bg-slate-200"
@@ -1913,6 +2075,11 @@ export function DashboardPage() {
                       <p className="font-semibold text-slate-800 truncate break-words">{prod.title}</p>
                       {getProductCategories(prod).length > 0 ? (
                         <div className="mt-0.5 flex flex-wrap gap-1">
+                          {prod.isRecommended && (
+                            <span className="inline-block rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-700">
+                              Recommended
+                            </span>
+                          )}
                           {getProductCategories(prod).map((tag) => (
                             <span
                               key={`${prod._id}-${tag}`}

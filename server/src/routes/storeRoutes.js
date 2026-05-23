@@ -40,6 +40,23 @@ function isValidEmail(email) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || "").trim());
 }
 
+function uniqueCategoryTags(tags = []) {
+  return [...new Set(tags.map((tag) => String(tag || "").trim()).filter(Boolean))];
+}
+
+function parseCategoryTags(category = "") {
+  return String(category || "")
+    .split(",")
+    .map((tag) => tag.trim())
+    .filter(Boolean);
+}
+
+function renameCategoryTags(tags = [], fromCategory, toCategory) {
+  return uniqueCategoryTags(
+    tags.map((tag) => (tag === fromCategory ? toCategory : tag))
+  );
+}
+
 // ─── GET /store/public/:sellerSlug — Full store config (no auth) ──────────
 router.get("/public/:sellerSlug", async (req, res) => {
   try {
@@ -146,6 +163,58 @@ router.put("/options", auth, async (req, res) => {
     return res.json({ seller: withPolicyDefaults(seller) });
   } catch (error) {
     return res.status(500).json({ message: "Unable to update store options" });
+  }
+});
+
+// Rename a seller product category and sync existing products that use it.
+router.patch("/categories/rename", auth, async (req, res) => {
+  try {
+    const fromCategory = String(req.body.from || "").trim();
+    const toCategory = String(req.body.to || "").trim();
+
+    if (!fromCategory || !toCategory) {
+      return res.status(400).json({ message: "Both current and new category names are required." });
+    }
+
+    const seller = await Seller.findById(req.sellerId);
+    if (!seller) {
+      return res.status(404).json({ message: "Seller not found" });
+    }
+
+    if (!seller.categories.includes(fromCategory)) {
+      return res.status(404).json({ message: "Category not found" });
+    }
+
+    if (fromCategory === toCategory) {
+      return res.json({ seller: withPolicyDefaults(seller), updatedProducts: 0 });
+    }
+
+    seller.categories = renameCategoryTags(seller.categories, fromCategory, toCategory);
+    await seller.save();
+
+    const products = await Product.find({ seller: seller._id });
+    let updatedProducts = 0;
+
+    for (const product of products) {
+      const currentTags = uniqueCategoryTags([
+        ...(Array.isArray(product.categories) ? product.categories : []),
+        ...parseCategoryTags(product.category),
+      ]);
+
+      if (!currentTags.includes(fromCategory)) {
+        continue;
+      }
+
+      const nextTags = renameCategoryTags(currentTags, fromCategory, toCategory);
+      product.categories = nextTags;
+      product.category = nextTags.join(", ");
+      await product.save();
+      updatedProducts += 1;
+    }
+
+    return res.json({ seller: withPolicyDefaults(seller), updatedProducts });
+  } catch (error) {
+    return res.status(500).json({ message: "Unable to rename category" });
   }
 });
 
