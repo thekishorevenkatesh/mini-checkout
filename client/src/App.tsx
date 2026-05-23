@@ -1,5 +1,6 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { GlobalControls } from "./components/GlobalControls";
+import { ZensosLogo } from "./components/ZensosLogo";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import { ToastProvider } from "./context/ToastContext";
 import { AdminPage } from "./pages/AdminPage";
@@ -15,11 +16,7 @@ export default function App() {
         <div className="min-h-screen">
           <header className="app-shell-header sticky top-0 z-40 px-3 py-3 sm:px-4">
             <div className="mx-auto flex w-full max-w-7xl items-center justify-between">
-              <img
-                src="/zensos-final-version.png"
-                alt="Zensos logo"
-                className="h-18 w-24 object-contain "
-              />
+              <ZensosLogo size="lg" alt="Zensos" />
               <GlobalControls />
             </div>
           </header>

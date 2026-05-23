@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/png" href="/zensos.png" />
+    <link rel="icon" type="image/png" href="/favico.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Zensos</title>
     <meta name="description" content="Zensos helps small sellers and home businesses create their own online store in minutes. Share your store link, accept UPI payments, and manage orders — all in one place." />
@@ -18,6 +18,15 @@
     <meta name="twitter:description" content="Your Store. Your Link. Your Sales." />
   </head>
   <body>
+    <script>
+      (function () {
+        var stored = localStorage.getItem("zensos_theme");
+        var prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+        if (stored === "dark" || (!stored && prefersDark)) {
+          document.documentElement.classList.add("dark");
+        }
+      })();
+    </script>
     <div id="app"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

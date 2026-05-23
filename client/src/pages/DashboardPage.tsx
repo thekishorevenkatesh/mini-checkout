@@ -29,7 +29,8 @@ type Tab = "dashboard" | "store" | "products" | "orders" | "reports" | "profile"
 type ProductFormVariant = {
   label: string;   // value / size  e.g. "500"
   uom: string;     // unit of measure e.g. "g", "ml", "Pack"
-  amount: string;  // price
+  amount: string;  // selling price
+  mrp: string;
   isActive: boolean;
 };
 
@@ -849,15 +850,21 @@ export function DashboardPage() {
         const key = getVariantPriceKey(variant.label, option);
         const fallbackKey = getVariantPriceKey("Variant", option);
         const rawPrice = prod.variantPrices?.[key] ?? prod.variantPrices?.[fallbackKey];
+        const matchedVariantItem = prod.variantItems?.find(
+          (item) => item.variantId === `legacy:${key}` || item.variantId === `legacy:${fallbackKey}`,
+        );
+        const rawMrp =
+          prod.variantMrps?.[key]
+          ?? prod.variantMrps?.[fallbackKey]
+          ?? matchedVariantItem?.mrp;
         // Try to parse "value uom" from option string e.g. "500g" or "500 g"
         const match = option.match(/^([\d.]+)\s*([a-zA-Z]*)$/);
         variantRows.push({
           label: match ? match[1] : option,
           uom: match ? match[2] : "",
           amount: rawPrice !== undefined && rawPrice !== null ? String(rawPrice) : "",
-          isActive:
-            prod.variantItems?.find((item) => item.variantId === `legacy:${key}`)?.isActive
-              ?? true,
+          mrp: rawMrp !== undefined && rawMrp !== null && Number(rawMrp) > 0 ? String(rawMrp) : "",
+          isActive: matchedVariantItem?.isActive ?? true,
         });
       });
     });
@@ -896,6 +903,7 @@ export function DashboardPage() {
           label: "Variant",
           option: (v.label.trim() + (v.uom.trim() ? v.uom.trim() : "")),
           amount: Number(v.amount),
+          mrp: Number(v.mrp) || 0,
           isActive: v.isActive !== false,
         }));
 
@@ -906,13 +914,18 @@ export function DashboardPage() {
         acc[getVariantPriceKey(variant.label, variant.option)] = variant.amount;
         return acc;
       }, {});
-      const variantMrps = {};
+      const variantMrps = variantPayload.reduce<Record<string, number>>((acc, variant) => {
+        if (variant.mrp > 0) {
+          acc[getVariantPriceKey(variant.label, variant.option)] = variant.mrp;
+        }
+        return acc;
+      }, {});
       const variantItems = variantPayload.map((variant) => ({
         variantId: `legacy:${getVariantPriceKey(variant.label, variant.option)}`,
         title: variant.option,
         attributes: { [variant.label]: variant.option },
         price: variant.amount,
-        mrp: 0,
+        mrp: variant.mrp,
         isActive: variant.isActive,
       }));
 
@@ -924,6 +937,15 @@ export function DashboardPage() {
 
       if (Number.isFinite(baseMrp) && baseMrp > 0 && Number.isFinite(baseSellingPrice) && baseSellingPrice > 0 && baseSellingPrice >= baseMrp) {
         setError("Product selling price should be less than product MRP.");
+        setIsSubmittingProduct(false);
+        return;
+      }
+
+      const invalidVariantPricing = variantPayload.some(
+        (variant) => variant.mrp > 0 && variant.amount > 0 && variant.amount >= variant.mrp,
+      );
+      if (invalidVariantPricing) {
+        setError("Each variant selling price should be less than its variant MRP.");
         setIsSubmittingProduct(false);
         return;
       }
@@ -1894,66 +1916,85 @@ export function DashboardPage() {
               <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-3">
                 <div>
                   <p className="text-sm font-semibold text-slate-700">Product Variants &amp; Pricing</p>
-                  <p className="text-xs text-slate-500 mt-0.5">Each variant has a value, unit of measure (UOM), price, and its own active status.</p>
+                  <p className="text-xs text-slate-500 mt-0.5">Each variant has pack size, UOM, selling price, MRP, and its own active status.</p>
                 </div>
-                <div className="space-y-3 overflow-x-auto sm:space-y-2">
-                  {productForm.variants.length > 0 && (
-                    <div className="hidden min-w-[28rem] grid-cols-[minmax(0,1fr)_minmax(0,80px)_minmax(0,100px)_minmax(0,92px)_minmax(0,32px)] gap-2.5 px-1 sm:grid">
-                      <span className="text-xs font-semibold text-slate-500">Pack Size</span>
-                      <span className="text-xs font-semibold text-slate-500">UOM</span>
-                      <span className="text-xs font-semibold text-slate-500">Price (₹)</span>
-                      <span className="text-xs font-semibold text-slate-500">Status</span>
-                      <span />
-                    </div>
-                  )}
+                <div className="space-y-3">
                   {productForm.variants.map((v, i) => (
-                    <div key={i} className="grid w-full gap-3 rounded-xl border border-slate-200 bg-white p-3 sm:min-w-[28rem] sm:grid-cols-[minmax(0,1fr)_minmax(0,80px)_minmax(0,100px)_minmax(0,92px)_minmax(0,32px)] sm:items-center sm:gap-2.5 sm:rounded-none sm:border-0 sm:bg-transparent sm:p-0">
-                      <input
-                        className="min-w-0 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-slate-400"
-                      placeholder="e.g. 500 (for 500g)"
-                      value={v.label}
-                      onChange={e => setProductForm(p => { const vv = [...p.variants]; vv[i] = { ...vv[i], label: e.target.value }; return { ...p, variants: vv }; })}
-                    />
-                    <input
-                      className="min-w-0 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-slate-400"
-                      placeholder="g / ml"
-                      value={v.uom}
-                      onChange={e => setProductForm(p => { const vv = [...p.variants]; vv[i] = { ...vv[i], uom: e.target.value }; return { ...p, variants: vv }; })}
-                    />
-                    <input
-                      type="number" min={0}
-                      className="min-w-0 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-slate-400"
-                      placeholder="499"
-                      value={v.amount}
-                      onChange={e => setProductForm(p => { const vv = [...p.variants]; vv[i] = { ...vv[i], amount: e.target.value }; return { ...p, variants: vv }; })}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setProductForm(p => {
-                        const vv = [...p.variants];
-                        vv[i] = { ...vv[i], isActive: !vv[i].isActive };
-                        return { ...p, variants: vv };
-                      })}
-                      className={`inline-flex h-10 w-full items-center justify-center rounded-lg border px-3 text-sm font-semibold transition sm:w-auto ${
-                        v.isActive
-                          ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
-                          : "border-slate-200 bg-slate-100 text-slate-600 hover:bg-slate-200"
-                      }`}
-                    >
-                      {v.isActive ? "Active" : "Inactive"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setProductForm(p => ({ ...p, variants: p.variants.filter((_, j) => j !== i) }))}
-                      className="inline-flex h-9 w-full items-center justify-center gap-1 rounded-lg border border-rose-200 bg-rose-50 px-2 text-sm font-semibold text-rose-700 hover:bg-rose-100 transition sm:h-8 sm:w-8 sm:px-0"
-                      aria-label={`Remove variant ${i + 1}`}
-                      title="Remove variant"
-                    ><AppIcon name="close" className="text-[9px]" /><span className="sm:hidden">Remove</span></button>
-                  </div>
-                ))}
+                    <div key={i} className="rounded-xl border border-slate-200 bg-white p-3 space-y-3">
+                      <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
+                        <label className="col-span-2 block min-w-0 space-y-1 lg:col-span-1">
+                          <span className="text-xs font-semibold text-slate-500">Pack size</span>
+                          <input
+                            className="w-full min-w-0 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-slate-400"
+                            placeholder="e.g. 500"
+                            value={v.label}
+                            onChange={e => setProductForm(p => { const vv = [...p.variants]; vv[i] = { ...vv[i], label: e.target.value }; return { ...p, variants: vv }; })}
+                          />
+                        </label>
+                        <label className="block min-w-0 space-y-1">
+                          <span className="text-xs font-semibold text-slate-500">UOM</span>
+                          <input
+                            className="w-full min-w-0 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-slate-400"
+                            placeholder="g / ml"
+                            value={v.uom}
+                            onChange={e => setProductForm(p => { const vv = [...p.variants]; vv[i] = { ...vv[i], uom: e.target.value }; return { ...p, variants: vv }; })}
+                          />
+                        </label>
+                        <label className="block min-w-0 space-y-1">
+                          <span className="text-xs font-semibold text-slate-500">Selling (₹)</span>
+                          <input
+                            type="number"
+                            min={0}
+                            className="w-full min-w-0 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-slate-400"
+                            placeholder="499"
+                            value={v.amount}
+                            onChange={e => setProductForm(p => { const vv = [...p.variants]; vv[i] = { ...vv[i], amount: e.target.value }; return { ...p, variants: vv }; })}
+                          />
+                        </label>
+                        <label className="block min-w-0 space-y-1">
+                          <span className="text-xs font-semibold text-slate-500">MRP (₹)</span>
+                          <input
+                            type="number"
+                            min={0}
+                            className="w-full min-w-0 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-slate-400"
+                            placeholder="599"
+                            value={v.mrp}
+                            onChange={e => setProductForm(p => { const vv = [...p.variants]; vv[i] = { ...vv[i], mrp: e.target.value }; return { ...p, variants: vv }; })}
+                          />
+                        </label>
+                      </div>
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setProductForm(p => {
+                            const vv = [...p.variants];
+                            vv[i] = { ...vv[i], isActive: !vv[i].isActive };
+                            return { ...p, variants: vv };
+                          })}
+                          className={`inline-flex h-9 items-center justify-center rounded-lg border px-3 text-sm font-semibold transition ${
+                            v.isActive
+                              ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                              : "border-slate-200 bg-slate-100 text-slate-600 hover:bg-slate-200"
+                          }`}
+                        >
+                          {v.isActive ? "Active" : "Inactive"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setProductForm(p => ({ ...p, variants: p.variants.filter((_, j) => j !== i) }))}
+                          className="inline-flex h-9 items-center justify-center gap-1 rounded-lg border border-rose-200 bg-rose-50 px-3 text-sm font-semibold text-rose-700 hover:bg-rose-100 transition"
+                          aria-label={`Remove variant ${i + 1}`}
+                          title="Remove variant"
+                        >
+                          <AppIcon name="close" className="text-[9px]" />
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                  ))}
                 <button
                   type="button"
-                  onClick={() => setProductForm(p => ({ ...p, variants: [...p.variants, { label: "", uom: "", amount: "", isActive: true }] }))}
+                  onClick={() => setProductForm(p => ({ ...p, variants: [...p.variants, { label: "", uom: "", amount: "", mrp: "", isActive: true }] }))}
                   className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-100 transition"
                 >+ Add Variant</button>
               </div>
@@ -2100,10 +2141,23 @@ export function DashboardPage() {
                         <div className="mt-1 flex flex-wrap gap-1">
                           {prod.variants.flatMap(variant =>
                             variant.options.map(option => {
-                              const variantPrice = prod.variantPrices?.[getVariantPriceKey(variant.label, option)];
+                              const priceKey = getVariantPriceKey(variant.label, option);
+                              const variantPrice = prod.variantPrices?.[priceKey];
+                              const variantMrp =
+                                prod.variantMrps?.[priceKey]
+                                ?? prod.variantItems?.find((item) => item.variantId === `legacy:${priceKey}`)?.mrp;
                               return (
                                 <span key={option} className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
-                                  {option}{variantPrice ? ` · ₹${variantPrice}` : ""}
+                                  {option}
+                                  {variantPrice ? (
+                                    <>
+                                      {" · ₹"}
+                                      {variantPrice}
+                                      {variantMrp && variantMrp > variantPrice ? (
+                                        <span className="text-slate-400 line-through"> ₹{variantMrp}</span>
+                                      ) : null}
+                                    </>
+                                  ) : null}
                                 </span>
                               );
                             })

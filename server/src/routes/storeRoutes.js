@@ -244,7 +244,10 @@ router.post("/request-delete-otp", auth, async (req, res) => {
     seller.otpPurpose = "store_delete";
     seller.otpTargetId = "__store__";
     await seller.save();
-    await sendOtpEmail(seller.businessEmail, otp, seller.businessName);
+    await sendOtpEmail(seller.businessEmail, otp, {
+      businessName: seller.businessName,
+      purpose: "store_delete",
+    });
 
     return res.json({
       message: "A verification OTP has been sent to your business email.",

@@ -58,14 +58,18 @@ function isValidEmail(email) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
-async function storeAndSendOtp({ seller, email, purpose, targetId = null }) {
+async function storeAndSendOtp({ seller, email, purpose, targetId = null, intent = "" }) {
   const otp = generateOtp();
   seller.otp = hashOtp(otp);
   seller.otpExpiry = new Date(Date.now() + 10 * 60 * 1000);
   seller.otpPurpose = purpose;
   seller.otpTargetId = targetId;
   await seller.save();
-  await sendOtpEmail(email, otp, seller.businessName);
+  await sendOtpEmail(email, otp, {
+    businessName: seller.businessName,
+    purpose,
+    intent,
+  });
 }
 
 // ─── POST /auth/send-otp ───────────────────────────────────────────────────
@@ -133,6 +137,7 @@ router.post("/send-otp", async (req, res) => {
       seller,
       email: normalizedEmail,
       purpose: "auth",
+      intent: normalizedIntent === "login" ? "login" : "register",
     });
 
     return res.json({

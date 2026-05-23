@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { QRCodeSVG } from "qrcode.react";
 import { api } from "../api/client";
+import { ZensosLogo } from "../components/ZensosLogo";
 import { AppIcon } from "../components/ui/AppIcon";
 import { ProductImageGallery } from "../components/ui/ProductImageGallery";
 import { AddressFields } from "../components/forms/AddressFields";
@@ -128,6 +129,34 @@ function buildUpiLink(
 
 function getVariantPriceKey(label: string, option: string) {
   return `${label}::${option}`;
+}
+
+function getVariantOptionPricing(product: Product, label: string, option: string) {
+  const priceKey = getVariantPriceKey(label, option);
+  const matchedItem = product.variantItems?.find(
+    (item) => item.variantId === `legacy:${priceKey}` || item.attributes?.[label] === option,
+  );
+  if (matchedItem) {
+    return {
+      price: matchedItem.price,
+      mrp: matchedItem.mrp || product.variantMrps?.[priceKey] || product.mrp,
+    };
+  }
+  return {
+    price: product.variantPrices?.[priceKey] ?? product.price,
+    mrp: product.variantMrps?.[priceKey] ?? product.mrp,
+  };
+}
+
+function VariantPriceLabel({ price, mrp, className = "" }: { price?: number; mrp?: number; className?: string }) {
+  if (!price || price <= 0) return null;
+  const showMrp = typeof mrp === "number" && mrp > 0 && mrp > price;
+  return (
+    <span className={`inline-flex items-baseline gap-1 ${className}`.trim()}>
+      <span>₹{price}</span>
+      {showMrp ? <span className="text-xs text-slate-400 line-through">₹{mrp}</span> : null}
+    </span>
+  );
 }
 
 function buildLegacyVariantItems(product: Product): VariantItem[] {
@@ -1070,12 +1099,9 @@ export function PublicStorePage() {
     return (
       <main className="mx-auto flex min-h-screen w-full max-w-4xl items-center justify-center px-4 py-10">
         <div className="surface-card-strong rounded-[30px] p-8 text-center">
-          <p className="mb-3 inline-flex items-center gap-2 rounded-full border border-teal-100 bg-white/85 px-4 py-2 text-xs font-bold uppercase tracking-widest text-teal-600 dark:border-teal-900/40 dark:bg-slate-950/80 dark:text-teal-300">
-            <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-teal-600 text-white dark:bg-teal-500">
-              <AppIcon name="brand" className="text-[12px]" />
-            </span>
-            Zensos
-          </p>
+          <div className="mb-3 inline-flex items-center rounded-2xl border border-teal-100 bg-white/85 px-4 py-2 dark:border-teal-900/40 dark:bg-slate-950/80">
+            <ZensosLogo size="md" alt="Zensos" />
+          </div>
           <h1 className="font-heading text-2xl font-bold text-slate-900 dark:text-slate-100">Store Not Found</h1>
           <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-slate-300">{error || "This seller link is unavailable."}</p>
           <Link to="/login" className="mt-5 inline-flex items-center gap-2 rounded-2xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-950 dark:hover:bg-white"><AppIcon name="login" className="text-[14px]" />Sign In to Zensos</Link>
@@ -1705,7 +1731,7 @@ export function PublicStorePage() {
                   </div>
                   <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
                     {v.options.map(opt => {
-                      const optPrice = product.variantPrices?.[getVariantPriceKey(v.label, opt)];
+                      const { price: optPrice, mrp: optMrp } = getVariantOptionPricing(product, v.label, opt);
                       const optOut = Array.isArray(product.variantItems) && product.variantItems.length > 0
                         ? !product.variantItems.some((item) => item.isActive !== false && item.attributes?.[v.label] === opt)
                         : false;
@@ -1732,7 +1758,13 @@ export function PublicStorePage() {
                             <div className="flex items-start justify-between gap-3">
                               <div>
                                 <p className="text-[15px] font-semibold text-emerald-900 dark:text-emerald-200">{opt}</p>
-                                <p className="mt-1 text-xs text-emerald-700/80 dark:text-emerald-300/80">{optPrice ? `${"\u20B9"}${optPrice}` : "Selected variant"}</p>
+                                <p className="mt-1 text-xs text-emerald-700/80 dark:text-emerald-300/80">
+                                  {optPrice ? (
+                                    <VariantPriceLabel price={optPrice} mrp={optMrp} className="text-emerald-700/80 dark:text-emerald-300/80" />
+                                  ) : (
+                                    "Selected variant"
+                                  )}
+                                </p>
                               </div>
                             </div>
                           </button>
@@ -1751,7 +1783,12 @@ export function PublicStorePage() {
                           });
                         }}
                         className={`rounded-2xl border px-3 py-3 text-left text-sm font-semibold transition disabled:opacity-40 ${isSelectedOption ? "border-emerald-400 bg-emerald-50 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/20 dark:text-emerald-200" : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"}`}>
-                        {opt}{optPrice ? ` - ₹${optPrice}` : ""}
+                        <span className="block">{opt}</span>
+                        {optPrice ? (
+                          <span className="mt-1 block text-xs font-medium text-slate-500 dark:text-slate-400">
+                            <VariantPriceLabel price={optPrice} mrp={optMrp} />
+                          </span>
+                        ) : null}
                       </button>);
                     })}
                   </div>
@@ -1785,7 +1822,20 @@ export function PublicStorePage() {
                                     {Object.entries(draft.selections).map(([label, value]) => `${label}: ${value}`).join(" | ")}
                                   </p>
                                 </div>
-                                <p className="shrink-0 text-sm font-semibold text-slate-900 dark:text-slate-100">{"\u20B9"}{draft.unitPrice}</p>
+                                <div className="shrink-0 text-sm font-semibold text-slate-900 dark:text-slate-100">
+                                  {(() => {
+                                    const matched = findMatchingVariant(product, draft.selections, variantId);
+                                    const unitMrp = matched?.mrp
+                                      ?? Object.entries(draft.selections).reduce<number | undefined>((found, [label, value]) => {
+                                        if (found) return found;
+                                        const key = getVariantPriceKey(label, value);
+                                        const variantMrp = product.variantMrps?.[key];
+                                        return typeof variantMrp === "number" && variantMrp > 0 ? variantMrp : found;
+                                      }, undefined)
+                                      ?? product.mrp;
+                                    return <VariantPriceLabel price={draft.unitPrice} mrp={unitMrp} />;
+                                  })()}
+                                </div>
                               </div>
 
                               <div className="mt-3 flex items-center justify-end">
@@ -1859,7 +1909,20 @@ export function PublicStorePage() {
                                   <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{selectionSummary}</p>
                                 ) : null}
                               </div>
-                              <p className="shrink-0 text-sm font-bold text-slate-900 dark:text-slate-100">{"\u20B9"}{draft.unitPrice}</p>
+                              <div className="shrink-0 text-sm font-bold text-slate-900 dark:text-slate-100">
+                                {(() => {
+                                  const matched = findMatchingVariant(product, draft.selections, variantId);
+                                  const unitMrp = matched?.mrp
+                                    ?? Object.entries(draft.selections).reduce<number | undefined>((found, [label, value]) => {
+                                      if (found) return found;
+                                      const key = getVariantPriceKey(label, value);
+                                      const variantMrp = product.variantMrps?.[key];
+                                      return typeof variantMrp === "number" && variantMrp > 0 ? variantMrp : found;
+                                    }, undefined)
+                                    ?? product.mrp;
+                                  return <VariantPriceLabel price={draft.unitPrice} mrp={unitMrp} />;
+                                })()}
+                              </div>
                             </div>
 
                             <div className="mt-4 flex items-center justify-end">
@@ -1964,7 +2027,10 @@ export function PublicStorePage() {
         </button>
       </div>
       <p>
-        Powered by <span className="inline-flex items-center gap-1 font-semibold text-slate-500"><span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-teal-600"><AppIcon name="brand" className="text-[9px]" /></span>Zensos</span>
+        <span className="inline-flex flex-wrap items-center justify-center gap-2 text-slate-500">
+          <span>Powered by</span>
+          <ZensosLogo size="sm" alt="Zensos" />
+        </span>
       </p>
     </footer>
     {activePolicy && (

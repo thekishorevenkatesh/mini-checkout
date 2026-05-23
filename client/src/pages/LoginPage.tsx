@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "r
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { useAuth } from "../context/AuthContext";
+import { ZensosLogo } from "../components/ZensosLogo";
 import { AppIcon } from "../components/ui/AppIcon";
 import { AddressFields } from "../components/forms/AddressFields";
 import { useI18n } from "../context/I18nContext";
@@ -415,12 +416,9 @@ const emailError =
 
       {/* ── Left: Hero ─────────────────────────────────────────────── */}
       <section className="order-2 space-y-6 text-center lg:order-1 lg:space-y-7 lg:text-left">
-        <p className="inline-flex items-center gap-2 rounded-full border border-teal-100 bg-white/85 px-4 py-2 text-xs font-bold uppercase tracking-[0.2em] text-teal-700 shadow-sm dark:border-teal-900/40 dark:bg-slate-950/80 dark:text-teal-300">
-          <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-teal-600 text-white dark:bg-teal-500">
-            <AppIcon name="brand" className="text-[12px]" />
-          </span>
-          Zensos
-        </p>
+        <div className="inline-flex items-center rounded-2xl border border-teal-100 bg-white/85 px-4 py-2 shadow-sm dark:border-teal-900/40 dark:bg-slate-950/80">
+          <ZensosLogo size="md" alt="Zensos" />
+        </div>
         <h1 className="font-heading text-4xl font-bold leading-tight tracking-tight text-slate-900 sm:text-5xl dark:text-slate-100">
           {mode === "login"
             ? "Welcome back to Zensos."
@@ -1062,7 +1060,10 @@ const emailError =
       </section>
     </main>
     <footer className="px-3 pb-2 text-center text-xs text-slate-400 sm:px-4">
-      <span className="inline-flex items-center gap-1 font-semibold text-slate-500"><span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-slate-900"><AppIcon name="brand" className="text-[9px]" /></span>Zensos</span> - Your Store. Your Link. Your Sales.
+      <span className="inline-flex flex-wrap items-center justify-center gap-2 text-slate-500">
+        <ZensosLogo size="sm" alt="Zensos" />
+        <span className="font-semibold">Your Store. Your Link. Your Sales.</span>
+      </span>
     </footer>
     {showTermsModal && (
       <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/50 px-3 py-3 backdrop-blur-[2px] sm:items-center sm:px-4 sm:py-6">
