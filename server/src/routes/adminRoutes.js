@@ -79,10 +79,15 @@ router.get("/sellers/:sellerId", adminAuth, async (req, res) => {
   }
 });
 
+const { decrypt } = require("../utils/encryption");
+const razorpay = require("../utils/razorpay");
+const TransactionLedger = require("../models/TransactionLedger");
+const Order = require("../models/Order");
+
 router.patch("/sellers/:sellerId/approval", adminAuth, async (req, res) => {
   try {
     const { status } = req.body || {};
-    if (!["approved", "rejected", "pending"].includes(status)) {
+    if (!["approved", "rejected", "pending", "suspended"].includes(status)) {
       return res.status(400).json({ message: "Invalid approval status" });
     }
 
@@ -97,6 +102,59 @@ router.patch("/sellers/:sellerId/approval", adminAuth, async (req, res) => {
       seller.publishRequestedAt = seller.publishRequestedAt || new Date();
       seller.approvedAt = new Date();
       seller.approvedBy = req.adminUsername || "admin";
+
+      // ─── Razorpay Linked Account Creation On Approval ───
+      if (!seller.razorpayAccountId) {
+        try {
+          const bankAccountName = decrypt(seller.kycDetailsEncrypted?.bankAccountName || seller.bankAccountName);
+          const bankAccountNumber = decrypt(seller.kycDetailsEncrypted?.bankAccountNumber || seller.bankAccountNumber);
+          const bankIfsc = seller.kycDetailsEncrypted?.bankIfsc || seller.bankIfsc;
+
+          console.log(`[Admin Approval] Triggering Linked Account Creation for Seller: ${seller.businessName}`);
+          
+          const accountResponse = await razorpay.accounts.create({
+            email: seller.businessEmail,
+            phone: seller.phone,
+            type: "route",
+            legal_business_name: seller.businessName,
+            business_type: seller.kycDetailsEncrypted?.businessType || "individual",
+            contact_name: seller.businessName,
+            profile: {
+              category: seller.kycDetailsEncrypted?.businessCategory || "ecommerce",
+              addresses: {
+                registered: {
+                  street: seller.businessAddress || "Main Street",
+                  city: "Mumbai",
+                  state: "MH",
+                  postal_code: "400001",
+                  country: "IN",
+                },
+              },
+            },
+            funding_sources: [
+              {
+                type: "bank_account",
+                details: {
+                  account_number: bankAccountNumber,
+                  ifsc_code: bankIfsc,
+                  beneficiary_name: bankAccountName || seller.businessName,
+                },
+              },
+            ],
+          });
+
+          seller.razorpayAccountId = accountResponse.id;
+          // Set account status. Mock automatically activates
+          seller.razorpayAccountStatus = accountResponse.status === "activated" || accountResponse.status === "active" ? "active" : "pending";
+          console.log(`[Admin Approval] Razorpay Account Created: ${accountResponse.id}`);
+        } catch (err) {
+          console.error("[Admin Approval] Failed to create Razorpay sub-merchant:", err.message);
+          seller.razorpayAccountStatus = "uncreated";
+        }
+      }
+    } else if (status === "suspended") {
+      seller.storePublished = false;
+      seller.razorpayAccountStatus = "suspended";
     } else {
       seller.storePublished = false;
       if (status === "pending") {
@@ -115,6 +173,36 @@ router.patch("/sellers/:sellerId/approval", adminAuth, async (req, res) => {
     });
   } catch (_error) {
     return res.status(500).json({ message: "Unable to update seller approval" });
+  }
+});
+
+// ─── ADMIN: Fetch Financial Ledgers ─────────────────────────────────────
+router.get("/financial-ledger", adminAuth, async (req, res) => {
+  try {
+    const ledgers = await TransactionLedger.find({})
+      .populate("orderId", "_id customerName amount deliveryCharge")
+      .populate("sellerId", "_id businessName slug")
+      .sort({ createdAt: -1 })
+      .limit(100);
+
+    return res.json({ ledgers });
+  } catch (error) {
+    return res.status(500).json({ message: "Unable to fetch financial ledgers" });
+  }
+});
+
+// ─── ADMIN: Fetch Outgoing Transfers & Statuses ─────────────────────────
+router.get("/transfers", adminAuth, async (req, res) => {
+  try {
+    const orders = await Order.find({ paymentMethod: "prepaid" })
+      .populate("seller", "_id businessName razorpayAccountId")
+      .populate("parentOrder", "_id razorpayPaymentId")
+      .sort({ createdAt: -1 })
+      .limit(100);
+
+    return res.json({ transfers: orders });
+  } catch (error) {
+    return res.status(500).json({ message: "Unable to fetch transfers" });
   }
 });
 

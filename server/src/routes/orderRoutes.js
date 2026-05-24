@@ -139,21 +139,19 @@ function buildOrderResponse(order) {
   };
 }
 
+const razorpay = require("../utils/razorpay");
+const ParentOrder = require("../models/ParentOrder");
+const TransactionLedger = require("../models/TransactionLedger");
+
 router.post("/", async (req, res) => {
   try {
     const {
       items,
-      productId,
-      variantId = "",
       customerName,
       customerPhone,
       note,
-      quantity = 1,
       deliveryAddress = "",
-      deliveryCharge = 0,
-      selectedVariants = {},
-      paymentMethod = "prepaid",
-      paymentScreenshotUrl = "",
+      deliveryCharges = {}, // sellerId -> charge number
     } = req.body;
 
     if (!customerName || !customerPhone) {
@@ -162,17 +160,16 @@ router.post("/", async (req, res) => {
       });
     }
 
-    const requestedItems = Array.isArray(items) && items.length > 0
-      ? items
-      : [{ productId, variantId, quantity, selectedVariants }];
-
+    const requestedItems = Array.isArray(items) ? items : [];
     if (requestedItems.length === 0) {
       return res.status(400).json({ message: "At least one cart item is required" });
     }
 
     const normalizedOrderItems = [];
+    const sellerIdsSet = new Set();
     const productDocs = new Map();
 
+    // 1. Normalize items and verify products
     for (const requestedItem of requestedItems) {
       const requestedProductId = String(requestedItem?.productId || "").trim();
       if (!requestedProductId) {
@@ -180,12 +177,11 @@ router.post("/", async (req, res) => {
       }
 
       const parsedQuantity = Number(requestedItem?.quantity);
-      const safeQuantity =
-        Number.isInteger(parsedQuantity) && parsedQuantity > 0 ? parsedQuantity : 1;
+      const safeQuantity = Number.isInteger(parsedQuantity) && parsedQuantity > 0 ? parsedQuantity : 1;
 
       let product = productDocs.get(requestedProductId);
       if (!product) {
-        product = await Product.findById(requestedProductId).populate("seller", "_id");
+        product = await Product.findById(requestedProductId).populate("seller");
         if (!product || !product.isActive) {
           return res.status(404).json({ message: "One or more products are unavailable" });
         }
@@ -222,8 +218,11 @@ router.post("/", async (req, res) => {
       const unitPrice = matchedVariant ? matchedVariant.price : Number(product.price) || 0;
       const lineTotal = unitPrice * safeQuantity;
 
+      sellerIdsSet.add(product.seller._id.toString());
+
       normalizedOrderItems.push({
         sellerId: product.seller._id,
+        sellerDoc: product.seller,
         productId: product._id,
         productTitle: product.title,
         productCategory: product.category || "",
@@ -240,52 +239,133 @@ router.post("/", async (req, res) => {
       });
     }
 
-    const sellerIds = [...new Set(normalizedOrderItems.map((item) => String(item.sellerId)))];
-    if (sellerIds.length !== 1) {
-      return res.status(400).json({
-        message: "All cart items in one order must belong to the same seller",
-      });
-    }
-
-    const totalQuantity = normalizedOrderItems.reduce((sum, item) => sum + item.quantity, 0);
-    const amount = normalizedOrderItems.reduce((sum, item) => sum + item.lineTotal, 0);
-    const safeDeliveryCharge = Number(deliveryCharge) >= 0 ? Number(deliveryCharge) : 0;
-    const safePaymentMethod = paymentMethod === "cod" ? "cod" : "prepaid";
-    const firstItem = normalizedOrderItems[0];
-
-    const order = await Order.create({
-      seller: firstItem.sellerId,
-      product: firstItem.productId,
-      items: normalizedOrderItems.map((item) => ({
-        product: item.productId,
-        productTitle: item.productTitle,
-        productCategory: item.productCategory,
-        productImageUrl: item.productImageUrl,
-        variantId: item.variantId,
-        variantTitle: item.variantTitle,
-        selectedVariants: item.selectedVariants,
-        unitPrice: item.unitPrice,
-        quantity: item.quantity,
-        lineTotal: item.lineTotal,
-      })),
+    // 2. Create ParentOrder shell to derive ID
+    const parentOrder = new ParentOrder({
+      razorpayOrderId: "pending_creation_" + Math.random().toString(36).substring(2, 10),
+      razorpayPaymentId: "",
       customerName: String(customerName).trim(),
       customerPhone: String(customerPhone).trim(),
       deliveryAddress: String(deliveryAddress).trim(),
       note: note ? String(note).trim() : "",
-      amount,
-      quantity: totalQuantity,
-      deliveryCharge: safeDeliveryCharge,
-      selectedVariants: firstItem.selectedVariants,
-      paymentMethod: safePaymentMethod,
-      paymentStatus: safePaymentMethod === "cod" ? "confirmed" : "pending",
-      paymentScreenshotUrl:
-        safePaymentMethod === "prepaid" ? String(paymentScreenshotUrl || "").trim() : "",
+      totalAmountPaise: 0,
+      paymentStatus: "pending",
+      subOrders: [],
+    });
+    await parentOrder.save();
+
+    let grandTotalPaise = 0;
+    const createdSubOrders = [];
+
+    // 3. Group by Seller & calculate server-side splits in integer paise
+    const itemsBySeller = new Map();
+    for (const item of normalizedOrderItems) {
+      const sellerIdStr = item.sellerId.toString();
+      if (!itemsBySeller.has(sellerIdStr)) {
+        itemsBySeller.set(sellerIdStr, {
+          sellerDoc: item.sellerDoc,
+          lines: [],
+        });
+      }
+      itemsBySeller.get(sellerIdStr).lines.push(item);
+    }
+
+    for (const [sellerIdStr, data] of itemsBySeller.entries()) {
+      const seller = data.sellerDoc;
+      const lines = data.lines;
+
+      // Extract delivery charge for this seller (with safe fallback)
+      const inputDeliveryCharge = Number(deliveryCharges[sellerIdStr]) || 0;
+      const deliveryChargePaise = Math.round(inputDeliveryCharge * 100);
+
+      let itemRevenuePaise = 0;
+      for (const line of lines) {
+        const lineTotalPaise = Math.round(line.unitPrice * 100) * line.quantity;
+        itemRevenuePaise += lineTotalPaise;
+      }
+
+      // Platform Commission Math
+      let commissionPaise = 0;
+      const config = seller.commissionConfig || {};
+      if (config.commissionType === "percentage") {
+        let calculatedCommission = 0;
+        for (const line of lines) {
+          const lineTotalPaise = Math.round(line.unitPrice * 100) * line.quantity;
+          const categoryRate = config.categoryCommissions?.get(line.productCategory) ?? config.commissionValue ?? 5;
+          calculatedCommission += Math.floor(lineTotalPaise * (categoryRate / 100));
+        }
+        commissionPaise = calculatedCommission;
+      } else {
+        const fixedFeePaise = Math.round((config.commissionValue || 5) * 100);
+        commissionPaise = Math.min(itemRevenuePaise, fixedFeePaise);
+      }
+
+      const totalSubOrderPaise = itemRevenuePaise + deliveryChargePaise;
+      grandTotalPaise += totalSubOrderPaise;
+
+      // Create Sub-Order
+      const subOrder = await Order.create({
+        seller: seller._id,
+        parentOrder: parentOrder._id,
+        razorpayOrderId: "", // will update post Razorpay Order creation
+        items: lines.map((line) => ({
+          product: line.productId,
+          productTitle: line.productTitle,
+          productCategory: line.productCategory,
+          productImageUrl: line.productImageUrl,
+          variantId: line.variantId,
+          variantTitle: line.variantTitle,
+          selectedVariants: line.selectedVariants,
+          unitPrice: line.unitPrice,
+          quantity: line.quantity,
+          lineTotal: line.lineTotal,
+        })),
+        customerName: parentOrder.customerName,
+        customerPhone: parentOrder.customerPhone,
+        deliveryAddress: parentOrder.deliveryAddress,
+        note: parentOrder.note,
+        amount: itemRevenuePaise / 100, // keep decimal representation for existing UI compatibility
+        quantity: lines.reduce((sum, l) => sum + l.quantity, 0),
+        deliveryCharge: inputDeliveryCharge,
+        selectedVariants: lines[0].selectedVariants,
+        paymentMethod: "prepaid",
+        paymentStatus: "pending",
+        commissionAmountPaise: commissionPaise,
+        transferStatus: "untransferred",
+      });
+
+      createdSubOrders.push(subOrder);
+    }
+
+    // 4. Create Razorpay unified Order
+    const rpOrder = await razorpay.orders.create({
+      amount: grandTotalPaise,
+      currency: "INR",
+      receipt: parentOrder._id.toString(),
     });
 
-    return res.status(201).json({ order });
+    // 5. Update ParentOrder and Sub-Orders with Razorpay reference IDs
+    parentOrder.razorpayOrderId = rpOrder.id;
+    parentOrder.totalAmountPaise = grandTotalPaise;
+    parentOrder.subOrders = createdSubOrders.map((o) => o._id);
+    await parentOrder.save();
+
+    for (const subOrder of createdSubOrders) {
+      subOrder.razorpayOrderId = rpOrder.id;
+      await subOrder.save();
+    }
+
+    return res.status(201).json({
+      parentOrderId: parentOrder._id,
+      razorpayOrderId: rpOrder.id,
+      amount: grandTotalPaise / 100,
+      currency: "INR",
+      keyId: process.env.RAZORPAY_KEY_ID || "rzp_test_mock_id",
+      subOrders: createdSubOrders,
+    });
+
   } catch (error) {
-    console.error(error);
-    return res.status(500).json({ message: "Unable to create order" });
+    console.error("[Order Creation Error]:", error);
+    return res.status(500).json({ message: "Unable to create marketplace order", error: error.message });
   }
 });
 
@@ -471,6 +551,53 @@ router.patch("/:orderId/status", auth, async (req, res) => {
 
     if (!order) {
       return res.status(404).json({ message: "Order not found" });
+    }
+
+    // Programmatic payout release when seller marks the order as delivered
+    if (status === "delivered" && order.transferId && order.transferStatus === "processed") {
+      try {
+        const isMock = !process.env.RAZORPAY_KEY_ID || process.env.RAZORPAY_KEY_ID === "rzp_test_mock_id";
+        if (isMock) {
+          console.log(`[Mock Payout Release] Released on_hold for transfer: ${order.transferId}`);
+        } else {
+          // Native Razorpay HTTP request to update on_hold status to false
+          await new Promise((resolve, reject) => {
+            const https = require("https");
+            const postData = JSON.stringify({ on_hold: false });
+            
+            const apiReq = https.request(
+              `https://api.razorpay.com/v1/transfers/${order.transferId}`,
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "Content-Length": Buffer.byteLength(postData),
+                  "Authorization": "Basic " + Buffer.from(process.env.RAZORPAY_KEY_ID + ":" + process.env.RAZORPAY_KEY_SECRET).toString("base64")
+                }
+              },
+              (apiRes) => {
+                let data = "";
+                apiRes.on("data", chunk => data += chunk);
+                apiRes.on("end", () => {
+                  if (apiRes.statusCode >= 200 && apiRes.statusCode < 300) {
+                    resolve(JSON.parse(data));
+                  } else {
+                    reject(new Error(`Razorpay API returned code ${apiRes.statusCode}: ${data}`));
+                  }
+                });
+              }
+            );
+            apiReq.on("error", reject);
+            apiReq.write(postData);
+            apiReq.end();
+          });
+          console.log(`[Razorpay Payout Release] Payout successfully released for transfer: ${order.transferId}`);
+        }
+      } catch (err) {
+        console.error(`[Payout Release Failure] Could not release transfer hold for order ${order._id}:`, err.message);
+        // We do not block database status update if payment gateway API fails, 
+        // as the admin can manually resolve it or retry.
+      }
     }
 
     order.paymentStatus = status;

@@ -40,6 +40,7 @@ type AppIconName =
   | "logout"
   | "sun"
   | "moon"
+  | "earnings"
   | "language";
 
 type IconProps = {
@@ -336,6 +337,13 @@ const iconMap: Record<AppIconName, (props: IconProps) => ReactElement> = {
       <path d="M15 10h5" />
       <path d="m16 19 2.5-7 2.5 7" />
       <path d="M16.8 17h3.4" />
+    </IconBase>
+  ),
+  earnings: ({ className }) => (
+    <IconBase className={className}>
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <path d="M3 10h18" />
+      <circle cx="16" cy="14" r="1" />
     </IconBase>
   ),
 };

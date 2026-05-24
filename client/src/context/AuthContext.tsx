@@ -64,6 +64,8 @@ interface UpdateProfileInput {
   privacyPolicy?: string;
   returnRefundPolicy?: string;
   termsAndConditions?: string;
+  pan?: string;
+  businessType?: string;
 }
 
 interface AuthContextShape {

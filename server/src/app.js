@@ -9,6 +9,7 @@ const productRoutes = require("./routes/productRoutes");
 const orderRoutes = require("./routes/orderRoutes");
 const storeRoutes = require("./routes/storeRoutes");
 const adminRoutes = require("./routes/adminRoutes");
+const paymentRoutes = require("./routes/paymentRoutes");
 
 const app = express();
 
@@ -63,7 +64,13 @@ const authLimiter = rateLimit({
 app.use("/api", apiLimiter);
 app.use("/api/auth", authLimiter);
 
-app.use(express.json({ limit: "2mb" }));
+// Store raw body in req.rawBody to support cryptographically verified webhooks
+app.use(express.json({ 
+  limit: "2mb",
+  verify: (req, _res, buf) => {
+    req.rawBody = buf.toString();
+  }
+}));
 app.use(morgan("dev"));
 
 app.get("/api/health", (_req, res) => {
@@ -75,6 +82,7 @@ app.use("/api/products", productRoutes);
 app.use("/api/orders", orderRoutes);
 app.use("/api/store", storeRoutes);
 app.use("/api/admin", adminRoutes);
+app.use("/api/payments", paymentRoutes);
 
 app.use((_req, res) => {
   res.status(404).json({ message: "Not found" });

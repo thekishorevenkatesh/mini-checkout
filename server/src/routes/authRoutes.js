@@ -210,6 +210,16 @@ router.post("/verify-otp", async (req, res) => {
   }
 });
 
+const { encrypt, decrypt } = require("../utils/encryption");
+const TransactionLedger = require("../models/TransactionLedger");
+
+function maskText(text, visibleCount = 4) {
+  if (!text) return "";
+  const clean = String(text).trim();
+  if (clean.length <= visibleCount) return "*".repeat(clean.length);
+  return "*".repeat(clean.length - visibleCount) + clean.slice(-visibleCount);
+}
+
 // ─── POST /auth/register ──────────────────────────────────────────────────
 // Called after OTP verification for new sellers to complete their profile
 router.post("/register", auth, async (req, res) => {
@@ -225,6 +235,8 @@ router.post("/register", auth, async (req, res) => {
       bankName,
       bankAccountNumber,
       bankIfsc,
+      pan, // PAN added to KYC collection
+      businessType = "individual",
       businessLogo,
       whatsappNumber,
       callNumber,
@@ -274,11 +286,8 @@ router.post("/register", auth, async (req, res) => {
 
     seller.businessEmail = nextBusinessEmail;
     if (businessAddress) seller.businessAddress = String(businessAddress).trim();
-    if (businessGST) seller.businessGST = String(businessGST).trim();
     if (upiId) seller.upiId = String(upiId).trim();
-    if (bankAccountName) seller.bankAccountName = String(bankAccountName).trim();
     if (bankName) seller.bankName = String(bankName).trim();
-    if (bankAccountNumber) seller.bankAccountNumber = String(bankAccountNumber).trim();
     if (bankIfsc) seller.bankIfsc = String(bankIfsc).trim().toUpperCase();
     if (businessLogo) seller.businessLogo = String(businessLogo).trim();
     if (whatsappNumber) seller.whatsappNumber = String(whatsappNumber).trim();
@@ -288,6 +297,33 @@ router.post("/register", auth, async (req, res) => {
     if (typeof privacyPolicy === "string") seller.privacyPolicy = privacyPolicy.trim();
     if (typeof returnRefundPolicy === "string") seller.returnRefundPolicy = returnRefundPolicy.trim();
     if (typeof termsAndConditions === "string") seller.termsAndConditions = termsAndConditions.trim();
+    
+    // Cryptographic Storage for sensitive details
+    if (!seller.kycDetailsEncrypted) {
+      seller.kycDetailsEncrypted = {};
+    }
+    
+    if (bankAccountName) {
+      seller.kycDetailsEncrypted.bankAccountName = encrypt(bankAccountName);
+      seller.bankAccountName = maskText(bankAccountName, 3);
+    }
+    if (bankAccountNumber) {
+      seller.kycDetailsEncrypted.bankAccountNumber = encrypt(bankAccountNumber);
+      seller.bankAccountNumber = maskText(bankAccountNumber, 4);
+    }
+    if (pan) {
+      seller.kycDetailsEncrypted.pan = encrypt(pan);
+    }
+    if (businessGST) {
+      seller.kycDetailsEncrypted.gst = encrypt(businessGST);
+      seller.businessGST = maskText(businessGST, 4);
+    }
+    
+    seller.kycDetailsEncrypted.bankIfsc = seller.bankIfsc;
+    seller.kycDetailsEncrypted.bankName = seller.bankName;
+    seller.kycDetailsEncrypted.businessType = businessType;
+    seller.kycDetailsEncrypted.businessCategory = businessCategory || "";
+
     seller.approvalStatus = "draft";
     seller.storePublished = false;
     seller.publishRequestedAt = null;
@@ -340,6 +376,8 @@ router.put("/me", auth, async (req, res) => {
       bankName,
       bankAccountNumber,
       bankIfsc,
+      pan,
+      businessType,
       profileImageUrl,
       businessLogo,
       favicon,
@@ -378,11 +416,8 @@ router.put("/me", auth, async (req, res) => {
 
     seller.businessEmail = nextBusinessEmail;
     if (businessAddress !== undefined) seller.businessAddress = String(businessAddress).trim();
-    if (businessGST !== undefined) seller.businessGST = String(businessGST).trim();
     if (typeof upiId === "string") seller.upiId = upiId.trim();
-    if (typeof bankAccountName === "string") seller.bankAccountName = bankAccountName.trim();
     if (typeof bankName === "string") seller.bankName = bankName.trim();
-    if (typeof bankAccountNumber === "string") seller.bankAccountNumber = bankAccountNumber.trim();
     if (typeof bankIfsc === "string") seller.bankIfsc = bankIfsc.trim().toUpperCase();
     if (typeof profileImageUrl === "string") seller.profileImageUrl = profileImageUrl.trim();
     if (typeof businessLogo === "string") seller.businessLogo = businessLogo.trim();
@@ -395,6 +430,38 @@ router.put("/me", auth, async (req, res) => {
     if (typeof returnRefundPolicy === "string") seller.returnRefundPolicy = returnRefundPolicy.trim();
     if (typeof termsAndConditions === "string") seller.termsAndConditions = termsAndConditions.trim();
 
+    // Secure cryptographic updates for KYC & bank details
+    if (!seller.kycDetailsEncrypted) {
+      seller.kycDetailsEncrypted = {};
+    }
+
+    if (typeof bankAccountName === "string" && bankAccountName.trim()) {
+      if (!bankAccountName.includes("*")) { // Only encrypt if it's a new raw value
+        seller.kycDetailsEncrypted.bankAccountName = encrypt(bankAccountName);
+        seller.bankAccountName = maskText(bankAccountName, 3);
+      }
+    }
+    if (typeof bankAccountNumber === "string" && bankAccountNumber.trim()) {
+      if (!bankAccountNumber.includes("*")) { // Only encrypt if it's a new raw value
+        seller.kycDetailsEncrypted.bankAccountNumber = encrypt(bankAccountNumber);
+        seller.bankAccountNumber = maskText(bankAccountNumber, 4);
+      }
+    }
+    if (typeof pan === "string" && pan.trim() && !pan.includes("*")) {
+      seller.kycDetailsEncrypted.pan = encrypt(pan);
+    }
+    if (typeof businessGST === "string" && businessGST.trim()) {
+      if (!businessGST.includes("*")) { // Only encrypt if it's a new raw value
+        seller.kycDetailsEncrypted.gst = encrypt(businessGST);
+        seller.businessGST = maskText(businessGST, 4);
+      }
+    }
+
+    if (businessType) seller.kycDetailsEncrypted.businessType = businessType;
+    if (businessCategory) seller.kycDetailsEncrypted.businessCategory = businessCategory;
+    seller.kycDetailsEncrypted.bankIfsc = seller.bankIfsc;
+    seller.kycDetailsEncrypted.bankName = seller.bankName;
+
     if (!seller.slug) {
       seller.slug = await createUniqueSellerSlug(
         seller.businessName,
@@ -406,6 +473,49 @@ router.put("/me", auth, async (req, res) => {
     return res.json({ seller: withPolicyDefaults(seller) });
   } catch (error) {
     return res.status(500).json({ message: "Unable to update profile" });
+  }
+});
+
+// ─── GET /auth/earnings ──────────────────────────────────────────────────
+// Returns the seller's sales, ledger logs, and settlement breakdowns
+router.get("/earnings", auth, async (req, res) => {
+  try {
+    const ledgers = await TransactionLedger.find({ sellerId: req.sellerId })
+      .populate("orderId", "_id customerName createdAt amount deliveryCharge")
+      .sort({ createdAt: -1 });
+
+    let grossRevenuePaise = 0;
+    let netEarningsPaise = 0;
+    let deliveryFeesPaise = 0;
+    let reversalsPaise = 0;
+
+    for (const log of ledgers) {
+      if (log.type === "credit") {
+        if (log.purpose === "order_item_revenue") {
+          grossRevenuePaise += log.amountPaise;
+          netEarningsPaise += log.amountPaise;
+        } else if (log.purpose === "delivery_fee") {
+          deliveryFeesPaise += log.amountPaise;
+          netEarningsPaise += log.amountPaise;
+        }
+      } else if (log.type === "debit") {
+        reversalsPaise += log.amountPaise;
+        netEarningsPaise -= log.amountPaise;
+      }
+    }
+
+    return res.json({
+      summary: {
+        grossRevenue: grossRevenuePaise / 100,
+        netEarnings: netEarningsPaise / 100,
+        deliveryFees: deliveryFeesPaise / 100,
+        reversals: reversalsPaise / 100,
+      },
+      ledger: ledgers,
+    });
+  } catch (error) {
+    console.error("[Get Earnings Error]:", error);
+    return res.status(500).json({ message: "Unable to fetch seller financial metrics" });
   }
 });
 

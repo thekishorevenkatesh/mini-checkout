@@ -25,7 +25,7 @@ import {
   productMatchesCategory,
 } from "../utils/productCategories";
 
-type Tab = "dashboard" | "store" | "products" | "orders" | "reports" | "profile" | "policies";
+type Tab = "dashboard" | "store" | "products" | "orders" | "reports" | "earnings" | "profile" | "policies";
 type ProductFormVariant = {
   label: string;   // value / size  e.g. "500"
   uom: string;     // unit of measure e.g. "g", "ml", "Pack"
@@ -275,6 +275,8 @@ export function DashboardPage() {
   const [profileUpi, setProfileUpi] = useState(seller?.upiId || "");
   const [profileAddress, setProfileAddress] = useState<AddressParts>(parseAddress(seller?.businessAddress || ""));
   const [profileGST, setProfileGST] = useState(seller?.businessGST || "");
+  const [profilePAN, setProfilePAN] = useState(seller?.pan || "");
+  const [profileBusinessType, setProfileBusinessType] = useState(seller?.businessType || "individual");
   const [profileLogo, setProfileLogo] = useState(seller?.businessLogo || "");
   const [profileFavicon, setProfileFavicon] = useState(seller?.favicon || "");
   const [profileCategory, setProfileCategory] = useState(seller?.businessCategory || "");
@@ -338,6 +340,8 @@ export function DashboardPage() {
     topProducts: { title: string; unitsSold: number; revenue: number }[];
   } | null>(null);
   const [loadingReport, setLoadingReport] = useState(false);
+  const [earningsData, setEarningsData] = useState<any>(null);
+  const [loadingEarnings, setLoadingEarnings] = useState(false);
 
   // ── Real-time order refresh
   const ordersIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -362,6 +366,8 @@ export function DashboardPage() {
     setProfileUpi(seller.upiId || "");
     setProfileAddress(parseAddress(seller.businessAddress || ""));
     setProfileGST(seller.businessGST || "");
+    setProfilePAN(seller.pan || "");
+    setProfileBusinessType(seller.businessType || "individual");
     setProfileLogo(seller.businessLogo || "");
     setProfileFavicon(seller.favicon || "");
     setProfileCategory(seller.businessCategory || "");
@@ -446,7 +452,20 @@ export function DashboardPage() {
     finally { setLoadingReport(false); }
   }
 
+  async function loadEarnings() {
+    setLoadingEarnings(true);
+    try {
+      const response = await api.get("/auth/earnings");
+      setEarningsData(response.data);
+    } catch {
+      setError("Could not load earnings metrics.");
+    } finally {
+      setLoadingEarnings(false);
+    }
+  }
+
   useEffect(() => { if (tab === "reports") void loadReport(); }, [tab, reportDays]);
+  useEffect(() => { if (tab === "earnings") void loadEarnings(); }, [tab]);
 
   const stats = useMemo(() => {
     const now = Date.now();
@@ -590,6 +609,8 @@ export function DashboardPage() {
         bankIfsc: profileBankIfsc.trim().toUpperCase(),
         businessAddress: formatAddress(profileAddress),
         businessGST: profileGST.trim(),
+        pan: profilePAN.trim(),
+        businessType: profileBusinessType,
         businessLogo: profileLogo.trim(),
         favicon: profileFavicon.trim(),
         businessCategory: profileCategory.trim(),
@@ -1099,6 +1120,7 @@ export function DashboardPage() {
     { key: "products", label: t("nav.products", "Products"), icon: "products" },
     { key: "orders", label: t("nav.orders", "Orders"), icon: "orders" },
     { key: "reports", label: t("nav.reports", "Reports"), icon: "reports" },
+    { key: "earnings", label: t("nav.earnings", "Earnings & Payouts"), icon: "earnings" },
     { key: "profile", label: t("nav.profile", "Profile"), icon: "profile" },
     { key: "policies", label: t("nav.policies", "Policies"), icon: "policies" },
   ];
@@ -2742,6 +2764,87 @@ export function DashboardPage() {
           )}
         </div>
       )}
+      {tab === "earnings" && (
+        <div className="mx-auto max-w-4xl space-y-5">
+          {/* Earnings Header Summary Cards */}
+          {loadingEarnings ? (
+            <div className="text-center py-10 text-slate-500">Loading earnings ledger...</div>
+          ) : earningsData ? (
+            <>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <article className="rounded-3xl border border-white/70 bg-gradient-to-br from-emerald-500 to-teal-600 p-5 text-white shadow-card">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-emerald-100">Gross Sales</p>
+                  <p className="mt-2 font-heading text-2xl font-bold">₹{earningsData.summary.grossRevenue.toLocaleString("en-IN")}</p>
+                  <p className="text-[10px] text-emerald-200 mt-1">Total revenue processed before splits</p>
+                </article>
+                <article className="rounded-3xl border border-white/70 bg-gradient-to-br from-teal-600 to-sky-600 p-5 text-white shadow-card">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-teal-100">Net Share Payout</p>
+                  <p className="mt-2 font-heading text-2xl font-bold">₹{earningsData.summary.netEarnings.toLocaleString("en-IN")}</p>
+                  <p className="text-[10px] text-teal-200 mt-1">Settled to bank account post commissions</p>
+                </article>
+                <article className="rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card dark:border-teal-900/35 dark:bg-slate-900">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Commission Deducted</p>
+                  <p className="mt-2 font-heading text-2xl font-bold text-slate-900 dark:text-white">₹{earningsData.summary.reversals.toLocaleString("en-IN")}</p>
+                  <p className="text-[10px] text-slate-500 mt-1">Platform commissions and cuts</p>
+                </article>
+                <article className="rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card dark:border-teal-900/35 dark:bg-slate-900">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Delivery Fees</p>
+                  <p className="mt-2 font-heading text-2xl font-bold text-slate-900 dark:text-white">₹{earningsData.summary.deliveryFees.toLocaleString("en-IN")}</p>
+                  <p className="text-[10px] text-slate-500 mt-1">Total delivery earnings retained</p>
+                </article>
+              </div>
+
+              {/* Transaction Ledger Table */}
+              <article className="rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card dark:border-teal-900/35 dark:bg-slate-900/90">
+                <div className="mb-4">
+                  <h3 className="font-heading text-base font-bold text-slate-800 dark:text-white">Transaction & Payout Ledger</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">Auditable trace of credit/debit payouts processed via Razorpay Route</p>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="border-b border-slate-100 text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:border-slate-800">
+                        <th className="py-2.5 px-2">Date</th>
+                        <th className="py-2.5 px-2">Transaction Ref</th>
+                        <th className="py-2.5 px-2">Purpose</th>
+                        <th className="py-2.5 px-2">Type</th>
+                        <th className="py-2.5 px-2 text-right">Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {earningsData.ledger.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="text-center py-10 text-slate-500">No payout splits or settlements processed yet.</td>
+                        </tr>
+                      ) : (
+                        earningsData.ledger.map((log: any) => (
+                          <tr key={log._id} className="border-b border-slate-100 hover:bg-slate-50/50 dark:border-slate-800 dark:hover:bg-slate-800/40">
+                            <td className="py-3 px-2 text-slate-500 whitespace-nowrap">{new Date(log.createdAt).toLocaleDateString("en-IN")}</td>
+                            <td className="py-3 px-2 font-mono text-slate-700 dark:text-slate-300 font-semibold">{log.razorpayTransferId || "platform_ledger"}</td>
+                            <td className="py-3 px-2">
+                              <span className="capitalize">{log.purpose.replace(/_/g, " ")}</span>
+                            </td>
+                            <td className="py-3 px-2">
+                              <span className={`inline-block rounded-full px-2 py-0.5 font-bold uppercase text-[9px] ${log.type === "credit" ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : "bg-rose-50 text-rose-700 border border-rose-200"}`}>
+                                {log.type}
+                              </span>
+                            </td>
+                            <td className={`py-3 px-2 text-right font-bold font-mono ${log.type === "credit" ? "text-emerald-600" : "text-rose-600"}`}>
+                              {log.type === "credit" ? "+" : "-"}₹{(log.amountPaise / 100).toLocaleString("en-IN")}
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </article>
+            </>
+          ) : (
+            <div className="text-center py-10 text-slate-500">Failed to load earnings metrics.</div>
+          )}
+        </div>
+      )}
       {tab === "profile" && (
         <div className="mx-auto max-w-3xl space-y-5">
           {/* Account banner */}
@@ -2823,11 +2926,24 @@ export function DashboardPage() {
                 </label>
                 <label className="block space-y-1">
                   <span className="text-sm font-semibold text-slate-700">GST number</span>
-                  <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-teal-400" placeholder="22AAAAA0000A1Z5" value={profileGST} onChange={e => setProfileGST(e.target.value)} />
+                  <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-teal-400 dark:bg-slate-900 dark:border-slate-700 dark:text-slate-100" placeholder="22AAAAA0000A1Z5" value={profileGST} onChange={e => setProfileGST(e.target.value)} />
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-sm font-semibold text-slate-700">PAN details</span>
+                  <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm uppercase outline-none focus:border-teal-400 dark:bg-slate-900 dark:border-slate-700 dark:text-slate-100" placeholder="ABCDE1234F" maxLength={10} value={profilePAN} onChange={e => setProfilePAN(e.target.value.toUpperCase())} />
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-sm font-semibold text-slate-700">Business type</span>
+                  <select className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-teal-400 dark:bg-slate-900 dark:border-slate-700 dark:text-slate-100" value={profileBusinessType} onChange={e => setProfileBusinessType(e.target.value)}>
+                    <option value="individual">Individual / Proprietorship</option>
+                    <option value="partnership">Partnership</option>
+                    <option value="company">Private / Public Company</option>
+                    <option value="llp">Limited Liability Partnership (LLP)</option>
+                  </select>
                 </label>
                 <label className="block space-y-1">
                   <span className="text-sm font-semibold text-slate-700">Business email</span>
-                  <input type="email" className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-teal-400" placeholder="shop@example.com" value={profileEmail} onChange={e => setProfileEmail(e.target.value)} />
+                  <input type="email" className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-teal-400 dark:bg-slate-900 dark:border-slate-700 dark:text-slate-100" placeholder="shop@example.com" value={profileEmail} onChange={e => setProfileEmail(e.target.value)} />
                 </label>
               </div>
             </article>

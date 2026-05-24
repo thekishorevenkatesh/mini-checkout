@@ -169,9 +169,44 @@ const sellerSchema = new mongoose.Schema(
     },
     approvalStatus: {
       type: String,
-      enum: ["draft", "pending", "approved", "rejected"],
+      enum: ["draft", "pending", "approved", "rejected", "suspended"],
       default: "draft",
       index: true,
+    },
+    razorpayAccountId: {
+      type: String,
+      default: "",
+    },
+    razorpayAccountStatus: {
+      type: String,
+      enum: ["uncreated", "pending", "active", "suspended"],
+      default: "uncreated",
+    },
+    kycDetailsEncrypted: {
+      pan: { type: String, default: "" },
+      gst: { type: String, default: "" },
+      bankAccountName: { type: String, default: "" },
+      bankAccountNumber: { type: String, default: "" },
+      bankName: { type: String, default: "" },
+      bankIfsc: { type: String, default: "" },
+      businessType: { type: String, default: "individual" },
+      businessCategory: { type: String, default: "" },
+    },
+    commissionConfig: {
+      commissionType: {
+        type: String,
+        enum: ["percentage", "fixed"],
+        default: "percentage",
+      },
+      commissionValue: {
+        type: Number,
+        default: 5, // Default 5% commission
+      },
+      categoryCommissions: {
+        type: Map,
+        of: Number,
+        default: {},
+      },
     },
     storePublished: {
       type: Boolean,

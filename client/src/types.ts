@@ -64,6 +64,20 @@ export interface Seller {
   createdAt?: string;
   idProofUrl?: string;
   addressProofUrl?: string;
+  pan?: string;
+  businessType?: string;
+  razorpayAccountId?: string;
+  razorpayAccountStatus?: string;
+  kycDetailsEncrypted?: {
+    pan?: string;
+    gst?: string;
+    bankAccountName?: string;
+    bankAccountNumber?: string;
+    bankName?: string;
+    bankIfsc?: string;
+    businessType?: string;
+    businessCategory?: string;
+  };
 }
 
 export interface Product {

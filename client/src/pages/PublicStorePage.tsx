@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { createPortal } from "react-dom";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { QRCodeSVG } from "qrcode.react";
 import { api } from "../api/client";
 import { ZensosLogo } from "../components/ZensosLogo";
 import { AppIcon } from "../components/ui/AppIcon";
@@ -18,7 +17,7 @@ import {
   type AddressParts,
   type PhoneParts,
 } from "../utils/contactFields";
-import type { PaymentMethod, Product, Seller, VariantItem } from "../types";
+import type { Product, Seller, VariantItem } from "../types";
 import {
   collectCategoryTabs,
   getProductCategories,
@@ -35,17 +34,8 @@ type CartItem = {
   unitPrice: number;
 };
 type CartMap = Record<string, CartItem>;
-type SavedCheckoutData = {
-  customerName: string;
-  customerPhone: PhoneParts;
-  deliveryAddress: AddressParts;
-  note: string;
-  paymentMethod: PaymentMethod;
-  cart: CartMap;
-  deliveryCharge: number;
-  grandTotal: number;
-};
 type PolicyKey = "privacyPolicy" | "returnRefundPolicy" | "termsAndConditions";
+
 
 const SOCIAL_ICONS: Record<string, Parameters<typeof AppIcon>[0]["name"]> = {
   Instagram: "instagram",
@@ -61,9 +51,7 @@ const SOCIAL_ICONS: Record<string, Parameters<typeof AppIcon>[0]["name"]> = {
 const DEFAULT_APP_FAVICON = "/zensos.png";
 const ADMIN_TOKEN_KEY = "zensos_admin_token";
 
-function createTransactionRef() {
-  return `ORD-${Date.now()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
-}
+
 
 function normalizeImageUrl(url: string) {
   const trimmed = String(url || "").trim();
@@ -110,22 +98,7 @@ function getProductImages(product: Product) {
   return fallback;
 }
 
-function buildUpiLink(
-  upiId: string,
-  businessName: string,
-  amount: number,
-  transactionRef: string,
-) {
-  const params = new URLSearchParams({
-    pa: upiId,
-    pn: businessName,
-    am: amount.toFixed(2),
-    cu: "INR",
-    tn: `Order ${transactionRef}`.slice(0, 35),
-    tr: transactionRef,
-  });
-  return `upi://pay?${params.toString()}`;
-}
+
 
 function getVariantPriceKey(label: string, option: string) {
   return `${label}::${option}`;
@@ -433,16 +406,7 @@ export function PublicStorePage() {
   const [note, setNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("prepaid");
-
-  // Payment proof
-  const [screenshotUrl, setScreenshotUrl] = useState("");
-  const [screenshotFile, setScreenshotFile] = useState<File | null>(null);
-  const [screenshotPreview, setScreenshotPreview] = useState("");
-  const [uploadingProof, setUploadingProof] = useState(false);
   const [proofSuccess, setProofSuccess] = useState("");
-  const [savedProofUrl, setSavedProofUrl] = useState("");
-  const [savedCheckoutData, setSavedCheckoutData] = useState<SavedCheckoutData | null>(null);
   const [activePolicy, setActivePolicy] = useState<PolicyKey | null>(null);
   useEffect(() => {
     async function fetchStore() {
@@ -603,20 +567,6 @@ export function PublicStorePage() {
 
   const grandTotal = itemsTotal + deliveryCharge;
   const cartCount = Object.values(cart).reduce((s, i) => s + i.quantity, 0);
-  const isPrepaidCheckout = paymentMethod === "prepaid";
-  const isCodCheckout = paymentMethod === "cod";
-  const supportsPrepaid = seller?.paymentMode === "prepaid_only" || seller?.paymentMode === "both";
-  const supportsCod = seller?.paymentMode === "cod_only" || seller?.paymentMode === "both";
-
-  const previewUpiLink = useMemo(() => {
-    if (!seller?.upiId || grandTotal <= 0 || !isPrepaidCheckout) return "";
-    return buildUpiLink(
-      seller.upiId,
-      seller.businessName,
-      grandTotal,
-      createTransactionRef(),
-    );
-  }, [grandTotal, isPrepaidCheckout, seller]);
 
   const policyMeta: Record<PolicyKey, { title: string; content: string }> = useMemo(() => ({
     privacyPolicy: {
@@ -633,16 +583,8 @@ export function PublicStorePage() {
     },
   }), [seller]);
 
-  useEffect(() => {
-    if (!seller) return;
 
-    if (seller.paymentMode === "cod_only") {
-      setPaymentMethod("cod");
-      return;
-    }
 
-    setPaymentMethod("prepaid");
-  }, [seller]);
 
   useEffect(() => {
     const faviconElement = document.querySelector<HTMLLinkElement>("link[rel='icon']");
@@ -746,9 +688,6 @@ export function PublicStorePage() {
     }));
   }
 
-  function openUpiIntent(link: string) {
-    window.location.href = link;
-  }
 
   function openCartAndScroll() {
     // If drawer is already open, don't trigger auto-scroll
@@ -797,83 +736,18 @@ export function PublicStorePage() {
   }, [showCart]);
 
   function resetSavedProgress() {
-    setSavedCheckoutData(null);
-    setSavedProofUrl("");
     setProofSuccess("");
   }
 
-  function clearScreenshotSelection() {
-    setScreenshotFile(null);
-    setScreenshotPreview("");
-    setScreenshotUrl("");
-    setSavedProofUrl("");
-    setProofSuccess("");
-  }
-
-  function validateCheckout() {
-    setError("");
-    setSuccessMessage("");
-
-    if (cartEntries.length === 0) {
-      setError("Select at least one product.");
-      return null;
-    }
-    if (!sellerSlug) {
-      setError("Store link is invalid.");
-      return null;
-    }
-    if (!seller) {
-      setError("Seller store unavailable.");
-      return null;
-    }
-    if (!customerName.trim()) {
-      setError("Enter your name.");
-      return null;
-    }
-    if (!customerPhone.number.trim()) {
-      setError("Enter your phone number.");
-      return null;
-    }
-    if (isPrepaidCheckout && !seller.upiId) {
-      setError("UPI is not configured for this store.");
-      return null;
-    }
-
-    for (const { product, item } of cartEntries) {
-      for (const variant of getNormalizedVariantGroups(product)) {
-        if (!variant.options?.length) continue;
-        if (!item?.variants?.[variant.label]) {
-          setError(`Please select ${variant.label} for ${product.title}.`);
-          return null;
-        }
-      }
-    }
-
-    return {
-      customerName: customerName.trim(),
-      customerPhone,
-      deliveryAddress,
-      note: note.trim(),
-      paymentMethod,
-      cart: JSON.parse(JSON.stringify(cart)) as CartMap,
-      deliveryCharge,
-      grandTotal,
-    } satisfies SavedCheckoutData;
-  }
-
-  function handleSaveDetails(e: FormEvent) {
-    e.preventDefault();
-    const nextDraft = validateCheckout();
-    if (!nextDraft) return;
-
-    setSavedCheckoutData(nextDraft);
-    setSavedProofUrl("");
-    setProofSuccess("");
-    setSuccessMessage(
-      nextDraft.paymentMethod === "prepaid"
-        ? "Details saved. Complete the payment and upload your screenshot before placing the order."
-        : "Details saved. You can place the order now."
-    );
+  function loadRazorpayScript(): Promise<boolean> {
+    return new Promise((resolve) => {
+      if ((window as any).Razorpay) { resolve(true); return; }
+      const script = document.createElement("script");
+      script.src = "https://checkout.razorpay.com/v1/checkout.js";
+      script.onload = () => resolve(true);
+      script.onerror = () => resolve(false);
+      document.body.appendChild(script);
+    });
   }
 
   // -- Place order
@@ -881,96 +755,112 @@ export function PublicStorePage() {
     e.preventDefault();
     setError("");
     setSuccessMessage("");
-    if (!savedCheckoutData) {
-      setError("Save your details before placing the order.");
-      return;
-    }
-    if (savedCheckoutData.paymentMethod === "prepaid" && !savedProofUrl) {
-      setError("Upload and save your payment screenshot before placing the order.");
-      return;
-    }
 
-    const stagedItems = Object.values(savedCheckoutData.cart);
-    if (stagedItems.length === 0) {
-      setError("Your saved cart is empty. Save your details again.");
-      return;
+    // Validate form before proceeding
+    if (cartEntries.length === 0) { setError("Select at least one product."); return; }
+    if (!sellerSlug) { setError("Store link is invalid."); return; }
+    if (!seller) { setError("Seller store unavailable."); return; }
+    if (!customerName.trim()) { setError("Enter your name."); return; }
+    if (!customerPhone.number.trim()) { setError("Enter your phone number."); return; }
+    for (const { product, item } of cartEntries) {
+      for (const variant of getNormalizedVariantGroups(product)) {
+        if (!variant.options?.length) continue;
+        if (!item?.variants?.[variant.label]) {
+          setError(`Please select ${variant.label} for ${product.title}.`);
+          return;
+        }
+      }
     }
 
     setSubmitting(true);
     try {
-      const response = await api.post<{ order: { _id: string } }>("/orders", {
-        items: stagedItems.map((item) => ({
+      // 1. Load Razorpay script
+      const scriptLoaded = await loadRazorpayScript();
+      if (!scriptLoaded) {
+        setError("Failed to load Razorpay payment gateway. Please check your internet connection.");
+        setSubmitting(false);
+        return;
+      }
+
+      // 2. Build multi-vendor delivery charges mapping
+      const deliveryChargesMap: Record<string, number> = {};
+      if (seller) {
+        deliveryChargesMap[seller._id] = deliveryCharge;
+      }
+
+      // 3. Post to backend to generate unified Razorpay order
+      const response = await api.post<{
+        parentOrderId: string;
+        razorpayOrderId: string;
+        amount: number;
+        currency: string;
+        keyId: string;
+        subOrders: Array<{ _id: string }>;
+      }>("/orders", {
+        items: cartEntries.map(({ item }) => ({
           productId: item.productId,
           variantId: item.variantId,
           quantity: item.quantity,
           selectedVariants: item.variants,
         })),
-        customerName: savedCheckoutData.customerName,
-        customerPhone: formatPhone(savedCheckoutData.customerPhone),
-        deliveryAddress: formatAddress(savedCheckoutData.deliveryAddress),
-        deliveryCharge: savedCheckoutData.deliveryCharge,
-        note: savedCheckoutData.note,
-        paymentMethod: savedCheckoutData.paymentMethod,
-        paymentScreenshotUrl: savedCheckoutData.paymentMethod === "prepaid" ? savedProofUrl : "",
+        customerName: customerName.trim(),
+        customerPhone: formatPhone(customerPhone),
+        deliveryAddress: formatAddress(deliveryAddress),
+        deliveryCharges: deliveryChargesMap,
+        note: note.trim(),
       });
-      const orderId = response.data.order._id;
-      if (!orderId) { setError("Could not place order. Please retry."); }
-      else {
-        if (savedCheckoutData.paymentMethod === "cod") {
-          setSuccessMessage(`Order placed successfully for ${stagedItems.length} cart item(s). The seller will collect payment on delivery.`);
+
+      const { razorpayOrderId, keyId, amount, currency, subOrders } = response.data;
+
+      // 4. Trigger Razorpay Standard Checkout SDK overlay
+      const options = {
+        key: keyId,
+        amount: amount * 100, // in paise
+        currency: currency,
+        name: seller?.businessName || "Zensos Marketplace",
+        description: `Unified Checkout - ${subOrders.length} Shop(s)`,
+        image: seller?.businessLogo || "",
+        order_id: razorpayOrderId,
+        prefill: {
+          name: customerName.trim(),
+          contact: formatPhone(customerPhone),
+        },
+        theme: {
+          color: "#0f766e",
+        },
+        handler: function (_paymentRes: any) {
+          // Success! Clean cart and redirect
           setCustomerName("");
           setCustomerPhone({ countryCode: DEFAULT_COUNTRY_CODE, number: "" });
           setDeliveryAddress(EMPTY_ADDRESS);
           setNote("");
           setCart({});
-          setScreenshotUrl("");
-          setScreenshotFile(null);
-          setScreenshotPreview("");
           resetSavedProgress();
-          return;
+
+          const params = new URLSearchParams();
+          if (sellerSlug) params.set("sellerSlug", sellerSlug);
+          const orderIdsList = subOrders.map((o) => o._id).join(",");
+          params.set("orderIds", orderIdsList);
+          navigate(`/thank-you?${params.toString()}`, { replace: true });
+        },
+        modal: {
+          ondismiss: function () {
+            setSubmitting(false);
+          }
         }
+      };
 
-        setCustomerName("");
-        setCustomerPhone({ countryCode: DEFAULT_COUNTRY_CODE, number: "" });
-        setDeliveryAddress(EMPTY_ADDRESS);
-        setNote("");
-        setCart({});
-        setScreenshotUrl("");
-        setScreenshotFile(null);
-        setScreenshotPreview("");
-        resetSavedProgress();
+      const rzp = new (window as any).Razorpay(options);
+      rzp.open();
 
-        const params = new URLSearchParams();
-        if (sellerSlug) params.set("sellerSlug", sellerSlug);
-        params.set("orderIds", orderId);
-        navigate(`/thank-you?${params.toString()}`, { replace: true });
-      }
-    } catch { setError("Could not submit order."); }
-    finally { setSubmitting(false); }
+    } catch (err: any) {
+      console.error(err);
+      setError(err.response?.data?.message || "Could not generate transaction order.");
+      setSubmitting(false);
+    }
   }
 
-  // -- Submit payment proof
-  async function handleProofSubmit() {
-    if (!savedCheckoutData || savedCheckoutData.paymentMethod !== "prepaid") {
-      setError("Save your details before uploading a screenshot.");
-      return;
-    }
-    let proofUrl = screenshotUrl.trim();
-    if (screenshotFile) {
-      proofUrl = await new Promise<string>((resolve) => {
-        const reader = new FileReader();
-        reader.onloadend = () => resolve(reader.result as string);
-        reader.readAsDataURL(screenshotFile);
-      });
-    }
-    if (!proofUrl) return;
-    setUploadingProof(true);
-    try {
-      setSavedProofUrl(proofUrl);
-      setProofSuccess("Screenshot saved. You can place the order now.");
-    } catch { setError("Could not submit proof."); }
-    finally { setUploadingProof(false); }
-  }
+
 
   function openVariantPopup(productId: string) {
     const product = products.find(p => p._id === productId);
@@ -1068,12 +958,7 @@ export function PublicStorePage() {
     setVariantPopupProductId(null);
   }
 
-  async function copyIntentLink() {
-    if (!previewUpiLink) return;
-    await navigator.clipboard.writeText(previewUpiLink);
-    setSuccessMessage("UPI intent link copied.");
-    window.setTimeout(() => setSuccessMessage(""), 2200);
-  }
+
 
 
   if (loading) {
@@ -1503,192 +1388,63 @@ export function PublicStorePage() {
             </div>
           </div>
         )}
-
         <div className="rounded-2xl border border-slate-200 bg-white p-4 space-y-4 shadow-sm dark:border-teal-900/30 dark:bg-slate-950/70">
-        <div className="flex items-start gap-3">
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-teal-100 text-sm font-bold text-teal-800 dark:bg-teal-950 dark:text-teal-200">1</span>
-          <div className="space-y-1 pt-0.5">
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">Customer Details</p>
-            <p className="text-sm text-slate-600 dark:text-slate-300">Fill your details and choose how you want to pay before placing the order.</p>
+          <div className="flex items-start gap-3">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-teal-100 text-sm font-bold text-teal-800 dark:bg-teal-950 dark:text-teal-200">
+              <AppIcon name="cart" />
+            </span>
+            <div className="space-y-1 pt-0.5">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">Checkout & Payment</p>
+              <p className="text-sm text-slate-600 dark:text-slate-300">Enter your shipping details below. Payouts will be split automatically using Razorpay Route.</p>
+            </div>
           </div>
-        </div>
 
-      
-
-        {/* Order form */}
-        <form className="space-y-3" onSubmit={handleSaveDetails}>
-          <label className="block space-y-1">
-            <span className="text-sm font-semibold text-slate-700">Your name *</span>
-            <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400"
-              value={customerName} onChange={e => { setCustomerName(e.target.value); resetSavedProgress(); }} required />
-          </label>
-          <label className="block space-y-1">
-            <span className="text-sm font-semibold text-slate-700">Phone number *</span>
-            <div className="flex gap-2">
-              <input className="w-24 rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400" value={customerPhone.countryCode} readOnly disabled placeholder="+91" required />
-              <input
-                type="tel"
-                inputMode="numeric"
-                pattern="[0-9]{10,15}"
-                maxLength={15}
-                className="flex-1 rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400"
-                value={customerPhone.number}
-                onChange={e => { setCustomerPhone((prev) => ({ ...prev, number: e.target.value.replace(/\D/g, "") })); resetSavedProgress(); }}
-                required
-              />
-            </div>
-          </label>
-          <AddressFields
-            value={deliveryAddress}
-            onChange={(next) => {
-              setDeliveryAddress(next);
-              resetSavedProgress();
-            }}
-            inputClassName="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400"
-            gridClassName="grid gap-3 sm:grid-cols-2"
-          />
-          <label className="block space-y-1">
-            <span className="text-sm font-semibold text-slate-700">Note (optional)</span>
-            <textarea className="min-h-12 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400"
-              placeholder="Special instructions..." value={note} onChange={e => { setNote(e.target.value); resetSavedProgress(); }} />
-          </label>
-
-          <button type="submit" disabled={submitting || selectedItems.length === 0}
-            className="w-full rounded-xl bg-gradient-to-r from-emerald-500 via-teal-500 to-sky-500 px-4 py-3.5 text-sm font-semibold text-white shadow-md transition hover:from-emerald-400 hover:via-teal-400 hover:to-sky-400 disabled:from-slate-300 disabled:via-slate-300 disabled:to-slate-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-500 dark:hover:from-emerald-500 dark:hover:via-teal-500 dark:hover:to-sky-500">
-            Confirm Delivery Details
-          </button>
-        </form>
-        </div>
-  {(supportsPrepaid || supportsCod) && (
-          <div className="space-y-2">
-            <p className="text-sm font-semibold text-slate-700">Payment method</p>
-            <div className="grid gap-2">
-              {supportsPrepaid && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPaymentMethod("prepaid");
-                    resetSavedProgress();
-                  }}
-                  className={`rounded-xl border px-4 py-3 text-left transition ${isPrepaidCheckout ? "border-teal-500 bg-teal-50" : "border-slate-200 bg-slate-50 hover:border-slate-300"}`}
-                >
-                  <p className="text-sm font-semibold text-slate-900">Pay Before Order</p>
-                  <p className="text-xs text-slate-500">Save details, pay by UPI, upload screenshot, then place the order.</p>
-                </button>
-              )}
-              {supportsCod && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPaymentMethod("cod");
-                    resetSavedProgress();
-                  }}
-                  className={`rounded-xl border px-4 py-3 text-left transition ${isCodCheckout ? "border-teal-500 bg-teal-50" : "border-slate-200 bg-slate-50 hover:border-slate-300"}`}
-                >
-                  <p className="text-sm font-semibold text-slate-900">Cash on Delivery</p>
-                  <p className="text-xs text-slate-500">Place the order now and pay the seller at the time of delivery.</p>
-                </button>
-              )}
-            </div>
-          </div>
-        )}
-        {/* UPI payment */}
-        {(supportsPrepaid && isPrepaidCheckout && seller.upiId && grandTotal > 0 && selectedItems.length > 0) && (
-          <div className="rounded-2xl border border-teal-200/60 bg-gradient-to-b from-teal-50/80 to-slate-50 p-4 space-y-3 dark:border-teal-900/40 dark:from-teal-950/30 dark:to-slate-900/50">
-            <div className="flex items-start gap-3">
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-teal-600 text-sm font-bold text-white dark:bg-teal-700">2</span>
-              <div className="space-y-1 pt-0.5">
-                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-teal-800 dark:text-teal-300">UPI Payment</p>
-                <p className="text-sm text-slate-600 dark:text-slate-300">After saving your details, pay the exact amount below using any UPI app.</p>
-              </div>
-            </div>
-            <p className="text-sm text-slate-700 dark:text-slate-300">UPI ID: <span className="font-semibold text-slate-900 dark:text-slate-100">{seller.upiId}</span></p>
-            <div className="inline-flex rounded-xl bg-white p-3">
-              <QRCodeSVG value={previewUpiLink} size={128} />
-            </div>
-            <div className="flex flex-col gap-2 sm:flex-row">
-              <button type="button" onClick={() => openUpiIntent(previewUpiLink)} disabled={!savedCheckoutData}
-                className="flex-1 rounded-xl bg-teal-600 px-4 py-2 text-center text-sm font-semibold text-white hover:bg-teal-500 transition disabled:bg-teal-300">
-                Pay ₹{grandTotal} via UPI
-              </button>
-              <button type="button" onClick={copyIntentLink}
-                className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:border-slate-400 transition">
-                Copy Link
-              </button>
-            </div>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              {savedCheckoutData
-                ? "Scan the QR or tap Pay on your phone to open your UPI app, then upload the screenshot below."
-                : "Save your details first to lock the payable amount, then continue with UPI payment."}
-            </p>
-          </div>
-        )}
-        {supportsCod && isCodCheckout && (
-          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-700">Payment on Delivery</p>
-            <p className="text-sm text-emerald-900">No online payment is needed now. Your order will be placed first and the seller can collect payment at delivery.</p>
-          </div>
-        )}
-        {/* Payment proof � upload or URL */}
-        {isPrepaidCheckout && selectedItems.length > 0 && (
-          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 space-y-3">
-            <div className="flex items-start gap-3">
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-amber-500 text-sm font-bold text-white">3</span>
-              <div className="space-y-1 pt-0.5">
-                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-amber-800">Payment Screenshot</p>
-                <p className="text-sm text-amber-900">Upload the payment screenshot before placing the order.</p>
-              </div>
-            </div>
-            <label className="flex cursor-pointer flex-col items-center gap-2 rounded-xl border-2 border-dashed border-amber-300 bg-white px-4 py-3 text-center hover:border-amber-400 transition sm:px-5">
-              <span className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-amber-500">
-                <AppIcon name="upload" className="text-lg" />
-              </span>
-              <span className="break-all text-xs font-semibold text-amber-700">{screenshotFile ? screenshotFile.name : "Tap to upload image"}</span>
-              <span className="text-[11px] text-amber-600">You can remove it and upload a different screenshot before saving.</span>
-              <input type="file" accept="image/*" className="sr-only" onChange={e => { const f = e.target.files?.[0] ?? null; setSavedProofUrl(""); setProofSuccess(""); if (f) { setScreenshotFile(f); setScreenshotPreview(URL.createObjectURL(f)); setScreenshotUrl(""); } }} />
+          {/* Unified Order form */}
+          <form className="space-y-3" onSubmit={handleSubmit}>
+            <label className="block space-y-1">
+              <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">Your name *</span>
+              <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400 dark:bg-slate-900 dark:border-slate-700 dark:text-slate-100"
+                value={customerName} onChange={e => setCustomerName(e.target.value)} required />
             </label>
-            {(screenshotPreview || screenshotUrl.trim()) && (
-              <div className="rounded-xl border border-amber-200 bg-white p-3">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                  <div className="min-w-0 flex-1">
-                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-700">Selected screenshot</p>
-                    {screenshotPreview ? (
-                      <>
-                        <img src={screenshotPreview} alt="Preview" className="mt-2 h-28 w-full rounded-xl border border-amber-200 object-cover sm:h-24 sm:max-w-[220px]" />
-                        <p className="mt-2 break-all text-xs text-slate-500">{screenshotFile?.name || "Uploaded image selected"}</p>
-                      </>
-                    ) : (
-                      <p className="mt-2 break-all text-xs text-slate-500">{screenshotUrl}</p>
-                    )}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={clearScreenshotSelection}
-                    className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 transition hover:bg-rose-100 sm:self-start"
-                  >
-                    <AppIcon name="close" className="text-[10px]" /> Cancel
-                  </button>
-                </div>
+            <label className="block space-y-1">
+              <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">Phone number *</span>
+              <div className="flex gap-2">
+                <input className="w-24 rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400 dark:bg-slate-900 dark:border-slate-700 dark:text-slate-400" value={customerPhone.countryCode} readOnly disabled placeholder="+91" required />
+                <input
+                  type="tel"
+                  inputMode="numeric"
+                  pattern="[0-9]{10,15}"
+                  maxLength={15}
+                  className="flex-1 rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400 dark:bg-slate-900 dark:border-slate-700 dark:text-slate-100"
+                  value={customerPhone.number}
+                  onChange={e => setCustomerPhone((prev) => ({ ...prev, number: e.target.value.replace(/\D/g, "") }))}
+                  required
+                />
               </div>
-            )}
-            <div className="flex items-center gap-2"><div className="flex-1 h-px bg-amber-200" /><span className="text-[10px] font-semibold text-amber-500 uppercase">or paste URL</span><div className="flex-1 h-px bg-amber-200" /></div>
-            <input className="w-full rounded-xl border border-amber-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-amber-400"
-              placeholder="https://drive.google.com/..." value={screenshotUrl}
-              onChange={e => { setScreenshotUrl(e.target.value); setSavedProofUrl(""); setProofSuccess(""); if (e.target.value) { setScreenshotFile(null); setScreenshotPreview(""); } }} />
-            <button type="button" onClick={handleProofSubmit} disabled={uploadingProof || !savedCheckoutData || (!screenshotUrl.trim() && !screenshotFile)}
-              className="w-full rounded-xl bg-amber-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-amber-500 disabled:bg-amber-300 transition">
-              {uploadingProof ? "Saving..." : "Save Screenshot"}
+            </label>
+            <AddressFields
+              value={deliveryAddress}
+              onChange={(next) => setDeliveryAddress(next)}
+              inputClassName="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400 dark:bg-slate-900 dark:border-slate-700 dark:text-slate-100"
+              gridClassName="grid gap-3 sm:grid-cols-2"
+            />
+            <label className="block space-y-1">
+              <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">Note (optional)</span>
+              <textarea className="min-h-12 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400 dark:bg-slate-900 dark:border-slate-700 dark:text-slate-100"
+                placeholder="Special instructions..." value={note} onChange={e => setNote(e.target.value)} />
+            </label>
+
+            <button type="submit" disabled={submitting || selectedItems.length === 0 || !customerName.trim() || !customerPhone.number.trim()}
+              className="w-full rounded-xl bg-gradient-to-r from-emerald-500 via-teal-500 to-sky-500 px-4 py-3.5 text-sm font-semibold text-white shadow-md transition hover:from-emerald-400 hover:via-teal-400 hover:to-sky-400 disabled:from-slate-300 disabled:via-slate-300 disabled:to-slate-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-500 dark:hover:from-emerald-500 dark:hover:via-teal-500 dark:hover:to-sky-500 mt-2">
+              {submitting ? "Initiating Payout SPLIT Checkout..." : `Pay & Place Order (₹${grandTotal})`}
             </button>
-          </div>
-        )}
-        <form onSubmit={handleSubmit}>
-          <button type="submit" disabled={submitting || !savedCheckoutData || (savedCheckoutData.paymentMethod === "prepaid" && !savedProofUrl)}
-            className="w-full rounded-xl bg-gradient-to-r from-emerald-500 via-teal-500 to-sky-500 px-4 py-3.5 text-sm font-semibold text-white shadow-md transition hover:from-emerald-400 hover:via-teal-400 hover:to-sky-400 disabled:from-slate-300 disabled:via-slate-300 disabled:to-slate-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-500 dark:hover:from-emerald-500 dark:hover:via-teal-500 dark:hover:to-sky-500">
-            {submitting ? "Placing order�" : "Place Order"}
-          </button>
-        </form>
+          </form>
+        </div>
       </div>
     </div>
+
+
+
 
     {/* Variant Selection Popup */}
     {variantPopupProductId && (() => {
