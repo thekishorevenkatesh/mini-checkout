@@ -145,6 +145,11 @@ export interface Order {
   customerName: string;
   customerPhone: string;
   deliveryAddress: string;
+  billingAddress?: string;
+  shippingAddress?: string;
+  shippingSameAsBilling?: boolean;
+  shippingCustomerName?: string;
+  shippingCustomerPhone?: string;
   note: string;
   amount: number;
   quantity: number;

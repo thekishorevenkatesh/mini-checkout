@@ -29,6 +29,30 @@ const parentOrderSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
+    billingAddress: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    shippingAddress: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    shippingSameAsBilling: {
+      type: Boolean,
+      default: true,
+    },
+    shippingCustomerName: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    shippingCustomerPhone: {
+      type: String,
+      trim: true,
+      default: "",
+    },
     note: {
       type: String,
       default: "",

@@ -115,6 +115,30 @@ const orderSchema = new mongoose.Schema(
       trim: true,
       default: "",
     },
+    billingAddress: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    shippingAddress: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    shippingSameAsBilling: {
+      type: Boolean,
+      default: true,
+    },
+    shippingCustomerName: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    shippingCustomerPhone: {
+      type: String,
+      trim: true,
+      default: "",
+    },
     note: {
       type: String,
       trim: true,

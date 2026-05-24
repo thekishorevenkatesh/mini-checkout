@@ -5,18 +5,19 @@ import { api } from "../api/client";
 import { ZensosLogo } from "../components/ZensosLogo";
 import { AppIcon } from "../components/ui/AppIcon";
 import { ProductImageGallery } from "../components/ui/ProductImageGallery";
-import { AddressFields } from "../components/forms/AddressFields";
+import {
+  CheckoutAddressSection,
+  EMPTY_CHECKOUT_CONTACT,
+  type CheckoutContactAddress,
+} from "../components/forms/CheckoutAddressSection";
 import { DEFAULT_POLICY_CONTENT } from "../constants/policyDefaults";
 import { useI18n } from "../context/I18nContext";
 import { useToast } from "../context/ToastContext";
+import { formatPhone } from "../utils/contactFields";
 import {
-  DEFAULT_COUNTRY_CODE,
-  EMPTY_ADDRESS,
-  formatAddress,
-  formatPhone,
-  type AddressParts,
-  type PhoneParts,
-} from "../utils/contactFields";
+  formatCheckoutContactAddress,
+  validateCheckoutContact,
+} from "../utils/orderAddresses";
 import type { Product, Seller, VariantItem } from "../types";
 import {
   collectCategoryTabs,
@@ -400,10 +401,22 @@ export function PublicStorePage() {
   const [popupVariantError, setPopupVariantError] = useState("");
 
   // Checkout fields
-  const [customerName, setCustomerName] = useState("");
-  const [customerPhone, setCustomerPhone] = useState<PhoneParts>({ countryCode: DEFAULT_COUNTRY_CODE, number: "" });
-  const [deliveryAddress, setDeliveryAddress] = useState<AddressParts>(EMPTY_ADDRESS);
+  const [billingContact, setBillingContact] = useState<CheckoutContactAddress>(EMPTY_CHECKOUT_CONTACT);
+  const [shippingContact, setShippingContact] = useState<CheckoutContactAddress>(EMPTY_CHECKOUT_CONTACT);
+  const [shippingSameAsBilling, setShippingSameAsBilling] = useState(true);
   const [note, setNote] = useState("");
+
+  const checkoutInputClassName =
+    "w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400 dark:bg-slate-900 dark:border-slate-700 dark:text-slate-100";
+
+  useEffect(() => {
+    if (!shippingSameAsBilling) return;
+    setShippingContact({
+      fullName: billingContact.fullName,
+      phone: { ...billingContact.phone },
+      address: { ...billingContact.address },
+    });
+  }, [shippingSameAsBilling, billingContact]);
   const [submitting, setSubmitting] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
   const [proofSuccess, setProofSuccess] = useState("");
@@ -760,8 +773,12 @@ export function PublicStorePage() {
     if (cartEntries.length === 0) { setError("Select at least one product."); return; }
     if (!sellerSlug) { setError("Store link is invalid."); return; }
     if (!seller) { setError("Seller store unavailable."); return; }
-    if (!customerName.trim()) { setError("Enter your name."); return; }
-    if (!customerPhone.number.trim()) { setError("Enter your phone number."); return; }
+    const billingError = validateCheckoutContact(billingContact, "billing address");
+    if (billingError) { setError(billingError); return; }
+    if (!shippingSameAsBilling) {
+      const shippingError = validateCheckoutContact(shippingContact, "shipping address");
+      if (shippingError) { setError(shippingError); return; }
+    }
     for (const { product, item } of cartEntries) {
       for (const variant of getNormalizedVariantGroups(product)) {
         if (!variant.options?.length) continue;
@@ -803,9 +820,20 @@ export function PublicStorePage() {
           quantity: item.quantity,
           selectedVariants: item.variants,
         })),
-        customerName: customerName.trim(),
-        customerPhone: formatPhone(customerPhone),
-        deliveryAddress: formatAddress(deliveryAddress),
+        customerName: billingContact.fullName.trim(),
+        customerPhone: formatPhone(billingContact.phone),
+        billingAddress: formatCheckoutContactAddress(billingContact),
+        shippingAddress: formatCheckoutContactAddress(
+          shippingSameAsBilling ? billingContact : shippingContact
+        ),
+        shippingSameAsBilling,
+        shippingCustomerName: shippingSameAsBilling ? "" : shippingContact.fullName.trim(),
+        shippingCustomerPhone: shippingSameAsBilling
+          ? ""
+          : formatPhone(shippingContact.phone),
+        deliveryAddress: formatCheckoutContactAddress(
+          shippingSameAsBilling ? billingContact : shippingContact
+        ),
         deliveryCharges: deliveryChargesMap,
         note: note.trim(),
       });
@@ -822,17 +850,17 @@ export function PublicStorePage() {
         image: seller?.businessLogo || "",
         order_id: razorpayOrderId,
         prefill: {
-          name: customerName.trim(),
-          contact: formatPhone(customerPhone),
+          name: billingContact.fullName.trim(),
+          contact: formatPhone(billingContact.phone),
         },
         theme: {
           color: "#0f766e",
         },
         handler: function (_paymentRes: any) {
           // Success! Clean cart and redirect
-          setCustomerName("");
-          setCustomerPhone({ countryCode: DEFAULT_COUNTRY_CODE, number: "" });
-          setDeliveryAddress(EMPTY_ADDRESS);
+          setBillingContact(EMPTY_CHECKOUT_CONTACT);
+          setShippingContact(EMPTY_CHECKOUT_CONTACT);
+          setShippingSameAsBilling(true);
           setNote("");
           setCart({});
           resetSavedProgress();
@@ -1395,46 +1423,48 @@ export function PublicStorePage() {
             </span>
             <div className="space-y-1 pt-0.5">
               <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">Checkout & Payment</p>
-              <p className="text-sm text-slate-600 dark:text-slate-300">Enter your shipping details below. Your payment goes directly to the vendor via Razorpay Route after checkout.</p>
+              <p className="text-sm text-slate-600 dark:text-slate-300">Enter billing and shipping details below. Your payment goes directly to the vendor via Razorpay Route after checkout.</p>
             </div>
           </div>
 
           {/* Unified Order form */}
-          <form className="space-y-3" onSubmit={handleSubmit}>
-            <label className="block space-y-1">
-              <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">Your name *</span>
-              <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400 dark:bg-slate-900 dark:border-slate-700 dark:text-slate-100"
-                value={customerName} onChange={e => setCustomerName(e.target.value)} required />
-            </label>
-            <label className="block space-y-1">
-              <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">Phone number *</span>
-              <div className="flex gap-2">
-                <input className="w-24 rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400 dark:bg-slate-900 dark:border-slate-700 dark:text-slate-400" value={customerPhone.countryCode} readOnly disabled placeholder="+91" required />
-                <input
-                  type="tel"
-                  inputMode="numeric"
-                  pattern="[0-9]{10,15}"
-                  maxLength={15}
-                  className="flex-1 rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400 dark:bg-slate-900 dark:border-slate-700 dark:text-slate-100"
-                  value={customerPhone.number}
-                  onChange={e => setCustomerPhone((prev) => ({ ...prev, number: e.target.value.replace(/\D/g, "") }))}
-                  required
-                />
-              </div>
-            </label>
-            <AddressFields
-              value={deliveryAddress}
-              onChange={(next) => setDeliveryAddress(next)}
-              inputClassName="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400 dark:bg-slate-900 dark:border-slate-700 dark:text-slate-100"
-              gridClassName="grid gap-3 sm:grid-cols-2"
+          <form className="space-y-4" onSubmit={handleSubmit}>
+            <CheckoutAddressSection
+              title="Billing Address"
+              value={billingContact}
+              onChange={setBillingContact}
+              inputClassName={checkoutInputClassName}
+              datalistIdPrefix="billing-"
+              required
             />
+            <label className="flex items-start gap-2.5 rounded-xl border border-slate-200 bg-slate-50/80 px-3 py-2.5 dark:border-slate-700 dark:bg-slate-900/50">
+              <input
+                type="checkbox"
+                className="mt-1 h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
+                checked={shippingSameAsBilling}
+                onChange={(event) => setShippingSameAsBilling(event.target.checked)}
+              />
+              <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                Shipping address same as billing address
+              </span>
+            </label>
+            {!shippingSameAsBilling ? (
+              <CheckoutAddressSection
+                title="Shipping Address"
+                value={shippingContact}
+                onChange={setShippingContact}
+                inputClassName={checkoutInputClassName}
+                datalistIdPrefix="shipping-"
+                required
+              />
+            ) : null}
             <label className="block space-y-1">
               <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">Note (optional)</span>
               <textarea className="min-h-12 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400 dark:bg-slate-900 dark:border-slate-700 dark:text-slate-100"
                 placeholder="Special instructions..." value={note} onChange={e => setNote(e.target.value)} />
             </label>
 
-            <button type="submit" disabled={submitting || selectedItems.length === 0 || !customerName.trim() || !customerPhone.number.trim()}
+            <button type="submit" disabled={submitting || selectedItems.length === 0 || !billingContact.fullName.trim() || !billingContact.phone.number.trim()}
               className="w-full rounded-xl bg-gradient-to-r from-emerald-500 via-teal-500 to-sky-500 px-4 py-3.5 text-sm font-semibold text-white shadow-md transition hover:from-emerald-400 hover:via-teal-400 hover:to-sky-400 disabled:from-slate-300 disabled:via-slate-300 disabled:to-slate-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-500 dark:hover:from-emerald-500 dark:hover:via-teal-500 dark:hover:to-sky-500 mt-2">
               {submitting ? "Processing payment..." : `Pay & Place Order (₹${grandTotal})`}
             </button>

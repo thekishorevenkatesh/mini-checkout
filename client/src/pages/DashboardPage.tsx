@@ -4,6 +4,9 @@ import { QRCodeCanvas } from "qrcode.react";
 import { api } from "../api/client";
 import { AppIcon } from "../components/ui/AppIcon";
 import { AddressFields } from "../components/forms/AddressFields";
+import { OrderAddressCards } from "../components/orders/OrderAddressCards";
+import { getOrderShippingSummary } from "../utils/orderAddresses";
+import { openOrderPrintDocument } from "../utils/orderPrintDocument";
 import { useAuth } from "../context/AuthContext";
 import { useI18n } from "../context/I18nContext";
 import { useToast } from "../context/ToastContext";
@@ -2462,7 +2465,7 @@ export function DashboardPage() {
                         <div>
                           <p className="font-semibold text-slate-800">{order.customerName}</p>
                           <p className="text-xs text-slate-500">{order.customerPhone}</p>
-                          {order.deliveryAddress && <p className="mt-0.5 flex items-center gap-1.5 text-xs text-slate-400"><span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 dark:from-teal-500 dark:to-sky-500"><AppIcon name="location" className="text-[8px]" /></span>{order.deliveryAddress}</p>}
+                          {getOrderShippingSummary(order) && <p className="mt-0.5 flex items-center gap-1.5 text-xs text-slate-400"><span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 dark:from-teal-500 dark:to-sky-500"><AppIcon name="location" className="text-[8px]" /></span><span className="line-clamp-2">{getOrderShippingSummary(order)}</span></p>}
                         </div>
                         <span className={`flex items-center gap-1.5 rounded-full border px-2 py-1 text-xs font-semibold ${statusClasses[order.paymentStatus]}`}>
                           <span className={`h-1.5 w-1.5 rounded-full ${STATUS_DOT[order.paymentStatus]}`} />{STATUS_LABEL[order.paymentStatus]}
@@ -2497,7 +2500,7 @@ export function DashboardPage() {
                           <td className="py-3 pr-4">
                             <p className="font-semibold text-slate-800 whitespace-nowrap">{order.customerName}</p>
                             <p className="text-xs text-slate-500">{order.customerPhone}</p>
-                            {order.deliveryAddress && <p className="flex items-center gap-1.5 text-xs text-slate-400 max-w-[160px] truncate" title={order.deliveryAddress}><span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 dark:from-teal-500 dark:to-sky-500"><AppIcon name="location" className="text-[8px]" /></span>{order.deliveryAddress}</p>}
+                            {getOrderShippingSummary(order) && <p className="flex items-center gap-1.5 text-xs text-slate-400 max-w-[160px] truncate" title={getOrderShippingSummary(order)}><span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 dark:from-teal-500 dark:to-sky-500"><AppIcon name="location" className="text-[8px]" /></span>{getOrderShippingSummary(order)}</p>}
                           </td>
                           <td className="py-3 pr-4">
                             <p className="text-slate-700">{getOrderItemSummary(order)||"—"}</p>
@@ -2559,12 +2562,7 @@ export function DashboardPage() {
                   <p className="text-xs text-slate-400">{new Date(viewingOrder.createdAt).toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"})}</p>
                 </div>
               </div>
-              {viewingOrder.deliveryAddress && (
-                <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-900/80">
-                  <p className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-400 mb-1"><span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 dark:from-teal-500 dark:to-sky-500"><AppIcon name="location" className="text-[8px]" /></span>Delivery Address</p>
-                  <p className="text-sm text-slate-700">{viewingOrder.deliveryAddress}</p>
-                </div>
-              )}
+              <OrderAddressCards order={viewingOrder} />
               <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-900/80">
                 <p className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">Product</p>
                 <div className="space-y-2">
@@ -2619,10 +2617,10 @@ export function DashboardPage() {
               </select>
               <button
                 onClick={() => {
-                  const o = viewingOrder;
-                  const w = window.open("","_blank"); if(!w) return;
-                  w.document.write(`<html><head><title>Order #${o._id.slice(-8).toUpperCase()}</title><style>body{font-family:sans-serif;padding:24px;color:#0f172a}h1{font-size:20px}h2{font-size:15px;margin-top:18px}table{width:100%;border-collapse:collapse;margin-top:12px}td,th{border:1px solid #e2e8f0;padding:8px 12px;text-align:left}th{background:#f8fafc;font-size:11px;text-transform:uppercase}</style></head><body><h1>Order #${o._id.slice(-8).toUpperCase()}</h1><p><b>Date:</b> ${new Date(o.createdAt).toLocaleString("en-IN")}</p><p><b>Status:</b> ${STATUS_LABEL[o.paymentStatus]}</p><h2>Customer</h2><p>${o.customerName} &middot; ${o.customerPhone}</p>${o.deliveryAddress?`<p>${o.deliveryAddress}</p>`:""}<h2>Product</h2><p>${o.product?.title||"?"} ${o.product?.category?`(${o.product.category})`:""}</p><table><tr><th>Qty</th><th>Amount</th><th>Delivery</th><th>Grand Total</th></tr><tr><td>${o.quantity}</td><td>₹${o.amount}</td><td>₹${o.deliveryCharge||0}</td><td><b>₹${o.amount+(o.deliveryCharge||0)}</b></td></tr></table><p style="margin-top:14px"><b>Payment:</b> ${o.paymentMethod||"?"}</p>${o.note?`<p><b>Note:</b> ${o.note}</p>`:""}<script>window.onload=()=>window.print()<\/script></body></html>`);
-                  w.document.close();
+                  openOrderPrintDocument(viewingOrder, seller, {
+                    status: STATUS_LABEL,
+                    transferStatus: getTransferStatusLabel,
+                  });
                 }}
                 className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800 sm:w-auto sm:whitespace-nowrap"
               ><AppIcon name="orders" className="text-[10px]" /> Print / PDF</button>

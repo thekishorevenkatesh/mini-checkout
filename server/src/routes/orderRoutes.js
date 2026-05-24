@@ -142,6 +142,43 @@ function buildOrderResponse(order) {
 const razorpay = require("../utils/razorpay");
 const ParentOrder = require("../models/ParentOrder");
 
+function normalizeOrderAddresses(body = {}) {
+  const deliveryAddress = String(body.deliveryAddress || "").trim();
+  const billingAddress = String(body.billingAddress || "").trim();
+  const shippingAddress = String(body.shippingAddress || "").trim();
+  const shippingCustomerName = String(body.shippingCustomerName || "").trim();
+  const shippingCustomerPhone = String(body.shippingCustomerPhone || "").trim();
+  const shippingSameAsBilling =
+    body.shippingSameAsBilling === false || body.shippingSameAsBilling === "false"
+      ? false
+      : true;
+
+  if (!billingAddress && !shippingAddress && deliveryAddress) {
+    return {
+      billingAddress: deliveryAddress,
+      shippingAddress: deliveryAddress,
+      deliveryAddress,
+      shippingSameAsBilling: true,
+      shippingCustomerName: "",
+      shippingCustomerPhone: "",
+    };
+  }
+
+  const resolvedBilling = billingAddress || deliveryAddress || "";
+  const resolvedShipping = shippingSameAsBilling
+    ? resolvedBilling
+    : shippingAddress || resolvedBilling;
+
+  return {
+    billingAddress: resolvedBilling,
+    shippingAddress: resolvedShipping,
+    deliveryAddress: resolvedShipping || resolvedBilling,
+    shippingSameAsBilling,
+    shippingCustomerName: shippingSameAsBilling ? "" : shippingCustomerName,
+    shippingCustomerPhone: shippingSameAsBilling ? "" : shippingCustomerPhone,
+  };
+}
+
 router.post("/", async (req, res) => {
   try {
     const {
@@ -149,9 +186,10 @@ router.post("/", async (req, res) => {
       customerName,
       customerPhone,
       note,
-      deliveryAddress = "",
       deliveryCharges = {}, // sellerId -> charge number
     } = req.body;
+
+    const addressFields = normalizeOrderAddresses(req.body);
 
     if (!customerName || !customerPhone) {
       return res.status(400).json({
@@ -244,7 +282,12 @@ router.post("/", async (req, res) => {
       razorpayPaymentId: "",
       customerName: String(customerName).trim(),
       customerPhone: String(customerPhone).trim(),
-      deliveryAddress: String(deliveryAddress).trim(),
+      deliveryAddress: addressFields.deliveryAddress,
+      billingAddress: addressFields.billingAddress,
+      shippingAddress: addressFields.shippingAddress,
+      shippingSameAsBilling: addressFields.shippingSameAsBilling,
+      shippingCustomerName: addressFields.shippingCustomerName,
+      shippingCustomerPhone: addressFields.shippingCustomerPhone,
       note: note ? String(note).trim() : "",
       totalAmountPaise: 0,
       paymentStatus: "pending",
@@ -309,6 +352,11 @@ router.post("/", async (req, res) => {
         customerName: parentOrder.customerName,
         customerPhone: parentOrder.customerPhone,
         deliveryAddress: parentOrder.deliveryAddress,
+        billingAddress: parentOrder.billingAddress,
+        shippingAddress: parentOrder.shippingAddress,
+        shippingSameAsBilling: parentOrder.shippingSameAsBilling,
+        shippingCustomerName: parentOrder.shippingCustomerName,
+        shippingCustomerPhone: parentOrder.shippingCustomerPhone,
         note: parentOrder.note,
         amount: itemRevenuePaise / 100, // keep decimal representation for existing UI compatibility
         quantity: lines.reduce((sum, l) => sum + l.quantity, 0),
