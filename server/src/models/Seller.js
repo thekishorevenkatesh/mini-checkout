@@ -95,7 +95,6 @@ const sellerSchema = new mongoose.Schema(
       type: String,
       trim: true,
       default: "",
-      index: true,
     },
     panHolderName: {
       type: String,
