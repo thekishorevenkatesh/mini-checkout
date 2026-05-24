@@ -621,6 +621,8 @@ router.get("/earnings", auth, async (req, res) => {
         netEarnings: netEarningsPaise / 100,
         deliveryFees: deliveryFeesPaise / 100,
         reversals: reversalsPaise / 100,
+        refunds: reversalsPaise / 100,
+        settlementModel: "direct",
       },
       ledger: ledgers,
     });

@@ -75,6 +75,19 @@ const STATUS_LABEL: Record<OrderStatus, string> = {
 };
 const ORDER_STATUSES: OrderStatus[] = ["pending", "paid", "delivered", "cancelled"];
 
+const TRANSFER_STATUS_LABEL: Record<string, string> = {
+  untransferred: "Settlement pending",
+  pending: "Settlement processing",
+  processed: "Settled to vendor",
+  failed: "Settlement failed",
+  reversed: "Settlement reversed",
+};
+
+function getTransferStatusLabel(order: Order) {
+  if (order.paymentStatus === "pending" || order.paymentStatus === "cancelled") return "";
+  return TRANSFER_STATUS_LABEL[order.transferStatus || "untransferred"] || order.transferStatus || "";
+}
+
 const SOCIAL_PLATFORMS = ["Instagram", "Facebook", "Twitter/X", "YouTube", "LinkedIn", "Website", "Google Location", "Other"];
 
 const IMGBB_KEY = import.meta.env.VITE_IMGBB_API_KEY as string | undefined;
@@ -2457,6 +2470,9 @@ export function DashboardPage() {
                       </div>
                       <p className="mt-2 text-sm text-slate-700">{getOrderItemSummary(order)||"—"}</p>
                       <p className="text-xs text-slate-500">Qty: {order.quantity} · ₹{order.amount} + ₹{order.deliveryCharge||0} = <strong>₹{order.amount+(order.deliveryCharge||0)}</strong></p>
+                      {getTransferStatusLabel(order) && (
+                        <p className="mt-1 text-[10px] font-semibold text-teal-700 dark:text-teal-300">{getTransferStatusLabel(order)}</p>
+                      )}
                       <div className="mt-3 flex gap-2">
                         <button onClick={() => setViewingOrder(order)} className="flex-1 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition">👁 View</button>
                         <select className="flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs outline-none" value={order.paymentStatus} onChange={e => handleOrderStatus(order._id, e.target.value as OrderStatus)}>
@@ -2472,7 +2488,7 @@ export function DashboardPage() {
                     <thead><tr className="border-b border-slate-200 text-xs uppercase tracking-[0.14em] text-slate-500">
                       <th className="pb-2 pr-4">Customer</th><th className="pb-2 pr-4">Product</th>
                       <th className="pb-2 pr-4">Variant</th><th className="pb-2 pr-4">Qty</th>
-                      <th className="pb-2 pr-4">Total</th><th className="pb-2 pr-4" title="Status">●</th>
+                      <th className="pb-2 pr-4">Total</th><th className="pb-2 pr-4">Settlement</th><th className="pb-2 pr-4" title="Status">●</th>
                       <th className="pb-2 pr-4">Update</th><th className="pb-2">View</th>
                     </tr></thead>
                     <tbody>
@@ -2490,6 +2506,7 @@ export function DashboardPage() {
                           <td className="py-3 pr-4 text-xs text-slate-500 whitespace-nowrap">{getOrderItems(order).map((item) => item.variantTitle || Object.values(item.selectedVariants || {}).join(", ") || "—").join(" | ")}</td>
                           <td className="py-3 pr-4 text-slate-700">{order.quantity}</td>
                           <td className="py-3 pr-4 font-semibold text-slate-900 whitespace-nowrap">₹{order.amount+(order.deliveryCharge||0)}</td>
+                          <td className="py-3 pr-4 text-[10px] font-semibold text-teal-700 dark:text-teal-300 whitespace-nowrap">{getTransferStatusLabel(order) || "—"}</td>
                           <td className="py-3 pr-4">
                             <span title={STATUS_LABEL[order.paymentStatus]} className={`inline-flex h-3 w-3 rounded-full ${STATUS_DOT[order.paymentStatus]}`} />
                           </td>
@@ -2577,12 +2594,16 @@ export function DashboardPage() {
                   <p className="text-sm font-semibold text-slate-700 capitalize">{viewingOrder.paymentMethod||"—"}</p>
                 </div>
                 <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-900/80">
-                  <p className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">Payment Proof</p>
-                  {viewingOrder.paymentScreenshotUrl
-                    ?<a href={viewingOrder.paymentScreenshotUrl} target="_blank" rel="noreferrer" className="text-sm font-semibold text-teal-700 underline">View Screenshot</a>
-                    :<p className="text-sm text-slate-400">Not uploaded</p>}
+                  <p className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">Vendor Settlement</p>
+                  <p className="text-sm font-semibold text-teal-700">{getTransferStatusLabel(viewingOrder) || "Awaiting payment"}</p>
                 </div>
               </div>
+              {viewingOrder.paymentScreenshotUrl && (
+                <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-900/80">
+                  <p className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">Payment Proof</p>
+                  <a href={viewingOrder.paymentScreenshotUrl} target="_blank" rel="noreferrer" className="text-sm font-semibold text-teal-700 underline">View Screenshot</a>
+                </div>
+              )}
               {viewingOrder.note&&(
                 <div className="rounded-xl bg-amber-50 border border-amber-200 p-3">
                   <p className="text-xs font-bold uppercase tracking-wider text-amber-600 mb-1">Customer Note</p>
@@ -2817,14 +2838,14 @@ export function DashboardPage() {
                   <p className="text-[10px] text-emerald-200 mt-1">Total revenue processed before splits</p>
                 </article>
                 <article className="rounded-3xl border border-white/70 bg-gradient-to-br from-teal-600 to-sky-600 p-5 text-white shadow-card">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-teal-100">Net Share Payout</p>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-teal-100">Direct Settlements</p>
                   <p className="mt-2 font-heading text-2xl font-bold">₹{earningsData.summary.netEarnings.toLocaleString("en-IN")}</p>
-                  <p className="text-[10px] text-teal-200 mt-1">Settled to bank account post commissions</p>
+                  <p className="text-[10px] text-teal-200 mt-1">Transferred to your linked account after each payment</p>
                 </article>
                 <article className="rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card dark:border-teal-900/35 dark:bg-slate-900">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Commission Deducted</p>
-                  <p className="mt-2 font-heading text-2xl font-bold text-slate-900 dark:text-white">₹{earningsData.summary.reversals.toLocaleString("en-IN")}</p>
-                  <p className="text-[10px] text-slate-500 mt-1">Platform commissions and cuts</p>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Refunds & Reversals</p>
+                  <p className="mt-2 font-heading text-2xl font-bold text-slate-900 dark:text-white">₹{(earningsData.summary.refunds ?? earningsData.summary.reversals).toLocaleString("en-IN")}</p>
+                  <p className="text-[10px] text-slate-500 mt-1">Amounts clawed back from refunds</p>
                 </article>
                 <article className="rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card dark:border-teal-900/35 dark:bg-slate-900">
                   <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Delivery Fees</p>
@@ -2837,7 +2858,7 @@ export function DashboardPage() {
               <article className="rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card dark:border-teal-900/35 dark:bg-slate-900/90">
                 <div className="mb-4">
                   <h3 className="font-heading text-base font-bold text-slate-800 dark:text-white">Transaction & Payout Ledger</h3>
-                  <p className="text-xs text-slate-500 mt-0.5">Auditable trace of credit/debit payouts processed via Razorpay Route</p>
+                  <p className="text-xs text-slate-500 mt-0.5">Direct vendor settlements via Razorpay Route after payment capture</p>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-left border-collapse text-xs">
@@ -2853,7 +2874,7 @@ export function DashboardPage() {
                     <tbody>
                       {earningsData.ledger.length === 0 ? (
                         <tr>
-                          <td colSpan={5} className="text-center py-10 text-slate-500">No payout splits or settlements processed yet.</td>
+                          <td colSpan={5} className="text-center py-10 text-slate-500">No direct settlements recorded yet.</td>
                         </tr>
                       ) : (
                         earningsData.ledger.map((log: any) => (
@@ -2906,6 +2927,16 @@ export function DashboardPage() {
             </span>
           </div>
 
+          {seller?.razorpayOnboardingError ? (
+            <div className="flex items-start gap-3 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 dark:border-rose-800/50 dark:bg-rose-950/40">
+              <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-rose-500 text-white text-sm">!</span>
+              <div>
+                <p className="text-sm font-bold text-rose-800 dark:text-rose-300">Razorpay onboarding needs attention</p>
+                <p className="mt-0.5 text-xs text-rose-700 dark:text-rose-400">{seller.razorpayOnboardingError}</p>
+              </div>
+            </div>
+          ) : null}
+
           {/* ── Razorpay Payout Account Status Banner ── */}
           {(() => {
             const rzpStatus = seller?.razorpayAccountStatus;
@@ -2916,7 +2947,7 @@ export function DashboardPage() {
                   <div>
                     <p className="text-sm font-bold text-amber-800 dark:text-amber-300">Payouts Blocked Until PAN KYC Is Verified</p>
                     <p className="mt-0.5 text-xs text-amber-700 dark:text-amber-400">
-                      Add a valid PAN, PAN holder legal name, bank details, and KYC proofs. Admin approval and Razorpay linked account activation require verified PAN KYC before settlements can be released.
+                      Add a valid PAN, PAN holder legal name, bank details, and KYC proofs. Admin approval and Razorpay linked account activation require verified PAN KYC before direct settlements can be sent.
                     </p>
                   </div>
                 </div>
@@ -2929,7 +2960,7 @@ export function DashboardPage() {
                   <div>
                     <p className="text-sm font-bold text-emerald-800 dark:text-emerald-300">Payout Account Active</p>
                     <p className="mt-0.5 text-xs text-emerald-700 dark:text-emerald-400">
-                      Your Razorpay linked account is verified and active. Once you mark orders as <strong>Delivered</strong>, funds will be automatically transferred to your bank account.
+                      Your Razorpay linked account is verified and active. When a customer pays, your full order amount is transferred directly to your linked account.
                     </p>
                   </div>
                 </div>
@@ -2942,7 +2973,7 @@ export function DashboardPage() {
                   <div>
                     <p className="text-sm font-bold text-amber-800 dark:text-amber-300">Payout Account — Pending Activation</p>
                     <p className="mt-0.5 text-xs text-amber-700 dark:text-amber-400">
-                      Your linked account has been created and is pending Razorpay's KYC review. This usually takes 1–3 business days. Payouts will be held until activation.
+                      Your linked account has been created and is pending Razorpay's KYC review. This usually takes 1–3 business days. Settlements begin once activation completes.
                     </p>
                   </div>
                 </div>
@@ -2997,6 +3028,8 @@ export function DashboardPage() {
                 { label: "PAN verification", value: seller?.panVerificationStatus },
                 { label: "KYC status", value: seller?.kycStatus },
                 { label: "Payout status", value: seller?.payoutStatus },
+                { label: "Route onboarding", value: seller?.linkedAccountOnboardingStatus?.replace(/_/g, " ") },
+                { label: "Linked account", value: seller?.razorpayAccountId ? `${seller.razorpayAccountStatus || "pending"}` : "Not created" },
                 { label: "Business address", value: seller?.businessAddress },
                 { label: "UPI ID", value: seller?.upiId },
                 { label: "Account holder", value: seller?.bankAccountName },

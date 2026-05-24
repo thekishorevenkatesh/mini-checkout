@@ -221,6 +221,43 @@ const sellerSchema = new mongoose.Schema(
     razorpayAccountId: {
       type: String,
       default: "",
+      index: true,
+    },
+    razorpayReferenceId: {
+      type: String,
+      default: "",
+      index: true,
+    },
+    razorpayStakeholderId: {
+      type: String,
+      default: "",
+    },
+    razorpayProductId: {
+      type: String,
+      default: "",
+    },
+    razorpayLinkedAccountCreatedAt: {
+      type: Date,
+      default: null,
+    },
+    razorpayOnboardingError: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    linkedAccountOnboardingStatus: {
+      type: String,
+      enum: [
+        "not_started",
+        "kyc_incomplete",
+        "pending_approval",
+        "linked_account_pending",
+        "linked_account_created",
+        "linked_account_failed",
+        "payout_enabled",
+      ],
+      default: "not_started",
+      index: true,
     },
     razorpayAccountStatus: {
       type: String,
@@ -246,7 +283,7 @@ const sellerSchema = new mongoose.Schema(
       },
       commissionValue: {
         type: Number,
-        default: 5, // Default 5% commission
+        default: 0, // Disabled — vendors receive full order amount; field kept for future use
       },
       categoryCommissions: {
         type: Map,

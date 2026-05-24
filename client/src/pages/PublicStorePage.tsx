@@ -1395,7 +1395,7 @@ export function PublicStorePage() {
             </span>
             <div className="space-y-1 pt-0.5">
               <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">Checkout & Payment</p>
-              <p className="text-sm text-slate-600 dark:text-slate-300">Enter your shipping details below. Payouts will be split automatically using Razorpay Route.</p>
+              <p className="text-sm text-slate-600 dark:text-slate-300">Enter your shipping details below. Your payment goes directly to the vendor via Razorpay Route after checkout.</p>
             </div>
           </div>
 
@@ -1436,7 +1436,7 @@ export function PublicStorePage() {
 
             <button type="submit" disabled={submitting || selectedItems.length === 0 || !customerName.trim() || !customerPhone.number.trim()}
               className="w-full rounded-xl bg-gradient-to-r from-emerald-500 via-teal-500 to-sky-500 px-4 py-3.5 text-sm font-semibold text-white shadow-md transition hover:from-emerald-400 hover:via-teal-400 hover:to-sky-400 disabled:from-slate-300 disabled:via-slate-300 disabled:to-slate-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-500 dark:hover:from-emerald-500 dark:hover:via-teal-500 dark:hover:to-sky-500 mt-2">
-              {submitting ? "Initiating Payout SPLIT Checkout..." : `Pay & Place Order (₹${grandTotal})`}
+              {submitting ? "Processing payment..." : `Pay & Place Order (₹${grandTotal})`}
             </button>
           </form>
         </div>

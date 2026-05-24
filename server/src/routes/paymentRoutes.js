@@ -7,21 +7,93 @@ const ParentOrder = require("../models/ParentOrder");
 const TransactionLedger = require("../models/TransactionLedger");
 const WebhookLog = require("../models/WebhookLog");
 const auth = require("../middleware/auth");
-const { encrypt, decrypt } = require("../utils/encryption");
 const { collectKycIssues, isPayoutEligible, recordComplianceEvent } = require("../utils/kycCompliance");
+const { applyAccountWebhookToSeller } = require("../utils/razorpayLinkedAccount");
+const {
+  getVendorTransferAmountPaise,
+  hasProcessedTransfer,
+  executeVendorTransfer,
+  recordVendorTransferLedger,
+} = require("../utils/settlement");
 
 const router = express.Router();
 
-// Helper to verify Webhook Signature
 function verifySignature(rawBody, signature, secret) {
   if (!signature || !secret) return false;
   const hmac = crypto.createHmac("sha256", secret);
   hmac.update(rawBody);
-  const digest = hmac.digest("hex");
-  return digest === signature;
+  return hmac.digest("hex") === signature;
 }
 
-// ─── POST /api/payments/webhook ──────────────────────────────────────────
+async function processSubOrderTransfer(subOrder, razorpayPaymentId) {
+  if (hasProcessedTransfer(subOrder)) {
+    console.log(`[transfer] Skipping sub-order ${subOrder._id}: transfer already processed (${subOrder.transferId})`);
+    return;
+  }
+
+  const seller = await Seller.findById(subOrder.seller);
+  if (!seller) {
+    subOrder.transferStatus = "failed";
+    await subOrder.save();
+    console.error(`[transfer] Seller not found for sub-order: ${subOrder._id}`);
+    return;
+  }
+
+  if (!seller.razorpayAccountId || seller.razorpayAccountStatus !== "active") {
+    subOrder.transferStatus = "failed";
+    await subOrder.save();
+    console.warn(`[transfer] Skipped: seller ${seller.businessName} has no active Razorpay linked account.`);
+    return;
+  }
+
+  if (!isPayoutEligible(seller)) {
+    subOrder.transferStatus = "failed";
+    seller.payoutStatus = "blocked";
+    recordComplianceEvent(seller, "route_transfer_blocked_incomplete_kyc", "system", {
+      orderId: subOrder._id.toString(),
+      missingFields: collectKycIssues(seller, {
+        requireVerifiedPan: true,
+        requireVerifiedKyc: true,
+        requireBank: true,
+      }),
+    });
+    await Promise.all([subOrder.save(), seller.save()]);
+    console.warn(`[transfer] Blocked: seller ${seller.businessName} is not payout eligible.`);
+    return;
+  }
+
+  try {
+    const result = await executeVendorTransfer(razorpay, {
+      paymentId: razorpayPaymentId,
+      seller,
+      subOrder,
+    });
+
+    if (result.skipped) {
+      return;
+    }
+
+    subOrder.transferId = result.transferId;
+    subOrder.transferStatus = "processed";
+    await subOrder.save();
+
+    await recordVendorTransferLedger({
+      subOrder,
+      seller,
+      transferId: result.transferId,
+      transferAmountPaise: result.transferAmountPaise,
+    });
+
+    console.log(
+      `[transfer] Direct settlement to ${seller.businessName} (${seller.razorpayAccountId}): ${result.transferAmountPaise} paise`
+    );
+  } catch (err) {
+    console.error(`[transfer] Route API failed for sub-order ${subOrder._id}:`, err.message);
+    subOrder.transferStatus = "failed";
+    await subOrder.save();
+  }
+}
+
 router.post("/webhook", async (req, res) => {
   const eventId = req.headers["x-razorpay-event-id"] || req.body?.event_id;
   const signature = req.headers["x-razorpay-signature"];
@@ -32,17 +104,14 @@ router.post("/webhook", async (req, res) => {
     return res.status(400).json({ message: "Missing event ID" });
   }
 
-  // 1. Signature Verification
   const isMockMode = !process.env.RAZORPAY_KEY_ID || process.env.RAZORPAY_KEY_ID === "rzp_test_mock_id";
   if (!isMockMode) {
-    const isValid = verifySignature(rawBody, signature, secret);
-    if (!isValid) {
+    if (!verifySignature(rawBody, signature, secret)) {
       console.warn(`[Webhook Warning] Signature verification failed for event: ${eventId}`);
       return res.status(400).json({ message: "Invalid signature" });
     }
   }
 
-  // 2. Idempotency Check
   let webhookLog;
   try {
     webhookLog = await WebhookLog.create({
@@ -53,7 +122,6 @@ router.post("/webhook", async (req, res) => {
     });
   } catch (error) {
     if (error.code === 11000) {
-      // Event already logged/processed, return 200 OK to stop retries
       console.log(`[Webhook] Duplicate event blocked: ${eventId}`);
       return res.status(200).json({ status: "already_processed" });
     }
@@ -65,36 +133,31 @@ router.post("/webhook", async (req, res) => {
     const event = req.body.event;
     console.log(`[Webhook Logged] Event: ${event} (${eventId})`);
 
-    // 3. Event Router
     switch (event) {
       case "payment.captured":
         await handlePaymentCaptured(req.body.payload.payment.entity);
         break;
-
       case "payment.failed":
         await handlePaymentFailed(req.body.payload.payment.entity);
         break;
-
       case "transfer.processed":
         await handleTransferProcessed(req.body.payload.transfer.entity);
         break;
-
+      case "transfer.failed":
+        await handleTransferFailed(req.body.payload.transfer.entity);
+        break;
       case "settlement.processed":
         await handleSettlementProcessed(req.body.payload.settlement.entity);
         break;
-
       case "refund.processed":
         await handleRefundProcessed(req.body.payload.refund.entity);
         break;
-
       case "account.activated":
         await handleAccountActivated(req.body.payload.account.entity);
         break;
-
       case "account.updated":
         await handleAccountUpdated(req.body.payload.account.entity);
         break;
-
       default:
         console.log(`[Webhook] Unhandled event: ${event}`);
     }
@@ -102,27 +165,21 @@ router.post("/webhook", async (req, res) => {
     webhookLog.processed = true;
     webhookLog.processedAt = new Date();
     await webhookLog.save();
-
     return res.status(200).json({ status: "ok" });
   } catch (err) {
     console.error(`[Webhook Error] Processing failed for event ${eventId}:`, err);
     webhookLog.error = err.message;
     await webhookLog.save();
-    // Return 500 so Razorpay retries if it's a transient failure
     return res.status(500).json({ message: "Webhook processing failed" });
   }
 });
 
-// ─── Webhook Event Handlers ──────────────────────────────────────────────
-
 async function handlePaymentCaptured(payment) {
   const razorpayOrderId = payment.order_id;
   const razorpayPaymentId = payment.id;
-  const amountPaise = payment.amount;
 
-  console.log(`[payment.captured] Processing Order ID: ${razorpayOrderId}`);
+  console.log(`[payment.captured] Processing order: ${razorpayOrderId}`);
 
-  // Find ParentOrder
   const parentOrder = await ParentOrder.findOne({ razorpayOrderId }).populate("subOrders");
   if (!parentOrder) {
     console.warn(`[payment.captured] No ParentOrder found for ID: ${razorpayOrderId}`);
@@ -130,7 +187,14 @@ async function handlePaymentCaptured(payment) {
   }
 
   if (parentOrder.paymentStatus === "paid") {
-    console.log(`[payment.captured] Order already paid: ${razorpayOrderId}`);
+    console.log(`[payment.captured] Parent order already paid: ${razorpayOrderId}`);
+    for (const subOrder of parentOrder.subOrders) {
+      if (subOrder.paymentStatus !== "paid") {
+        subOrder.paymentStatus = "paid";
+        await subOrder.save();
+      }
+      await processSubOrderTransfer(subOrder, parentOrder.razorpayPaymentId || razorpayPaymentId);
+    }
     return;
   }
 
@@ -138,91 +202,10 @@ async function handlePaymentCaptured(payment) {
   parentOrder.razorpayPaymentId = razorpayPaymentId;
   await parentOrder.save();
 
-  // Process Sub-Orders and Execute splits via Razorpay Route
   for (const subOrder of parentOrder.subOrders) {
     subOrder.paymentStatus = "paid";
     await subOrder.save();
-
-    const seller = await Seller.findById(subOrder.seller);
-    if (!seller) {
-      subOrder.transferStatus = "failed";
-      await subOrder.save();
-      console.error(`[payment.captured] Seller not found for SubOrder: ${subOrder._id}`);
-      continue;
-    }
-
-    // 1. Check if Seller has Linked Account ID
-    if (!seller.razorpayAccountId || seller.razorpayAccountStatus !== "active") {
-      subOrder.transferStatus = "failed";
-      await subOrder.save();
-      console.warn(`[payment.captured] Route Transfer skipped: Seller ${seller.businessName} has no active Razorpay Account.`);
-      continue;
-    }
-    if (!isPayoutEligible(seller)) {
-      subOrder.transferStatus = "failed";
-      seller.payoutStatus = "blocked";
-      recordComplianceEvent(seller, "route_transfer_blocked_incomplete_kyc", "system", {
-        orderId: subOrder._id.toString(),
-        missingFields: collectKycIssues(seller, {
-          requireVerifiedPan: true,
-          requireVerifiedKyc: true,
-          requireBank: true,
-        }),
-      });
-      await Promise.all([subOrder.save(), seller.save()]);
-      console.warn(`[payment.captured] Route Transfer blocked: Seller ${seller.businessName} is not payout eligible.`);
-      continue;
-    }
-
-    try {
-      // 2. Perform Razorpay Route Transfer
-      const transferAmountPaise = Math.round((subOrder.amount + subOrder.deliveryCharge) * 100) - subOrder.commissionAmountPaise;
-
-      console.log(`[payment.captured] Split Transfer to ${seller.businessName} (${seller.razorpayAccountId}): Amount ${transferAmountPaise} paise`);
-      
-      const transferResponse = await razorpay.payments.transfer(razorpayPaymentId, {
-        transfers: [
-          {
-            account: seller.razorpayAccountId,
-            amount: transferAmountPaise,
-            currency: "INR",
-            on_hold: 1, // Funds held on hold. Released when marked delivered
-          },
-        ],
-      });
-
-      const transferResult = transferResponse.items?.[0] || transferResponse;
-      subOrder.transferId = transferResult.id;
-      subOrder.transferStatus = "processed";
-      await subOrder.save();
-
-      // 3. Write Ledger credit for Seller
-      await TransactionLedger.create({
-        orderId: subOrder._id,
-        sellerId: seller._id,
-        amountPaise: transferAmountPaise,
-        type: "credit",
-        purpose: "order_item_revenue",
-        status: "settled",
-        razorpayTransferId: transferResult.id,
-      });
-
-      // 4. Write Ledger credit for Platform owner
-      await TransactionLedger.create({
-        orderId: subOrder._id,
-        sellerId: null, // Admin platform commission
-        amountPaise: subOrder.commissionAmountPaise,
-        type: "credit",
-        purpose: "platform_commission",
-        status: "settled",
-        razorpayTransferId: transferResult.id,
-      });
-
-    } catch (err) {
-      console.error(`[payment.captured] Route Transfer API failed for order ${subOrder._id}:`, err.message);
-      subOrder.transferStatus = "failed";
-      await subOrder.save();
-    }
+    await processSubOrderTransfer(subOrder, razorpayPaymentId);
   }
 }
 
@@ -254,171 +237,111 @@ async function handleTransferProcessed(transfer) {
   }
 }
 
+async function handleTransferFailed(transfer) {
+  const transferId = transfer.id;
+  console.log(`[transfer.failed] Transfer ID: ${transferId}`);
+
+  const subOrder = await Order.findOne({ transferId });
+  if (subOrder) {
+    subOrder.transferStatus = "failed";
+    await subOrder.save();
+  }
+}
+
 async function handleSettlementProcessed(settlement) {
-  // Can be logged to Settlement schemas to track bank payouts
   console.log(`[settlement.processed] Settlement ID: ${settlement.id}, Amount: ${settlement.amount}`);
 }
 
 async function handleRefundProcessed(refund) {
   const paymentId = refund.payment_id;
   const refundId = refund.id;
-
   console.log(`[refund.processed] Payment: ${paymentId}, Refund: ${refundId}`);
 
   const parentOrder = await ParentOrder.findOne({ razorpayPaymentId: paymentId }).populate("subOrders");
   if (!parentOrder) return;
 
-  // Debit ledger entries and reverse sub-order balances
   for (const subOrder of parentOrder.subOrders) {
-    if (subOrder.paymentStatus === "paid") {
-      subOrder.paymentStatus = "cancelled";
-      await subOrder.save();
+    if (subOrder.paymentStatus !== "paid" && subOrder.paymentStatus !== "delivered") continue;
 
-      // Write Ledger debits
-      const transferAmountPaise = Math.round((subOrder.amount + subOrder.deliveryCharge) * 100) - subOrder.commissionAmountPaise;
-
-      await TransactionLedger.create({
-        orderId: subOrder._id,
-        sellerId: subOrder.seller,
-        amountPaise: transferAmountPaise,
-        type: "debit",
-        purpose: "refund",
-        status: "reversed",
-      });
-
-      await TransactionLedger.create({
-        orderId: subOrder._id,
-        sellerId: null,
-        amountPaise: subOrder.commissionAmountPaise,
-        type: "debit",
-        purpose: "reversal",
-        status: "reversed",
-      });
+    subOrder.paymentStatus = "cancelled";
+    if (subOrder.transferId) {
+      subOrder.transferStatus = "reversed";
     }
+    await subOrder.save();
+
+    const vendorSharePaise = getVendorTransferAmountPaise(subOrder);
+    await TransactionLedger.create({
+      orderId: subOrder._id,
+      sellerId: subOrder.seller,
+      amountPaise: vendorSharePaise,
+      type: "debit",
+      purpose: "refund",
+      status: "reversed",
+      razorpayTransferId: subOrder.transferId || "",
+    });
   }
 }
 
 async function handleAccountActivated(account) {
   const razorpayAccountId = account.id;
-  console.log(`[account.activated] Razorpay Linked Account ID: ${razorpayAccountId}`);
+  console.log(`[account.activated] Razorpay linked account: ${razorpayAccountId}`);
 
   const seller = await Seller.findOne({ razorpayAccountId });
   if (seller) {
-    seller.razorpayAccountStatus = "active";
-    if (seller.panVerificationStatus === "verified" && seller.kycStatus === "verified") {
-      seller.payoutStatus = "enabled";
-    }
+    applyAccountWebhookToSeller(seller, account);
     await seller.save();
-    console.log(`[account.activated] Seller ${seller.businessName} updated to active.`);
   }
 }
 
 async function handleAccountUpdated(account) {
   const razorpayAccountId = account.id;
-  console.log(`[account.updated] Razorpay Linked Account ID: ${razorpayAccountId}`);
+  console.log(`[account.updated] Razorpay linked account: ${razorpayAccountId}`);
 
   const seller = await Seller.findOne({ razorpayAccountId });
   if (seller) {
-    if (account.status === "activated") {
-      seller.razorpayAccountStatus = "active";
-      if (seller.panVerificationStatus === "verified" && seller.kycStatus === "verified") {
-        seller.payoutStatus = "enabled";
-      }
-    } else if (account.status === "suspended") {
-      seller.razorpayAccountStatus = "suspended";
-      seller.payoutStatus = "suspended";
-    }
+    applyAccountWebhookToSeller(seller, account);
     await seller.save();
   }
 }
 
-// ─── ADMIN-ONLY: Force Manual Retry of Route Transfer ───────────────────
 router.post("/retry-transfer/:orderId", auth, async (req, res) => {
   try {
-    // Basic verification - must be admin request
-    // Admin check is integrated via header role check
-    const header = req.headers.authorization || "";
-    const token = header.startsWith("Bearer ") ? header.slice(7) : "";
-    const payload = crypto.createHash("sha256").update(token).digest("hex"); // Placeholder logic, adminAuth already handles role verified
-    
     const subOrder = await Order.findById(req.params.orderId).populate("parentOrder");
     if (!subOrder) {
       return res.status(404).json({ message: "Order not found" });
     }
 
-    if (subOrder.transferStatus === "processed") {
-      return res.status(400).json({ message: "Split payment already transferred" });
+    if (String(subOrder.seller) !== String(req.sellerId)) {
+      return res.status(403).json({ message: "Not authorized to retry transfer for this order" });
     }
 
-    const seller = await Seller.findById(subOrder.seller);
-    if (!seller || !seller.razorpayAccountId || seller.razorpayAccountStatus !== "active") {
-      return res.status(400).json({ message: "Seller has no active Razorpay Linked Account configuration" });
-    }
-    if (!isPayoutEligible(seller)) {
-      return res.status(400).json({
-        message: "Seller payout is blocked until PAN and KYC are verified.",
-        missingFields: collectKycIssues(seller, {
-          requireVerifiedPan: true,
-          requireVerifiedKyc: true,
-          requireBank: true,
-        }),
-      });
+    if (hasProcessedTransfer(subOrder)) {
+      return res.status(400).json({ message: "Vendor settlement already completed for this order" });
     }
 
     const paymentId = subOrder.parentOrder?.razorpayPaymentId;
     if (!paymentId) {
-      return res.status(400).json({ message: "Order payment record has not been successfully captured" });
+      return res.status(400).json({ message: "Order payment has not been captured yet" });
     }
 
-    const transferAmountPaise = Math.round((subOrder.amount + subOrder.deliveryCharge) * 100) - subOrder.commissionAmountPaise;
+    if (subOrder.paymentStatus !== "paid" && subOrder.paymentStatus !== "delivered") {
+      return res.status(400).json({ message: "Transfer can only be retried for paid orders" });
+    }
 
-    console.log(`[Manual Retry] Split Transfer to ${seller.businessName}: Amount ${transferAmountPaise} paise`);
+    await processSubOrderTransfer(subOrder, paymentId);
+    const refreshed = await Order.findById(subOrder._id);
 
-    const transferResponse = await razorpay.payments.transfer(paymentId, {
-      transfers: [
-        {
-          account: seller.razorpayAccountId,
-          amount: transferAmountPaise,
-          currency: "INR",
-          on_hold: 1,
-        },
-      ],
-    });
+    if (refreshed.transferStatus === "failed") {
+      return res.status(500).json({ message: "Transfer retry failed", subOrder: refreshed });
+    }
 
-    const transferResult = transferResponse.items?.[0] || transferResponse;
-    subOrder.transferId = transferResult.id;
-    subOrder.transferStatus = "processed";
-    await subOrder.save();
-
-    // Log in Transaction Ledger
-    await TransactionLedger.create({
-      orderId: subOrder._id,
-      sellerId: seller._id,
-      amountPaise: transferAmountPaise,
-      type: "credit",
-      purpose: "order_item_revenue",
-      status: "settled",
-      razorpayTransferId: transferResult.id,
-    });
-
-    await TransactionLedger.create({
-      orderId: subOrder._id,
-      sellerId: null,
-      amountPaise: subOrder.commissionAmountPaise,
-      type: "credit",
-      purpose: "platform_commission",
-      status: "settled",
-      razorpayTransferId: transferResult.id,
-    });
-
-    return res.json({ message: "Split transfer completed successfully", subOrder });
+    return res.json({ message: "Vendor settlement completed", subOrder: refreshed });
   } catch (error) {
     console.error("[Manual Retry Error]:", error);
     return res.status(500).json({ message: "Could not execute transfer retry", error: error.message });
   }
 });
 
-// ─── ADMIN-ONLY: Trigger Payout Refund ──────────────────────────────────
 router.post("/refund/:orderId", auth, async (req, res) => {
   try {
     const subOrder = await Order.findById(req.params.orderId).populate("parentOrder");
@@ -426,34 +349,26 @@ router.post("/refund/:orderId", auth, async (req, res) => {
       return res.status(404).json({ message: "Order not found" });
     }
 
-    if (subOrder.paymentStatus !== "paid") {
-      return res.status(400).json({ message: "Can only refund orders that are paid" });
+    if (String(subOrder.seller) !== String(req.sellerId)) {
+      return res.status(403).json({ message: "Not authorized to refund this order" });
+    }
+
+    if (subOrder.paymentStatus !== "paid" && subOrder.paymentStatus !== "delivered") {
+      return res.status(400).json({ message: "Can only refund paid orders" });
     }
 
     const paymentId = subOrder.parentOrder?.razorpayPaymentId;
     if (!paymentId) {
-      return res.status(400).json({ message: "No payment transaction registered for this order" });
+      return res.status(400).json({ message: "No payment record for this order" });
     }
 
-    const refundAmountPaise = Math.round((subOrder.amount + subOrder.deliveryCharge) * 100);
-
-    // Call Razorpay Refund with Transfer Reversal
-    console.log(`[Refund Trigger] Reversing payment ${paymentId} for amount ${refundAmountPaise} paise`);
-
-    // In a real Razorpay setting, triggering refund on captured payment works as:
-    // If the payment had Route splits, reversing the splits clawbacks money from sub-merchants.
-    // Razorpay V1 supports reversing all associated transfers by setting reverse_all_transfers: 1
+    const vendorSharePaise = getVendorTransferAmountPaise(subOrder);
     const isMock = !process.env.RAZORPAY_KEY_ID || process.env.RAZORPAY_KEY_ID === "rzp_test_mock_id";
-    
-    if (isMock) {
-      // Simulate reversal response
-      if (subOrder.transferId) {
-        await razorpay.transfers.reverse(subOrder.transferId, { amount: refundAmountPaise - subOrder.commissionAmountPaise });
-      }
-    } else {
-      // Live refund execution
-      // We reverse the specific sub-merchant transfer to clawback funds
-      if (subOrder.transferId) {
+
+    if (subOrder.transferId) {
+      if (isMock) {
+        await razorpay.transfers.reverse(subOrder.transferId, { amount: vendorSharePaise });
+      } else {
         try {
           await new Promise((resolve, reject) => {
             const r = require("https").request(
@@ -462,49 +377,44 @@ router.post("/refund/:orderId", auth, async (req, res) => {
                 method: "POST",
                 headers: {
                   "Content-Type": "application/json",
-                  "Authorization": "Basic " + Buffer.from(process.env.RAZORPAY_KEY_ID + ":" + process.env.RAZORPAY_KEY_SECRET).toString("base64")
-                }
+                  Authorization:
+                    "Basic " +
+                    Buffer.from(
+                      process.env.RAZORPAY_KEY_ID + ":" + process.env.RAZORPAY_KEY_SECRET
+                    ).toString("base64"),
+                },
               },
-              (res) => {
+              (apiRes) => {
                 let data = "";
-                res.on("data", chunk => data += chunk);
-                res.on("end", () => resolve(JSON.parse(data)));
+                apiRes.on("data", (chunk) => (data += chunk));
+                apiRes.on("end", () => resolve(JSON.parse(data)));
               }
             );
             r.on("error", reject);
-            r.write(JSON.stringify({ amount: refundAmountPaise - subOrder.commissionAmountPaise }));
+            r.write(JSON.stringify({ amount: vendorSharePaise }));
             r.end();
           });
         } catch (err) {
-          console.warn("Linked transfer reversal clawback error:", err.message);
+          console.warn("Linked transfer reversal error:", err.message);
         }
       }
     }
 
     subOrder.paymentStatus = "cancelled";
-    subOrder.transferStatus = "reversed";
+    subOrder.transferStatus = subOrder.transferId ? "reversed" : subOrder.transferStatus;
     await subOrder.save();
 
-    // Debit Ledgers
     await TransactionLedger.create({
       orderId: subOrder._id,
       sellerId: subOrder.seller,
-      amountPaise: refundAmountPaise - subOrder.commissionAmountPaise,
+      amountPaise: vendorSharePaise,
       type: "debit",
       purpose: "refund",
       status: "reversed",
+      razorpayTransferId: subOrder.transferId || "",
     });
 
-    await TransactionLedger.create({
-      orderId: subOrder._id,
-      sellerId: null,
-      amountPaise: subOrder.commissionAmountPaise,
-      type: "debit",
-      purpose: "reversal",
-      status: "reversed",
-    });
-
-    return res.json({ message: "Order refund and seller payout reversal completed", subOrder });
+    return res.json({ message: "Order refund and vendor transfer reversal completed", subOrder });
   } catch (error) {
     console.error("[Refund Error]:", error);
     return res.status(500).json({ message: "Could not trigger refund", error: error.message });

@@ -3,7 +3,6 @@ const Product = require("../models/Product");
 const Order = require("../models/Order");
 const Seller = require("../models/Seller");
 const auth = require("../middleware/auth");
-const { collectKycIssues, isPayoutEligible } = require("../utils/kycCompliance");
 
 const router = express.Router();
 const validStatuses = ["pending", "paid", "delivered", "cancelled"];
@@ -142,7 +141,6 @@ function buildOrderResponse(order) {
 
 const razorpay = require("../utils/razorpay");
 const ParentOrder = require("../models/ParentOrder");
-const TransactionLedger = require("../models/TransactionLedger");
 
 router.post("/", async (req, res) => {
   try {
@@ -284,21 +282,9 @@ router.post("/", async (req, res) => {
         itemRevenuePaise += lineTotalPaise;
       }
 
-      // Platform Commission Math
-      let commissionPaise = 0;
-      const config = seller.commissionConfig || {};
-      if (config.commissionType === "percentage") {
-        let calculatedCommission = 0;
-        for (const line of lines) {
-          const lineTotalPaise = Math.round(line.unitPrice * 100) * line.quantity;
-          const categoryRate = config.categoryCommissions?.get(line.productCategory) ?? config.commissionValue ?? 5;
-          calculatedCommission += Math.floor(lineTotalPaise * (categoryRate / 100));
-        }
-        commissionPaise = calculatedCommission;
-      } else {
-        const fixedFeePaise = Math.round((config.commissionValue || 5) * 100);
-        commissionPaise = Math.min(itemRevenuePaise, fixedFeePaise);
-      }
+      // Direct settlement: vendor receives full sub-order total (items + delivery).
+      // commissionAmountPaise retained on schema for historical orders only; always 0 for new orders.
+      const commissionPaise = 0;
 
       const totalSubOrderPaise = itemRevenuePaise + deliveryChargePaise;
       grandTotalPaise += totalSubOrderPaise;
@@ -552,64 +538,6 @@ router.patch("/:orderId/status", auth, async (req, res) => {
 
     if (!order) {
       return res.status(404).json({ message: "Order not found" });
-    }
-
-    // Programmatic payout release when seller marks the order as delivered
-    if (status === "delivered" && order.transferId && order.transferStatus === "processed") {
-      try {
-        const seller = await Seller.findById(req.sellerId);
-        if (!isPayoutEligible(seller)) {
-          return res.status(400).json({
-            message: "Payout release blocked until PAN and KYC are verified.",
-            missingFields: collectKycIssues(seller, {
-              requireVerifiedPan: true,
-              requireVerifiedKyc: true,
-              requireBank: true,
-            }),
-          });
-        }
-        const isMock = !process.env.RAZORPAY_KEY_ID || process.env.RAZORPAY_KEY_ID === "rzp_test_mock_id";
-        if (isMock) {
-          console.log(`[Mock Payout Release] Released on_hold for transfer: ${order.transferId}`);
-        } else {
-          // Native Razorpay HTTP request to update on_hold status to false
-          await new Promise((resolve, reject) => {
-            const https = require("https");
-            const postData = JSON.stringify({ on_hold: false });
-            
-            const apiReq = https.request(
-              `https://api.razorpay.com/v1/transfers/${order.transferId}`,
-              {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  "Content-Length": Buffer.byteLength(postData),
-                  "Authorization": "Basic " + Buffer.from(process.env.RAZORPAY_KEY_ID + ":" + process.env.RAZORPAY_KEY_SECRET).toString("base64")
-                }
-              },
-              (apiRes) => {
-                let data = "";
-                apiRes.on("data", chunk => data += chunk);
-                apiRes.on("end", () => {
-                  if (apiRes.statusCode >= 200 && apiRes.statusCode < 300) {
-                    resolve(JSON.parse(data));
-                  } else {
-                    reject(new Error(`Razorpay API returned code ${apiRes.statusCode}: ${data}`));
-                  }
-                });
-              }
-            );
-            apiReq.on("error", reject);
-            apiReq.write(postData);
-            apiReq.end();
-          });
-          console.log(`[Razorpay Payout Release] Payout successfully released for transfer: ${order.transferId}`);
-        }
-      } catch (err) {
-        console.error(`[Payout Release Failure] Could not release transfer hold for order ${order._id}:`, err.message);
-        // We do not block database status update if payment gateway API fails, 
-        // as the admin can manually resolve it or retry.
-      }
     }
 
     order.paymentStatus = status;

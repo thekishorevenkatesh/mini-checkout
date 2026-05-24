@@ -1,4 +1,13 @@
 export type OrderStatus = "pending" | "paid" | "delivered" | "cancelled";
+export type LinkedAccountOnboardingStatus =
+  | "not_started"
+  | "kyc_incomplete"
+  | "pending_approval"
+  | "linked_account_pending"
+  | "linked_account_created"
+  | "linked_account_failed"
+  | "payout_enabled";
+export type TransferStatus = "untransferred" | "pending" | "processed" | "failed" | "reversed";
 export type PaymentMode = "prepaid_only" | "cod_only" | "both";
 export type PaymentMethod = "prepaid" | "cod";
 
@@ -73,6 +82,12 @@ export interface Seller {
   payoutStatus?: "blocked" | "enabled" | "suspended";
   businessType?: string;
   razorpayAccountId?: string;
+  razorpayReferenceId?: string;
+  razorpayStakeholderId?: string;
+  razorpayProductId?: string;
+  razorpayLinkedAccountCreatedAt?: string | null;
+  razorpayOnboardingError?: string;
+  linkedAccountOnboardingStatus?: LinkedAccountOnboardingStatus;
   razorpayAccountStatus?: string;
   kycDetailsEncrypted?: {
     pan?: string;
@@ -138,5 +153,8 @@ export interface Order {
   paymentMethod: PaymentMethod;
   paymentStatus: OrderStatus;
   paymentScreenshotUrl: string;
+  transferId?: string;
+  transferStatus?: TransferStatus;
+  commissionAmountPaise?: number;
   createdAt: string;
 }

@@ -83,7 +83,7 @@ app.use("/api/orders", orderRoutes);
 app.use("/api/store", storeRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/payments", paymentRoutes);
-app.use("/api/webhooks", paymentRoutes); // Razorpay Dashboard webhook URL: /api/webhooks/razorpay
+app.use("/api/webhooks", paymentRoutes); // Same handler: POST /api/webhooks/webhook
 
 app.use((_req, res) => {
   res.status(404).json({ message: "Not found" });

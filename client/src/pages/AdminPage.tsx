@@ -7,7 +7,7 @@ import { Card } from "../components/ui/Card";
 import { InputField } from "../components/ui/FormField";
 import { useI18n } from "../context/I18nContext";
 import { useToast } from "../context/ToastContext";
-import type { Seller } from "../types";
+import type { Seller, LinkedAccountOnboardingStatus } from "../types";
 
 type ApprovalStatus = "pending" | "approved" | "rejected" | "suspended";
 type SortBy = "latest" | "oldest" | "business";
@@ -34,6 +34,22 @@ function formatPaymentMode(mode?: Seller["paymentMode"]) {
 }
 
 function formatDeliveryMode(mode?: Seller["deliveryMode"]) {
+  if (mode === "flat_rate") return "Flat delivery charge";
+  if (mode === "always_free") return "Always free delivery";
+  return "";
+}
+
+function formatLinkedAccountStatus(status?: LinkedAccountOnboardingStatus) {
+  if (!status) return "Not started";
+  return status.replace(/_/g, " ");
+}
+
+function linkedAccountStatusBadge(status?: LinkedAccountOnboardingStatus) {
+  if (status === "payout_enabled") return "bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800";
+  if (status === "linked_account_failed" || status === "kyc_incomplete") return "bg-rose-100 text-rose-700 border-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800";
+  if (status === "linked_account_pending" || status === "linked_account_created" || status === "pending_approval") return "bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800";
+  return "bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700";
+}
   if (mode === "flat_rate") return "Flat delivery charge";
   if (mode === "always_free") return "Always free delivery";
   return "";
@@ -236,6 +252,39 @@ export function AdminPage() {
   function closeSellerDetail() {
     setSelectedSeller(null);
     setLoadingSellerDetail(false);
+  }
+
+  async function retryLinkedAccount(sellerId: string) {
+    if (!token) return;
+    setError("");
+    setSuccess("");
+    try {
+      const response = await api.post<{ seller: Seller; message: string }>(
+        `/admin/sellers/${sellerId}/linked-account/retry`,
+        {},
+        { headers: authHeaders }
+      );
+      setSuccess(response.data.message || "Linked account provisioning retried.");
+      await loadSellers(status);
+      if (selectedSeller?._id === sellerId && response.data.seller) {
+        setSelectedSeller(response.data.seller);
+      }
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        const message = error.response?.data?.message;
+        const detail = error.response?.data?.detail;
+        const missingFields = Array.isArray(error.response?.data?.missingFields)
+          ? error.response?.data?.missingFields
+          : [];
+        setError(
+          [message, detail, missingFields.length ? `Missing: ${missingFields.join(", ")}` : ""]
+            .filter(Boolean)
+            .join(" ")
+        );
+      } else {
+        setError("Unable to retry Razorpay linked account provisioning.");
+      }
+    }
   }
 
   async function updateApproval(
@@ -776,6 +825,55 @@ export function AdminPage() {
                     )}
                   </div>
                 </div>
+              </SectionCard>
+
+              <SectionCard
+                title="Razorpay linked account"
+                eyebrow="Route onboarding"
+                icon={
+                  <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-teal-50 text-teal-600 text-sm dark:bg-teal-950/50">
+                    ₹
+                  </span>
+                }
+              >
+                <div className="mb-4 flex flex-wrap items-center gap-2">
+                  <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold capitalize ${linkedAccountStatusBadge(selectedSeller.linkedAccountOnboardingStatus)}`}>
+                    {formatLinkedAccountStatus(selectedSeller.linkedAccountOnboardingStatus)}
+                  </span>
+                  {selectedSeller.razorpayAccountStatus ? (
+                    <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+                      Account: {selectedSeller.razorpayAccountStatus}
+                    </span>
+                  ) : null}
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <DetailCell label="Linked account ID" value={selectedSeller.razorpayAccountId} />
+                  <DetailCell label="Reference ID" value={selectedSeller.razorpayReferenceId} />
+                  <DetailCell label="Stakeholder ID" value={selectedSeller.razorpayStakeholderId} />
+                  <DetailCell label="Route product ID" value={selectedSeller.razorpayProductId} />
+                  <DetailCell label="Payout status" value={selectedSeller.payoutStatus} />
+                  <DetailCell
+                    label="Linked account created"
+                    value={
+                      selectedSeller.razorpayLinkedAccountCreatedAt
+                        ? new Date(selectedSeller.razorpayLinkedAccountCreatedAt).toLocaleString("en-IN")
+                        : ""
+                    }
+                  />
+                </div>
+                {selectedSeller.razorpayOnboardingError ? (
+                  <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-300">
+                    <p className="font-semibold">Last onboarding error</p>
+                    <p className="mt-1">{selectedSeller.razorpayOnboardingError}</p>
+                  </div>
+                ) : null}
+                {selectedSeller.approvalStatus === "approved" ? (
+                  <div className="mt-4">
+                    <Button variant="secondary" onClick={() => void retryLinkedAccount(selectedSeller._id)} className="w-full sm:w-auto">
+                      Retry linked account setup
+                    </Button>
+                  </div>
+                ) : null}
               </SectionCard>
 
               <SectionCard

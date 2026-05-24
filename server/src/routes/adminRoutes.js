@@ -79,16 +79,17 @@ router.get("/sellers/:sellerId", adminAuth, async (req, res) => {
   }
 });
 
-const { decrypt } = require("../utils/encryption");
-const razorpay = require("../utils/razorpay");
 const TransactionLedger = require("../models/TransactionLedger");
 const Order = require("../models/Order");
 const {
   collectKycIssues,
-  getPanCompliance,
-  isValidPan,
   recordComplianceEvent,
 } = require("../utils/kycCompliance");
+const {
+  collectLinkedAccountBlockers,
+  provisionVendorLinkedAccount,
+  syncLinkedAccountOnboardingStatus,
+} = require("../utils/razorpayLinkedAccount");
 
 router.patch("/sellers/:sellerId/approval", adminAuth, async (req, res) => {
   try {
@@ -103,23 +104,21 @@ router.patch("/sellers/:sellerId/approval", adminAuth, async (req, res) => {
     }
 
     seller.approvalStatus = status;
+    syncLinkedAccountOnboardingStatus(seller);
+
     if (status === "approved") {
-      const approvalBlockers = collectKycIssues(seller, {
-        requireVerifiedPan: true,
-        requireVerifiedKyc: true,
-        requireBank: true,
-        requireDocuments: true,
-      });
+      const approvalBlockers = collectLinkedAccountBlockers(seller);
       if (approvalBlockers.length > 0) {
         seller.approvalStatus = "pending";
         seller.storePublished = false;
         seller.payoutStatus = "blocked";
+        seller.linkedAccountOnboardingStatus = "kyc_incomplete";
         recordComplianceEvent(seller, "approval_blocked_incomplete_kyc", req.adminUsername || "admin", {
           missingFields: approvalBlockers,
         });
         await seller.save();
         return res.status(400).json({
-          message: "Cannot approve seller until mandatory PAN, KYC documents, and bank details are verified.",
+          message: "Cannot approve seller until mandatory PAN, KYC documents, bank details, and business contact fields are verified.",
           missingFields: approvalBlockers,
         });
       }
@@ -129,80 +128,24 @@ router.patch("/sellers/:sellerId/approval", adminAuth, async (req, res) => {
       seller.approvedAt = new Date();
       seller.approvedBy = req.adminUsername || "admin";
       seller.onboardingProgress = "approved";
+      seller.linkedAccountOnboardingStatus = "linked_account_pending";
 
-      // ─── Razorpay Linked Account Creation On Approval ───
-      if (!seller.razorpayAccountId) {
-        try {
-          const bankAccountName = decrypt(seller.kycDetailsEncrypted?.bankAccountName || seller.bankAccountName);
-          const bankAccountNumber = decrypt(seller.kycDetailsEncrypted?.bankAccountNumber || seller.bankAccountNumber);
-          const bankIfsc = seller.kycDetailsEncrypted?.bankIfsc || seller.bankIfsc;
-          const pan = getPanCompliance(seller).pan;
-
-          if (!isValidPan(pan)) {
-            throw new Error("Valid PAN is required before Razorpay linked account creation.");
-          }
-
-          console.log(`[Admin Approval] Triggering Linked Account Creation for Seller: ${seller.businessName}`);
-          
-          const accountResponse = await razorpay.accounts.create({
-            email: seller.businessEmail,
-            phone: seller.phone,
-            type: "route",
-            legal_business_name: seller.businessName,
-            business_type: seller.kycDetailsEncrypted?.businessType || "individual",
-            contact_name: seller.businessName,
-            legal_info: {
-              pan,
-            },
-            profile: {
-              category: seller.kycDetailsEncrypted?.businessCategory || "ecommerce",
-              addresses: {
-                registered: {
-                  street: seller.businessAddress || "Main Street",
-                  city: "Mumbai",
-                  state: "MH",
-                  postal_code: "400001",
-                  country: "IN",
-                },
-              },
-            },
-            funding_sources: [
-              {
-                type: "bank_account",
-                details: {
-                  account_number: bankAccountNumber,
-                  ifsc_code: bankIfsc,
-                  beneficiary_name: bankAccountName || seller.businessName,
-                },
-              },
-            ],
-          });
-
-          seller.razorpayAccountId = accountResponse.id;
-          // Set account status. Mock automatically activates
-          seller.razorpayAccountStatus = accountResponse.status === "activated" || accountResponse.status === "active" ? "active" : "pending";
-          seller.payoutStatus = seller.razorpayAccountStatus === "active" ? "enabled" : "blocked";
-          recordComplianceEvent(seller, "razorpay_linked_account_created", req.adminUsername || "admin", {
-            razorpayAccountId: accountResponse.id,
-            razorpayAccountStatus: seller.razorpayAccountStatus,
-          });
-          console.log(`[Admin Approval] Razorpay Account Created: ${accountResponse.id}`);
-        } catch (err) {
-          console.error("[Admin Approval] Failed to create Razorpay sub-merchant:", err.message);
-          seller.razorpayAccountStatus = "uncreated";
-          seller.payoutStatus = "blocked";
-          seller.storePublished = false;
-          seller.approvalStatus = "pending";
-          recordComplianceEvent(seller, "razorpay_linked_account_failed", req.adminUsername || "admin", {
-            reason: err.message,
-          });
-          await seller.save();
-          return res.status(502).json({
-            message: "Seller KYC is verified, but Razorpay linked account creation failed. Approval was not completed.",
-            detail: err.message,
-          });
-        }
+      try {
+        await provisionVendorLinkedAccount(seller, { actor: req.adminUsername || "admin" });
+      } catch (err) {
+        console.error("[Admin Approval] Razorpay linked account provisioning failed:", err.message);
+        seller.storePublished = false;
+        seller.approvalStatus = "pending";
+        seller.onboardingProgress = "kyc_verified";
+        await seller.save();
+        return res.status(502).json({
+          message: "Seller KYC is verified, but Razorpay linked account creation failed. Approval was not completed.",
+          detail: err.message,
+          missingFields: err.missingFields || [],
+          linkedAccountOnboardingStatus: seller.linkedAccountOnboardingStatus,
+        });
       }
+
       if (seller.razorpayAccountId && seller.razorpayAccountStatus === "active") {
         seller.payoutStatus = "enabled";
       }
@@ -218,6 +161,7 @@ router.patch("/sellers/:sellerId/approval", adminAuth, async (req, res) => {
       }
       seller.approvedAt = null;
       seller.approvedBy = "";
+      syncLinkedAccountOnboardingStatus(seller);
     }
 
     await seller.save();
@@ -266,9 +210,11 @@ router.patch("/sellers/:sellerId/kyc", adminAuth, async (req, res) => {
       seller.onboardingProgress = "kyc_verified";
       if (seller.razorpayAccountStatus === "active") {
         seller.payoutStatus = "enabled";
+        seller.linkedAccountOnboardingStatus = "payout_enabled";
       }
     } else {
       seller.payoutStatus = "blocked";
+      syncLinkedAccountOnboardingStatus(seller);
     }
 
     recordComplianceEvent(seller, "admin_kyc_status_update", req.adminUsername || "admin", {
@@ -311,6 +257,49 @@ router.get("/transfers", adminAuth, async (req, res) => {
     return res.json({ transfers: orders });
   } catch (error) {
     return res.status(500).json({ message: "Unable to fetch transfers" });
+  }
+});
+
+router.post("/sellers/:sellerId/linked-account/retry", adminAuth, async (req, res) => {
+  let seller;
+  try {
+    seller = await Seller.findById(req.params.sellerId);
+    if (!seller) {
+      return res.status(404).json({ message: "Seller not found" });
+    }
+
+    if (seller.approvalStatus !== "approved") {
+      return res.status(400).json({ message: "Linked account provisioning requires an approved seller." });
+    }
+
+    const blockers = collectLinkedAccountBlockers(seller);
+    if (blockers.length > 0) {
+      return res.status(400).json({
+        message: "Seller KYC is incomplete for Razorpay linked account creation.",
+        missingFields: blockers,
+      });
+    }
+
+    await provisionVendorLinkedAccount(seller, {
+      actor: req.adminUsername || "admin",
+      force: true,
+    });
+    await seller.save();
+
+    const refreshed = await Seller.findById(seller._id).select(ADMIN_SELLER_OMIT);
+    return res.json({
+      message: "Razorpay linked account provisioning completed.",
+      seller: toAdminSellerView(refreshed),
+    });
+  } catch (error) {
+    if (seller) {
+      await seller.save();
+    }
+    return res.status(error.statusCode === 400 ? 400 : 502).json({
+      message: "Razorpay linked account provisioning failed.",
+      detail: error.message,
+      missingFields: error.missingFields || [],
+    });
   }
 });
 
