@@ -55,7 +55,7 @@ export interface Seller {
   privacyPolicy: string;
   returnRefundPolicy: string;
   termsAndConditions: string;
-  approvalStatus: "draft" | "pending" | "approved" | "rejected";
+  approvalStatus: "draft" | "pending" | "approved" | "rejected" | "suspended";
   storePublished?: boolean;
   publishRequestedAt?: string | null;
   approvedAt?: string | null;
@@ -65,6 +65,12 @@ export interface Seller {
   idProofUrl?: string;
   addressProofUrl?: string;
   pan?: string;
+  panHolderName?: string;
+  panDocumentUrl?: string;
+  panVerificationStatus?: "unsubmitted" | "pending" | "verified" | "rejected";
+  kycStatus?: "incomplete" | "pending" | "verified" | "rejected";
+  onboardingProgress?: "otp_verified" | "profile_submitted" | "kyc_pending" | "kyc_verified" | "approved";
+  payoutStatus?: "blocked" | "enabled" | "suspended";
   businessType?: string;
   razorpayAccountId?: string;
   razorpayAccountStatus?: string;

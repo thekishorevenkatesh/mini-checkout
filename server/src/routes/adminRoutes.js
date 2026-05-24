@@ -49,7 +49,7 @@ router.get("/sellers", adminAuth, async (req, res) => {
   try {
     const status = String(req.query.status || "pending").trim();
     const query =
-      status && ["pending", "approved", "rejected"].includes(status)
+      status && ["pending", "approved", "rejected", "suspended"].includes(status)
         ? { approvalStatus: status }
         : {};
 
@@ -83,6 +83,12 @@ const { decrypt } = require("../utils/encryption");
 const razorpay = require("../utils/razorpay");
 const TransactionLedger = require("../models/TransactionLedger");
 const Order = require("../models/Order");
+const {
+  collectKycIssues,
+  getPanCompliance,
+  isValidPan,
+  recordComplianceEvent,
+} = require("../utils/kycCompliance");
 
 router.patch("/sellers/:sellerId/approval", adminAuth, async (req, res) => {
   try {
@@ -98,10 +104,31 @@ router.patch("/sellers/:sellerId/approval", adminAuth, async (req, res) => {
 
     seller.approvalStatus = status;
     if (status === "approved") {
+      const approvalBlockers = collectKycIssues(seller, {
+        requireVerifiedPan: true,
+        requireVerifiedKyc: true,
+        requireBank: true,
+        requireDocuments: true,
+      });
+      if (approvalBlockers.length > 0) {
+        seller.approvalStatus = "pending";
+        seller.storePublished = false;
+        seller.payoutStatus = "blocked";
+        recordComplianceEvent(seller, "approval_blocked_incomplete_kyc", req.adminUsername || "admin", {
+          missingFields: approvalBlockers,
+        });
+        await seller.save();
+        return res.status(400).json({
+          message: "Cannot approve seller until mandatory PAN, KYC documents, and bank details are verified.",
+          missingFields: approvalBlockers,
+        });
+      }
+
       seller.storePublished = true;
       seller.publishRequestedAt = seller.publishRequestedAt || new Date();
       seller.approvedAt = new Date();
       seller.approvedBy = req.adminUsername || "admin";
+      seller.onboardingProgress = "approved";
 
       // ─── Razorpay Linked Account Creation On Approval ───
       if (!seller.razorpayAccountId) {
@@ -109,6 +136,11 @@ router.patch("/sellers/:sellerId/approval", adminAuth, async (req, res) => {
           const bankAccountName = decrypt(seller.kycDetailsEncrypted?.bankAccountName || seller.bankAccountName);
           const bankAccountNumber = decrypt(seller.kycDetailsEncrypted?.bankAccountNumber || seller.bankAccountNumber);
           const bankIfsc = seller.kycDetailsEncrypted?.bankIfsc || seller.bankIfsc;
+          const pan = getPanCompliance(seller).pan;
+
+          if (!isValidPan(pan)) {
+            throw new Error("Valid PAN is required before Razorpay linked account creation.");
+          }
 
           console.log(`[Admin Approval] Triggering Linked Account Creation for Seller: ${seller.businessName}`);
           
@@ -119,6 +151,9 @@ router.patch("/sellers/:sellerId/approval", adminAuth, async (req, res) => {
             legal_business_name: seller.businessName,
             business_type: seller.kycDetailsEncrypted?.businessType || "individual",
             contact_name: seller.businessName,
+            legal_info: {
+              pan,
+            },
             profile: {
               category: seller.kycDetailsEncrypted?.businessCategory || "ecommerce",
               addresses: {
@@ -146,17 +181,38 @@ router.patch("/sellers/:sellerId/approval", adminAuth, async (req, res) => {
           seller.razorpayAccountId = accountResponse.id;
           // Set account status. Mock automatically activates
           seller.razorpayAccountStatus = accountResponse.status === "activated" || accountResponse.status === "active" ? "active" : "pending";
+          seller.payoutStatus = seller.razorpayAccountStatus === "active" ? "enabled" : "blocked";
+          recordComplianceEvent(seller, "razorpay_linked_account_created", req.adminUsername || "admin", {
+            razorpayAccountId: accountResponse.id,
+            razorpayAccountStatus: seller.razorpayAccountStatus,
+          });
           console.log(`[Admin Approval] Razorpay Account Created: ${accountResponse.id}`);
         } catch (err) {
           console.error("[Admin Approval] Failed to create Razorpay sub-merchant:", err.message);
           seller.razorpayAccountStatus = "uncreated";
+          seller.payoutStatus = "blocked";
+          seller.storePublished = false;
+          seller.approvalStatus = "pending";
+          recordComplianceEvent(seller, "razorpay_linked_account_failed", req.adminUsername || "admin", {
+            reason: err.message,
+          });
+          await seller.save();
+          return res.status(502).json({
+            message: "Seller KYC is verified, but Razorpay linked account creation failed. Approval was not completed.",
+            detail: err.message,
+          });
         }
+      }
+      if (seller.razorpayAccountId && seller.razorpayAccountStatus === "active") {
+        seller.payoutStatus = "enabled";
       }
     } else if (status === "suspended") {
       seller.storePublished = false;
       seller.razorpayAccountStatus = "suspended";
+      seller.payoutStatus = "suspended";
     } else {
       seller.storePublished = false;
+      seller.payoutStatus = "blocked";
       if (status === "pending") {
         seller.publishRequestedAt = new Date();
       }
@@ -177,6 +233,58 @@ router.patch("/sellers/:sellerId/approval", adminAuth, async (req, res) => {
 });
 
 // ─── ADMIN: Fetch Financial Ledgers ─────────────────────────────────────
+router.patch("/sellers/:sellerId/kyc", adminAuth, async (req, res) => {
+  try {
+    const { panVerificationStatus, kycStatus, note } = req.body || {};
+    if (
+      panVerificationStatus &&
+      !["pending", "verified", "rejected"].includes(panVerificationStatus)
+    ) {
+      return res.status(400).json({ message: "Invalid PAN verification status" });
+    }
+    if (kycStatus && !["incomplete", "pending", "verified", "rejected"].includes(kycStatus)) {
+      return res.status(400).json({ message: "Invalid KYC status" });
+    }
+
+    const seller = await Seller.findById(req.params.sellerId);
+    if (!seller) {
+      return res.status(404).json({ message: "Seller not found" });
+    }
+
+    const blockers = collectKycIssues(seller, { requireBank: true, requireDocuments: true });
+    if ((panVerificationStatus === "verified" || kycStatus === "verified") && blockers.length > 0) {
+      return res.status(400).json({
+        message: "Cannot verify KYC until mandatory PAN, holder name, documents, and bank details are present.",
+        missingFields: blockers,
+      });
+    }
+
+    if (panVerificationStatus) seller.panVerificationStatus = panVerificationStatus;
+    if (kycStatus) seller.kycStatus = kycStatus;
+
+    if (seller.panVerificationStatus === "verified" && seller.kycStatus === "verified") {
+      seller.onboardingProgress = "kyc_verified";
+      if (seller.razorpayAccountStatus === "active") {
+        seller.payoutStatus = "enabled";
+      }
+    } else {
+      seller.payoutStatus = "blocked";
+    }
+
+    recordComplianceEvent(seller, "admin_kyc_status_update", req.adminUsername || "admin", {
+      panVerificationStatus: seller.panVerificationStatus,
+      kycStatus: seller.kycStatus,
+      note: String(note || "").trim(),
+    });
+
+    await seller.save();
+    const refreshed = await Seller.findById(seller._id).select(ADMIN_SELLER_OMIT);
+    return res.json({ seller: toAdminSellerView(refreshed) });
+  } catch (_error) {
+    return res.status(500).json({ message: "Unable to update seller KYC status" });
+  }
+});
+
 router.get("/financial-ledger", adminAuth, async (req, res) => {
   try {
     const ledgers = await TransactionLedger.find({})

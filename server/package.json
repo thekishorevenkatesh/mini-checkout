@@ -4,7 +4,8 @@
   "main": "src/server.js",
   "scripts": {
     "dev": "nodemon src/server.js",
-    "start": "node src/server.js"
+    "start": "node src/server.js",
+    "migrate:pan-kyc": "node src/scripts/migrate-pan-kyc.js"
   },
   "keywords": [],
   "author": "",

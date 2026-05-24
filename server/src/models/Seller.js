@@ -85,6 +85,52 @@ const sellerSchema = new mongoose.Schema(
       trim: true,
       default: "",
     },
+    pan: {
+      type: String,
+      trim: true,
+      uppercase: true,
+      default: "",
+    },
+    panHash: {
+      type: String,
+      trim: true,
+      default: "",
+      index: true,
+    },
+    panHolderName: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    panDocumentUrl: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    panVerificationStatus: {
+      type: String,
+      enum: ["unsubmitted", "pending", "verified", "rejected"],
+      default: "unsubmitted",
+      index: true,
+    },
+    kycStatus: {
+      type: String,
+      enum: ["incomplete", "pending", "verified", "rejected"],
+      default: "incomplete",
+      index: true,
+    },
+    onboardingProgress: {
+      type: String,
+      enum: ["otp_verified", "profile_submitted", "kyc_pending", "kyc_verified", "approved"],
+      default: "otp_verified",
+      index: true,
+    },
+    payoutStatus: {
+      type: String,
+      enum: ["blocked", "enabled", "suspended"],
+      default: "blocked",
+      index: true,
+    },
     profileImageUrl: {
       type: String,
       trim: true,
@@ -184,6 +230,7 @@ const sellerSchema = new mongoose.Schema(
     },
     kycDetailsEncrypted: {
       pan: { type: String, default: "" },
+      panHolderName: { type: String, default: "" },
       gst: { type: String, default: "" },
       bankAccountName: { type: String, default: "" },
       bankAccountNumber: { type: String, default: "" },
@@ -229,6 +276,17 @@ const sellerSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    complianceAudit: {
+      type: [
+        {
+          action: { type: String, trim: true, required: true },
+          actor: { type: String, trim: true, default: "system" },
+          metadata: { type: mongoose.Schema.Types.Mixed, default: {} },
+          at: { type: Date, default: Date.now },
+        },
+      ],
+      default: [],
+    },
     // OTP fields (transient — cleared after verification)
     otp: {
       type: String,
@@ -252,5 +310,14 @@ const sellerSchema = new mongoose.Schema(
     timestamps: true,
   }
 );
+
+sellerSchema.index(
+  { panHash: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { panHash: { $type: "string", $gt: "" } },
+  }
+);
+sellerSchema.index({ kycStatus: 1, payoutStatus: 1, approvalStatus: 1 });
 
 module.exports = mongoose.model("Seller", sellerSchema);

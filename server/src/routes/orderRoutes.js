@@ -3,6 +3,7 @@ const Product = require("../models/Product");
 const Order = require("../models/Order");
 const Seller = require("../models/Seller");
 const auth = require("../middleware/auth");
+const { collectKycIssues, isPayoutEligible } = require("../utils/kycCompliance");
 
 const router = express.Router();
 const validStatuses = ["pending", "paid", "delivered", "cancelled"];
@@ -556,6 +557,17 @@ router.patch("/:orderId/status", auth, async (req, res) => {
     // Programmatic payout release when seller marks the order as delivered
     if (status === "delivered" && order.transferId && order.transferStatus === "processed") {
       try {
+        const seller = await Seller.findById(req.sellerId);
+        if (!isPayoutEligible(seller)) {
+          return res.status(400).json({
+            message: "Payout release blocked until PAN and KYC are verified.",
+            missingFields: collectKycIssues(seller, {
+              requireVerifiedPan: true,
+              requireVerifiedKyc: true,
+              requireBank: true,
+            }),
+          });
+        }
         const isMock = !process.env.RAZORPAY_KEY_ID || process.env.RAZORPAY_KEY_ID === "rzp_test_mock_id";
         if (isMock) {
           console.log(`[Mock Payout Release] Released on_hold for transfer: ${order.transferId}`);

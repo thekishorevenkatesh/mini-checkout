@@ -26,6 +26,12 @@ import {
 } from "../utils/productCategories";
 
 type Tab = "dashboard" | "store" | "products" | "orders" | "reports" | "earnings" | "profile" | "policies";
+const PAN_PATTERN = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
+
+function normalizePan(value: string) {
+  return value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 10);
+}
+
 type ProductFormVariant = {
   label: string;   // value / size  e.g. "500"
   uom: string;     // unit of measure e.g. "g", "ml", "Pack"
@@ -276,6 +282,8 @@ export function DashboardPage() {
   const [profileAddress, setProfileAddress] = useState<AddressParts>(parseAddress(seller?.businessAddress || ""));
   const [profileGST, setProfileGST] = useState(seller?.businessGST || "");
   const [profilePAN, setProfilePAN] = useState(seller?.pan || "");
+  const [profilePANHolderName, setProfilePANHolderName] = useState(seller?.panHolderName || "");
+  const [profilePANDocumentUrl, setProfilePANDocumentUrl] = useState(seller?.panDocumentUrl || "");
   const [profileBusinessType, setProfileBusinessType] = useState(seller?.businessType || "individual");
   const [profileLogo, setProfileLogo] = useState(seller?.businessLogo || "");
   const [profileFavicon, setProfileFavicon] = useState(seller?.favicon || "");
@@ -367,6 +375,8 @@ export function DashboardPage() {
     setProfileAddress(parseAddress(seller.businessAddress || ""));
     setProfileGST(seller.businessGST || "");
     setProfilePAN(seller.pan || "");
+    setProfilePANHolderName(seller.panHolderName || "");
+    setProfilePANDocumentUrl(seller.panDocumentUrl || "");
     setProfileBusinessType(seller.businessType || "individual");
     setProfileLogo(seller.businessLogo || "");
     setProfileFavicon(seller.favicon || "");
@@ -586,6 +596,18 @@ export function DashboardPage() {
     return "Draft";
   }
 
+  const normalizedProfilePAN = normalizePan(profilePAN);
+  const profilePANError =
+    profilePAN.trim().length === 0
+      ? "PAN number is required."
+      : !PAN_PATTERN.test(normalizedProfilePAN)
+        ? "Enter PAN in ABCDE1234F format."
+        : "";
+  const profilePANHolderNameError =
+    profilePANHolderName.trim().length === 0 ? "PAN holder legal name is required." : "";
+  const isProfileFormValid =
+    !profilePANError && !profilePANHolderNameError && profileEmail.trim() && isValidEmail(profileEmail);
+
   // ── Profile save
   async function handleProfileSave(e: FormEvent) {
     e.preventDefault(); setError(""); setSuccess("");
@@ -595,6 +617,10 @@ export function DashboardPage() {
     }
     if (!isValidEmail(profileEmail)) {
       setError("Enter a valid business email address.");
+      return;
+    }
+    if (profilePANError || profilePANHolderNameError) {
+      setError(profilePANError || profilePANHolderNameError);
       return;
     }
     setIsSavingProfile(true);
@@ -609,7 +635,9 @@ export function DashboardPage() {
         bankIfsc: profileBankIfsc.trim().toUpperCase(),
         businessAddress: formatAddress(profileAddress),
         businessGST: profileGST.trim(),
-        pan: profilePAN.trim(),
+        pan: normalizedProfilePAN,
+        panHolderName: profilePANHolderName.trim(),
+        panDocumentUrl: profilePANDocumentUrl.trim(),
         businessType: profileBusinessType,
         businessLogo: profileLogo.trim(),
         favicon: profileFavicon.trim(),
@@ -618,7 +646,7 @@ export function DashboardPage() {
         addressProofUrl: profileAddressProof.trim(),
       });
       setSuccess("Profile saved.");
-    } catch { setError("Could not save profile."); }
+    } catch (error) { setError(getApiErrorMessage(error, "Could not save profile.")); }
     finally { setIsSavingProfile(false); }
   }
 
@@ -2867,6 +2895,75 @@ export function DashboardPage() {
             </span>
           </div>
 
+          {/* ── Razorpay Payout Account Status Banner ── */}
+          {(() => {
+            const rzpStatus = seller?.razorpayAccountStatus;
+            if (seller?.payoutStatus === "blocked" || seller?.kycStatus !== "verified" || seller?.panVerificationStatus !== "verified") {
+              return (
+                <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 dark:border-amber-800/50 dark:bg-amber-950/40">
+                  <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-amber-400 text-white text-sm">!</span>
+                  <div>
+                    <p className="text-sm font-bold text-amber-800 dark:text-amber-300">Payouts Blocked Until PAN KYC Is Verified</p>
+                    <p className="mt-0.5 text-xs text-amber-700 dark:text-amber-400">
+                      Add a valid PAN, PAN holder legal name, bank details, and KYC proofs. Admin approval and Razorpay linked account activation require verified PAN KYC before settlements can be released.
+                    </p>
+                  </div>
+                </div>
+              );
+            }
+            if (rzpStatus === "active") {
+              return (
+                <div className="flex items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 dark:border-emerald-800/50 dark:bg-emerald-950/40">
+                  <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-emerald-500 text-white text-sm">✓</span>
+                  <div>
+                    <p className="text-sm font-bold text-emerald-800 dark:text-emerald-300">Payout Account Active</p>
+                    <p className="mt-0.5 text-xs text-emerald-700 dark:text-emerald-400">
+                      Your Razorpay linked account is verified and active. Once you mark orders as <strong>Delivered</strong>, funds will be automatically transferred to your bank account.
+                    </p>
+                  </div>
+                </div>
+              );
+            }
+            if (rzpStatus === "pending") {
+              return (
+                <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 dark:border-amber-800/50 dark:bg-amber-950/40">
+                  <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-amber-400 text-white text-sm">⏳</span>
+                  <div>
+                    <p className="text-sm font-bold text-amber-800 dark:text-amber-300">Payout Account — Pending Activation</p>
+                    <p className="mt-0.5 text-xs text-amber-700 dark:text-amber-400">
+                      Your linked account has been created and is pending Razorpay's KYC review. This usually takes 1–3 business days. Payouts will be held until activation.
+                    </p>
+                  </div>
+                </div>
+              );
+            }
+            if (rzpStatus === "suspended") {
+              return (
+                <div className="flex items-start gap-3 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 dark:border-rose-800/50 dark:bg-rose-950/40">
+                  <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-rose-500 text-white text-sm">✕</span>
+                  <div>
+                    <p className="text-sm font-bold text-rose-800 dark:text-rose-300">Payout Account Suspended</p>
+                    <p className="mt-0.5 text-xs text-rose-700 dark:text-rose-400">
+                      Your Razorpay linked account has been suspended. Contact the platform admin to resolve this issue.
+                    </p>
+                  </div>
+                </div>
+              );
+            }
+            // uncreated — show what's needed
+            return (
+              <div className="flex items-start gap-3 rounded-2xl border border-sky-200 bg-sky-50 px-5 py-4 dark:border-sky-800/50 dark:bg-sky-950/40">
+                <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-sky-500 text-white text-sm">ℹ</span>
+                <div>
+                  <p className="text-sm font-bold text-sky-800 dark:text-sky-300">Payout Account Not Yet Set Up</p>
+                  <p className="mt-0.5 text-xs text-sky-700 dark:text-sky-400">
+                    To receive automatic payouts, fill in your <strong>Bank Account details</strong> and <strong>Business Type</strong> below, then save your profile. The platform admin will create your Razorpay linked account upon approving your store.
+                  </p>
+                </div>
+              </div>
+            );
+          })()}
+
           <article className="rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card dark:border-teal-900/35 dark:bg-gradient-to-br dark:from-slate-950 dark:to-slate-900">
             <div className="mb-4 flex items-center justify-between gap-3">
               <div>
@@ -2884,6 +2981,11 @@ export function DashboardPage() {
                 { label: "Business email", value: seller?.businessEmail },
                 { label: "Registered phone", value: seller?.phone },
                 { label: "GST number", value: seller?.businessGST },
+                { label: "PAN", value: seller?.pan },
+                { label: "PAN holder", value: seller?.panHolderName },
+                { label: "PAN verification", value: seller?.panVerificationStatus },
+                { label: "KYC status", value: seller?.kycStatus },
+                { label: "Payout status", value: seller?.payoutStatus },
                 { label: "Business address", value: seller?.businessAddress },
                 { label: "UPI ID", value: seller?.upiId },
                 { label: "Account holder", value: seller?.bankAccountName },
@@ -2894,6 +2996,7 @@ export function DashboardPage() {
                 { label: "Call number", value: seller?.callNumber },
                 { label: "ID proof", value: seller?.idProofUrl ? "Uploaded" : "" },
                 { label: "Address proof", value: seller?.addressProofUrl ? "Uploaded" : "" },
+                { label: "PAN document", value: seller?.panDocumentUrl ? "Uploaded" : "" },
               ].map(({ label, value }) => (
                 <div key={label} className="min-w-0 rounded-2xl border border-slate-100 bg-slate-50/80 px-3 py-2.5">
                   <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">{label}</p>
@@ -2930,7 +3033,13 @@ export function DashboardPage() {
                 </label>
                 <label className="block space-y-1">
                   <span className="text-sm font-semibold text-slate-700">PAN details</span>
-                  <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm uppercase outline-none focus:border-teal-400 dark:bg-slate-900 dark:border-slate-700 dark:text-slate-100" placeholder="ABCDE1234F" maxLength={10} value={profilePAN} onChange={e => setProfilePAN(e.target.value.toUpperCase())} />
+                  <input className={`w-full rounded-xl border px-3 py-2.5 text-sm uppercase outline-none focus:ring-2 dark:bg-slate-900 dark:text-slate-100 ${profilePAN && profilePANError ? "border-rose-300 focus:border-rose-400 focus:ring-rose-50 dark:border-rose-700" : "border-slate-200 focus:border-teal-400 focus:ring-teal-50 dark:border-slate-700"}`} placeholder="ABCDE1234F" maxLength={10} value={profilePAN} onChange={e => setProfilePAN(normalizePan(e.target.value))} required />
+                  {profilePANError ? <span className="text-xs text-rose-600">{profilePANError}</span> : <span className="text-xs text-slate-400">Mandatory for Razorpay linked account creation and settlements.</span>}
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-sm font-semibold text-slate-700">PAN holder legal name *</span>
+                  <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-teal-400 dark:bg-slate-900 dark:border-slate-700 dark:text-slate-100" placeholder="Name exactly as on PAN" value={profilePANHolderName} onChange={e => setProfilePANHolderName(e.target.value)} required />
+                  {profilePANHolderNameError ? <span className="text-xs text-rose-600">{profilePANHolderNameError}</span> : null}
                 </label>
                 <label className="block space-y-1">
                   <span className="text-sm font-semibold text-slate-700">Business type</span>
@@ -3030,6 +3139,16 @@ export function DashboardPage() {
               <p className="text-xs text-slate-500 mb-4">Upload clear images of your documents. Required for admin verification and store approval.</p>
               <div className="grid gap-5 sm:grid-cols-2">
                 <div className="space-y-2">
+                  <p className="text-sm font-semibold text-slate-700">PAN Document</p>
+                  <p className="text-xs text-slate-400">Upload when requested for PAN review</p>
+                  {profilePANDocumentUrl && (
+                    <a href={profilePANDocumentUrl} target="_blank" rel="noreferrer">
+                      <img src={profilePANDocumentUrl} alt="PAN Document" className="h-28 w-full rounded-xl object-cover border border-slate-200 hover:opacity-90 transition" />
+                    </a>
+                  )}
+                  <ImageUploadField value={profilePANDocumentUrl} onChange={setProfilePANDocumentUrl} />
+                </div>
+                <div className="space-y-2">
                   <p className="text-sm font-semibold text-slate-700">ID Proof <span className="text-rose-500">*</span></p>
                   <p className="text-xs text-slate-400">Aadhaar, PAN, Passport, Voter ID, Driving Licence</p>
                   {profileIdProof && (
@@ -3052,7 +3171,7 @@ export function DashboardPage() {
               </div>
             </article>
 
-            <button type="submit" disabled={isSavingProfile}
+            <button type="submit" disabled={isSavingProfile || !isProfileFormValid}
               className="w-full rounded-xl bg-gradient-to-r from-emerald-500 via-teal-500 to-sky-500 px-4 py-3 text-sm font-semibold text-white transition hover:from-emerald-400 hover:via-teal-400 hover:to-sky-400 disabled:from-slate-300 disabled:via-slate-300 disabled:to-slate-300 shadow-sm">
               {isSavingProfile ? "Saving…" : "💾 Save Profile"}
             </button>

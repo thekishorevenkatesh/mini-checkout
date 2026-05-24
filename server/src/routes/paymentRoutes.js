@@ -8,6 +8,7 @@ const TransactionLedger = require("../models/TransactionLedger");
 const WebhookLog = require("../models/WebhookLog");
 const auth = require("../middleware/auth");
 const { encrypt, decrypt } = require("../utils/encryption");
+const { collectKycIssues, isPayoutEligible, recordComplianceEvent } = require("../utils/kycCompliance");
 
 const router = express.Router();
 
@@ -157,6 +158,21 @@ async function handlePaymentCaptured(payment) {
       console.warn(`[payment.captured] Route Transfer skipped: Seller ${seller.businessName} has no active Razorpay Account.`);
       continue;
     }
+    if (!isPayoutEligible(seller)) {
+      subOrder.transferStatus = "failed";
+      seller.payoutStatus = "blocked";
+      recordComplianceEvent(seller, "route_transfer_blocked_incomplete_kyc", "system", {
+        orderId: subOrder._id.toString(),
+        missingFields: collectKycIssues(seller, {
+          requireVerifiedPan: true,
+          requireVerifiedKyc: true,
+          requireBank: true,
+        }),
+      });
+      await Promise.all([subOrder.save(), seller.save()]);
+      console.warn(`[payment.captured] Route Transfer blocked: Seller ${seller.businessName} is not payout eligible.`);
+      continue;
+    }
 
     try {
       // 2. Perform Razorpay Route Transfer
@@ -289,6 +305,9 @@ async function handleAccountActivated(account) {
   const seller = await Seller.findOne({ razorpayAccountId });
   if (seller) {
     seller.razorpayAccountStatus = "active";
+    if (seller.panVerificationStatus === "verified" && seller.kycStatus === "verified") {
+      seller.payoutStatus = "enabled";
+    }
     await seller.save();
     console.log(`[account.activated] Seller ${seller.businessName} updated to active.`);
   }
@@ -302,8 +321,12 @@ async function handleAccountUpdated(account) {
   if (seller) {
     if (account.status === "activated") {
       seller.razorpayAccountStatus = "active";
+      if (seller.panVerificationStatus === "verified" && seller.kycStatus === "verified") {
+        seller.payoutStatus = "enabled";
+      }
     } else if (account.status === "suspended") {
       seller.razorpayAccountStatus = "suspended";
+      seller.payoutStatus = "suspended";
     }
     await seller.save();
   }
@@ -330,6 +353,16 @@ router.post("/retry-transfer/:orderId", auth, async (req, res) => {
     const seller = await Seller.findById(subOrder.seller);
     if (!seller || !seller.razorpayAccountId || seller.razorpayAccountStatus !== "active") {
       return res.status(400).json({ message: "Seller has no active Razorpay Linked Account configuration" });
+    }
+    if (!isPayoutEligible(seller)) {
+      return res.status(400).json({
+        message: "Seller payout is blocked until PAN and KYC are verified.",
+        missingFields: collectKycIssues(seller, {
+          requireVerifiedPan: true,
+          requireVerifiedKyc: true,
+          requireBank: true,
+        }),
+      });
     }
 
     const paymentId = subOrder.parentOrder?.razorpayPaymentId;

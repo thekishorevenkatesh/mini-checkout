@@ -8,6 +8,16 @@ const Order = require("../models/Order");
 const { generateOtp, hashOtp, verifyOtp: verifyHashedOtp } = require("../utils/otp");
 const { getPolicyContent } = require("../utils/policyDefaults");
 const { sendOtpEmail } = require("../utils/mailer");
+const {
+  applyKycStateFromPan,
+  collectKycIssues,
+  getPanCompliance,
+  isValidPan,
+  maskPan,
+  normalizePan,
+  panHash,
+  recordComplianceEvent,
+} = require("../utils/kycCompliance");
 
 const router = express.Router();
 
@@ -21,8 +31,11 @@ function withPolicyDefaults(sellerDoc) {
   if (!sellerDoc) return sellerDoc;
 
   const seller = sellerDoc.toObject ? sellerDoc.toObject() : sellerDoc;
+  const pan = getPanCompliance(seller);
+  delete seller.kycDetailsEncrypted;
   return {
     ...seller,
+    pan: pan.panMasked || seller.pan || "",
     ...getPolicyContent(seller),
   };
 }
@@ -198,8 +211,11 @@ router.post("/verify-otp", async (req, res) => {
     await seller.save();
 
     const isProfileComplete = Boolean(
-      seller.businessName && seller.upiId && seller.slug &&
-      seller.businessName !== seller.phone // not a placeholder
+      seller.businessName &&
+      seller.upiId &&
+      seller.slug &&
+      seller.businessName !== seller.phone &&
+      collectKycIssues(seller).length === 0
     );
 
     const token = issueToken(seller._id.toString());
@@ -220,6 +236,19 @@ function maskText(text, visibleCount = 4) {
   return "*".repeat(clean.length - visibleCount) + clean.slice(-visibleCount);
 }
 
+async function assertPanIsUnique(normalizedPan, sellerId) {
+  const duplicate = await Seller.findOne({
+    panHash: panHash(normalizedPan),
+    _id: { $ne: sellerId },
+  }).select("_id");
+
+  if (duplicate) {
+    const error = new Error("This PAN is already linked to another seller account.");
+    error.statusCode = 409;
+    throw error;
+  }
+}
+
 // ─── POST /auth/register ──────────────────────────────────────────────────
 // Called after OTP verification for new sellers to complete their profile
 router.post("/register", auth, async (req, res) => {
@@ -235,7 +264,9 @@ router.post("/register", auth, async (req, res) => {
       bankName,
       bankAccountNumber,
       bankIfsc,
-      pan, // PAN added to KYC collection
+      pan,
+      panHolderName,
+      panDocumentUrl,
       businessType = "individual",
       businessLogo,
       whatsappNumber,
@@ -256,10 +287,23 @@ router.post("/register", auth, async (req, res) => {
       return res.status(400).json({ message: "You must accept Terms & Conditions." });
     }
 
+    const normalizedPan = normalizePan(pan);
+    const normalizedPanHolderName = String(panHolderName || businessName || "").trim();
+    if (!normalizedPan) {
+      return res.status(400).json({ message: "PAN number is mandatory for vendor onboarding." });
+    }
+    if (!isValidPan(normalizedPan)) {
+      return res.status(400).json({ message: "Enter a valid PAN in ABCDE1234F format." });
+    }
+    if (!normalizedPanHolderName) {
+      return res.status(400).json({ message: "PAN holder legal name is required." });
+    }
+
     const seller = await Seller.findById(req.sellerId);
     if (!seller) {
       return res.status(404).json({ message: "Seller not found" });
     }
+    await assertPanIsUnique(normalizedPan, seller._id);
 
     const nextBusinessEmail = normalizeEmail(businessEmail || seller.businessEmail);
     if (!nextBusinessEmail) {
@@ -311,9 +355,12 @@ router.post("/register", auth, async (req, res) => {
       seller.kycDetailsEncrypted.bankAccountNumber = encrypt(bankAccountNumber);
       seller.bankAccountNumber = maskText(bankAccountNumber, 4);
     }
-    if (pan) {
-      seller.kycDetailsEncrypted.pan = encrypt(pan);
-    }
+    seller.kycDetailsEncrypted.pan = encrypt(normalizedPan);
+    seller.kycDetailsEncrypted.panHolderName = encrypt(normalizedPanHolderName);
+    seller.pan = maskPan(normalizedPan);
+    seller.panHash = panHash(normalizedPan);
+    seller.panHolderName = normalizedPanHolderName;
+    if (typeof panDocumentUrl === "string") seller.panDocumentUrl = panDocumentUrl.trim();
     if (businessGST) {
       seller.kycDetailsEncrypted.gst = encrypt(businessGST);
       seller.businessGST = maskText(businessGST, 4);
@@ -326,6 +373,12 @@ router.post("/register", auth, async (req, res) => {
 
     seller.approvalStatus = "draft";
     seller.storePublished = false;
+    seller.onboardingProgress = "profile_submitted";
+    applyKycStateFromPan(seller);
+    recordComplianceEvent(seller, "vendor_registration_pan_submitted", "seller", {
+      panVerificationStatus: seller.panVerificationStatus,
+      kycStatus: seller.kycStatus,
+    });
     seller.publishRequestedAt = null;
     seller.approvedAt = null;
     seller.approvedBy = "";
@@ -335,6 +388,12 @@ router.post("/register", auth, async (req, res) => {
     return res.json({ seller: withPolicyDefaults(seller) });
   } catch (error) {
     console.error(error);
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ message: error.message });
+    }
+    if (error.code === 11000 && error.keyPattern?.panHash) {
+      return res.status(409).json({ message: "This PAN is already linked to another seller account." });
+    }
     return res.status(500).json({ message: "Could not complete registration" });
   }
 });
@@ -377,6 +436,8 @@ router.put("/me", auth, async (req, res) => {
       bankAccountNumber,
       bankIfsc,
       pan,
+      panHolderName,
+      panDocumentUrl,
       businessType,
       profileImageUrl,
       businessLogo,
@@ -395,7 +456,7 @@ router.put("/me", auth, async (req, res) => {
       return res.status(404).json({ message: "Seller not found" });
     }
 
-    const nextBusinessEmail = normalizeEmail(businessEmail);
+    const nextBusinessEmail = normalizeEmail(businessEmail || seller.businessEmail);
 
     if (businessName) seller.businessName = String(businessName).trim();
     if (businessCategory !== undefined) seller.businessCategory = String(businessCategory).trim();
@@ -447,9 +508,40 @@ router.put("/me", auth, async (req, res) => {
         seller.bankAccountNumber = maskText(bankAccountNumber, 4);
       }
     }
-    if (typeof pan === "string" && pan.trim() && !pan.includes("*")) {
-      seller.kycDetailsEncrypted.pan = encrypt(pan);
+    const existingPan = getPanCompliance(seller);
+    const nextRawPan = typeof pan === "string" && !pan.includes("*")
+      ? normalizePan(pan)
+      : existingPan.pan;
+    const nextPanHolderName = typeof panHolderName === "string"
+      ? panHolderName.trim()
+      : seller.panHolderName;
+
+    if (!nextRawPan) {
+      return res.status(400).json({ message: "PAN number is mandatory for vendor onboarding." });
     }
+    if (!isValidPan(nextRawPan)) {
+      return res.status(400).json({ message: "Enter a valid PAN in ABCDE1234F format." });
+    }
+    if (!nextPanHolderName) {
+      return res.status(400).json({ message: "PAN holder legal name is required." });
+    }
+
+    if (nextRawPan !== existingPan.pan) {
+      await assertPanIsUnique(nextRawPan, seller._id);
+      seller.kycDetailsEncrypted.pan = encrypt(nextRawPan);
+      seller.pan = maskPan(nextRawPan);
+      seller.panHash = panHash(nextRawPan);
+      seller.panVerificationStatus = "pending";
+      seller.kycStatus = "pending";
+      seller.payoutStatus = "blocked";
+      if (seller.razorpayAccountStatus === "active") {
+        seller.razorpayAccountStatus = "suspended";
+      }
+      recordComplianceEvent(seller, "pan_changed_reverification_required", "seller");
+    }
+    seller.panHolderName = nextPanHolderName;
+    seller.kycDetailsEncrypted.panHolderName = encrypt(nextPanHolderName);
+    if (typeof panDocumentUrl === "string") seller.panDocumentUrl = panDocumentUrl.trim();
     if (typeof businessGST === "string" && businessGST.trim()) {
       if (!businessGST.includes("*")) { // Only encrypt if it's a new raw value
         seller.kycDetailsEncrypted.gst = encrypt(businessGST);
@@ -461,6 +553,9 @@ router.put("/me", auth, async (req, res) => {
     if (businessCategory) seller.kycDetailsEncrypted.businessCategory = businessCategory;
     seller.kycDetailsEncrypted.bankIfsc = seller.bankIfsc;
     seller.kycDetailsEncrypted.bankName = seller.bankName;
+    applyKycStateFromPan(seller);
+    const kycIssues = collectKycIssues(seller);
+    seller.onboardingProgress = kycIssues.length ? "kyc_pending" : "profile_submitted";
 
     if (!seller.slug) {
       seller.slug = await createUniqueSellerSlug(
@@ -472,6 +567,12 @@ router.put("/me", auth, async (req, res) => {
     await seller.save();
     return res.json({ seller: withPolicyDefaults(seller) });
   } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ message: error.message });
+    }
+    if (error.code === 11000 && error.keyPattern?.panHash) {
+      return res.status(409).json({ message: "This PAN is already linked to another seller account." });
+    }
     return res.status(500).json({ message: "Unable to update profile" });
   }
 });

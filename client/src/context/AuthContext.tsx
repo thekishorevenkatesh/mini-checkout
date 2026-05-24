@@ -33,6 +33,9 @@ interface RegisterInput {
   bankName?: string;
   bankAccountNumber?: string;
   bankIfsc?: string;
+  pan: string;
+  panHolderName: string;
+  panDocumentUrl?: string;
   businessLogo?: string;
   whatsappNumber?: string;
   callNumber?: string;
@@ -65,6 +68,8 @@ interface UpdateProfileInput {
   returnRefundPolicy?: string;
   termsAndConditions?: string;
   pan?: string;
+  panHolderName?: string;
+  panDocumentUrl?: string;
   businessType?: string;
 }
 

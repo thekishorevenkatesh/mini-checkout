@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import axios from "axios";
 import { api } from "../api/client";
 import { AppIcon } from "../components/ui/AppIcon";
 import { Button } from "../components/ui/Button";
@@ -8,7 +9,7 @@ import { useI18n } from "../context/I18nContext";
 import { useToast } from "../context/ToastContext";
 import type { Seller } from "../types";
 
-type ApprovalStatus = "pending" | "approved" | "rejected";
+type ApprovalStatus = "pending" | "approved" | "rejected" | "suspended";
 type SortBy = "latest" | "oldest" | "business";
 
 const ADMIN_TOKEN_KEY = "zensos_admin_token";
@@ -16,6 +17,7 @@ const ADMIN_TOKEN_KEY = "zensos_admin_token";
 function statusBadge(status: ApprovalStatus) {
   if (status === "approved") return "bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800";
   if (status === "rejected") return "bg-rose-100 text-rose-700 border-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800";
+  if (status === "suspended") return "bg-slate-200 text-slate-700 border-slate-300 dark:bg-slate-800 dark:text-slate-200 dark:border-slate-700";
   return "bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800";
 }
 
@@ -258,8 +260,48 @@ export function AdminPage() {
       if (closeModal) {
         closeSellerDetail();
       }
-    } catch {
-      setError("Unable to update approval status.");
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        const message = error.response?.data?.message;
+        const missingFields = Array.isArray(error.response?.data?.missingFields)
+          ? error.response?.data?.missingFields
+          : [];
+        setError(missingFields.length ? `${message} Missing: ${missingFields.join(", ")}.` : message || "Unable to update approval status.");
+      } else {
+        setError("Unable to update approval status.");
+      }
+    }
+  }
+
+  async function updateKycStatus(
+    sellerId: string,
+    panVerificationStatus: Seller["panVerificationStatus"],
+    kycStatus: Seller["kycStatus"]
+  ) {
+    if (!token) return;
+    setError("");
+    setSuccess("");
+    try {
+      const response = await api.patch<{ seller: Seller }>(
+        `/admin/sellers/${sellerId}/kyc`,
+        { panVerificationStatus, kycStatus },
+        { headers: authHeaders }
+      );
+      setSuccess("Seller KYC status updated.");
+      await loadSellers(status);
+      if (selectedSeller?._id === sellerId && response.data.seller) {
+        setSelectedSeller(response.data.seller);
+      }
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        const message = error.response?.data?.message;
+        const missingFields = Array.isArray(error.response?.data?.missingFields)
+          ? error.response?.data?.missingFields
+          : [];
+        setError(missingFields.length ? `${message} Missing: ${missingFields.join(", ")}.` : message || "Unable to update KYC status.");
+      } else {
+        setError("Unable to update KYC status.");
+      }
     }
   }
 
@@ -418,6 +460,7 @@ export function AdminPage() {
               <option value="pending">Pending</option>
               <option value="approved">Approved</option>
               <option value="rejected">Rejected</option>
+              <option value="suspended">Suspended</option>
             </select>
           </label>
           <label className="block space-y-1.5">
@@ -613,6 +656,11 @@ export function AdminPage() {
                   <DetailCell label="Business email" value={selectedSeller.businessEmail} />
                   <DetailCell label="Registered phone" value={selectedSeller.phone} />
                   <DetailCell label="GST number" value={selectedSeller.businessGST} />
+                  <DetailCell label="PAN" value={selectedSeller.pan} />
+                  <DetailCell label="PAN holder" value={selectedSeller.panHolderName} />
+                  <DetailCell label="PAN verification" value={selectedSeller.panVerificationStatus} />
+                  <DetailCell label="KYC status" value={selectedSeller.kycStatus} />
+                  <DetailCell label="Payout status" value={selectedSeller.payoutStatus} />
                   <DetailCell label="Business address" value={selectedSeller.businessAddress} />
                 </div>
               </SectionCard>
@@ -743,6 +791,11 @@ export function AdminPage() {
                 </p>
                 <div className="grid gap-4 sm:grid-cols-2">
                   <DocumentPreview
+                    label="PAN document"
+                    hint="PAN card document when provided"
+                    url={selectedSeller.panDocumentUrl}
+                  />
+                  <DocumentPreview
                     label="ID proof"
                     hint="Aadhaar, PAN, Passport, Voter ID, Driving Licence"
                     url={selectedSeller.idProofUrl}
@@ -777,6 +830,20 @@ export function AdminPage() {
 
             <div className="shrink-0 border-t border-slate-200 bg-slate-50/80 px-4 py-3 dark:border-slate-800 dark:bg-slate-900/80 sm:px-6">
               <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
+                <Button
+                  variant="success"
+                  onClick={() => void updateKycStatus(selectedSeller._id, "verified", "verified")}
+                  className="w-full sm:w-auto"
+                >
+                  Verify PAN KYC
+                </Button>
+                <Button
+                  variant="danger"
+                  onClick={() => void updateKycStatus(selectedSeller._id, "rejected", "rejected")}
+                  className="w-full sm:w-auto"
+                >
+                  Reject KYC
+                </Button>
                 <Button
                   variant="success"
                   onClick={() => void updateApproval(selectedSeller._id, "approved", true)}
