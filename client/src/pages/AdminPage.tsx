@@ -50,10 +50,6 @@ function linkedAccountStatusBadge(status?: LinkedAccountOnboardingStatus) {
   if (status === "linked_account_pending" || status === "linked_account_created" || status === "pending_approval") return "bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800";
   return "bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700";
 }
-  if (mode === "flat_rate") return "Flat delivery charge";
-  if (mode === "always_free") return "Always free delivery";
-  return "";
-}
 
 function DetailCell({ label, value }: { label: string; value?: string | null }) {
   const text = displayValue(value);
