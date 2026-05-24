@@ -32,6 +32,10 @@ function normalizePan(value: string) {
   return value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 10);
 }
 
+function isMaskedPanValue(value: string) {
+  return String(value).includes("*");
+}
+
 type ProductFormVariant = {
   label: string;   // value / size  e.g. "500"
   uom: string;     // unit of measure e.g. "g", "ml", "Pack"
@@ -596,13 +600,18 @@ export function DashboardPage() {
     return "Draft";
   }
 
+  const savedProfilePan = seller?.pan ?? "";
   const normalizedProfilePAN = normalizePan(profilePAN);
+  const profilePANUnchangedOnFile =
+    Boolean(savedProfilePan) &&
+    (profilePAN === savedProfilePan ||
+      (isMaskedPanValue(profilePAN) && isMaskedPanValue(savedProfilePan)));
   const profilePANError =
     profilePAN.trim().length === 0
       ? "PAN number is required."
-      : !PAN_PATTERN.test(normalizedProfilePAN)
-        ? "Enter PAN in ABCDE1234F format."
-        : "";
+      : profilePANUnchangedOnFile || PAN_PATTERN.test(normalizedProfilePAN)
+        ? ""
+        : "Enter PAN in ABCDE1234F format.";
   const profilePANHolderNameError =
     profilePANHolderName.trim().length === 0 ? "PAN holder legal name is required." : "";
   const isProfileFormValid =
@@ -635,7 +644,9 @@ export function DashboardPage() {
         bankIfsc: profileBankIfsc.trim().toUpperCase(),
         businessAddress: formatAddress(profileAddress),
         businessGST: profileGST.trim(),
-        pan: normalizedProfilePAN,
+        pan: profilePANUnchangedOnFile || isMaskedPanValue(profilePAN)
+          ? (savedProfilePan || profilePAN)
+          : normalizedProfilePAN,
         panHolderName: profilePANHolderName.trim(),
         panDocumentUrl: profilePANDocumentUrl.trim(),
         businessType: profileBusinessType,
@@ -3006,7 +3017,7 @@ export function DashboardPage() {
             </div>
           </article>
 
-          <form onSubmit={handleProfileSave} className="space-y-5">
+          <form onSubmit={handleProfileSave} noValidate className="space-y-5">
             {/* Business Identity */}
             <article className="rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card dark:border-teal-900/35 dark:bg-gradient-to-br dark:from-slate-950 dark:to-slate-900">
               <h3 className="font-heading text-base font-bold text-slate-800 mb-4 flex items-center gap-2">
@@ -3033,8 +3044,24 @@ export function DashboardPage() {
                 </label>
                 <label className="block space-y-1">
                   <span className="text-sm font-semibold text-slate-700">PAN details</span>
-                  <input className={`w-full rounded-xl border px-3 py-2.5 text-sm uppercase outline-none focus:ring-2 dark:bg-slate-900 dark:text-slate-100 ${profilePAN && profilePANError ? "border-rose-300 focus:border-rose-400 focus:ring-rose-50 dark:border-rose-700" : "border-slate-200 focus:border-teal-400 focus:ring-teal-50 dark:border-slate-700"}`} placeholder="ABCDE1234F" maxLength={10} value={profilePAN} onChange={e => setProfilePAN(normalizePan(e.target.value))} required />
-                  {profilePANError ? <span className="text-xs text-rose-600">{profilePANError}</span> : <span className="text-xs text-slate-400">Mandatory for Razorpay linked account creation and settlements.</span>}
+                  <input
+                    className={`w-full rounded-xl border px-3 py-2.5 text-sm uppercase outline-none focus:ring-2 dark:bg-slate-900 dark:text-slate-100 ${profilePAN && profilePANError ? "border-rose-300 focus:border-rose-400 focus:ring-rose-50 dark:border-rose-700" : "border-slate-200 focus:border-teal-400 focus:ring-teal-50 dark:border-slate-700"}`}
+                    placeholder="ABCDE1234F"
+                    maxLength={10}
+                    value={profilePAN}
+                    onChange={(e) => {
+                      const next = e.target.value.toUpperCase();
+                      setProfilePAN(next.includes("*") ? next.replace(/[^A-Z0-9*]/g, "").slice(0, 10) : normalizePan(next));
+                    }}
+                    required={!profilePANUnchangedOnFile}
+                  />
+                  {profilePANError ? (
+                    <span className="text-xs text-rose-600">{profilePANError}</span>
+                  ) : profilePANUnchangedOnFile ? (
+                    <span className="text-xs text-slate-400">PAN is saved on file. Enter a new full PAN only if you need to change it.</span>
+                  ) : (
+                    <span className="text-xs text-slate-400">Mandatory for Razorpay linked account creation and settlements.</span>
+                  )}
                 </label>
                 <label className="block space-y-1">
                   <span className="text-sm font-semibold text-slate-700">PAN holder legal name *</span>
@@ -3139,7 +3166,7 @@ export function DashboardPage() {
               <p className="text-xs text-slate-500 mb-4">Upload clear images of your documents. Required for admin verification and store approval.</p>
               <div className="grid gap-5 sm:grid-cols-2">
                 <div className="space-y-2">
-                  <p className="text-sm font-semibold text-slate-700">PAN Document</p>
+                  <p className="text-sm font-semibold text-slate-700">PAN Document <span className="text-rose-500">*</span></p>
                   <p className="text-xs text-slate-400">Upload when requested for PAN review</p>
                   {profilePANDocumentUrl && (
                     <a href={profilePANDocumentUrl} target="_blank" rel="noreferrer">

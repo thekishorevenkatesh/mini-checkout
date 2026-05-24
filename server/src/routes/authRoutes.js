@@ -299,6 +299,16 @@ router.post("/register", auth, async (req, res) => {
       return res.status(400).json({ message: "PAN holder legal name is required." });
     }
 
+    const formattedAddress = String(businessAddress || "").trim();
+    if (!formattedAddress) {
+      return res.status(400).json({ message: "Business address is required." });
+    }
+
+    const normalizedPanDocumentUrl = String(panDocumentUrl || "").trim();
+    if (!normalizedPanDocumentUrl) {
+      return res.status(400).json({ message: "PAN document upload is required." });
+    }
+
     const seller = await Seller.findById(req.sellerId);
     if (!seller) {
       return res.status(404).json({ message: "Seller not found" });
@@ -329,7 +339,7 @@ router.post("/register", auth, async (req, res) => {
     );
 
     seller.businessEmail = nextBusinessEmail;
-    if (businessAddress) seller.businessAddress = String(businessAddress).trim();
+    seller.businessAddress = formattedAddress;
     if (upiId) seller.upiId = String(upiId).trim();
     if (bankName) seller.bankName = String(bankName).trim();
     if (bankIfsc) seller.bankIfsc = String(bankIfsc).trim().toUpperCase();
@@ -360,7 +370,7 @@ router.post("/register", auth, async (req, res) => {
     seller.pan = maskPan(normalizedPan);
     seller.panHash = panHash(normalizedPan);
     seller.panHolderName = normalizedPanHolderName;
-    if (typeof panDocumentUrl === "string") seller.panDocumentUrl = panDocumentUrl.trim();
+    seller.panDocumentUrl = normalizedPanDocumentUrl;
     if (businessGST) {
       seller.kycDetailsEncrypted.gst = encrypt(businessGST);
       seller.businessGST = maskText(businessGST, 4);

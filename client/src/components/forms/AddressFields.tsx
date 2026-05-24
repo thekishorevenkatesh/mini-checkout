@@ -15,6 +15,7 @@ type AddressFieldsProps = {
   gridClassName?: string;
   labelClassName?: string;
   showSuggestionHint?: boolean;
+  required?: boolean;
 };
 
 function updateAddressField(
@@ -53,15 +54,17 @@ export function AddressFields({
   gridClassName = "sm:col-span-2 grid gap-3 sm:grid-cols-2",
   labelClassName = "block space-y-1",
   showSuggestionHint = true,
+  required = false,
 }: AddressFieldsProps) {
   const countrySuggestions = getCountrySuggestions(value.country);
   const stateSuggestions = getStateSuggestions(value.country, value.state);
   const citySuggestions = getCitySuggestions(value.country, value.state, value.city);
+  const req = (label: string) => (required ? `${label} *` : label);
 
   return (
     <div className={gridClassName}>
       <label className={labelClassName}>
-        <span className="text-sm font-semibold text-slate-700">Address line 1</span>
+        <span className="text-sm font-semibold text-slate-700">{req("Address line 1")}</span>
         <input
           className={inputClassName}
           value={value.line1}
@@ -86,7 +89,7 @@ export function AddressFields({
         />
       </label>
       <label className={labelClassName}>
-        <span className="text-sm font-semibold text-slate-700">City</span>
+        <span className="text-sm font-semibold text-slate-700">{req("City")}</span>
         <input
           list="city-suggestions"
           className={inputClassName}
@@ -96,7 +99,7 @@ export function AddressFields({
         />
       </label>
       <label className={labelClassName}>
-        <span className="text-sm font-semibold text-slate-700">State</span>
+        <span className="text-sm font-semibold text-slate-700">{req("State")}</span>
         <input
           list="state-suggestions"
           className={inputClassName}
@@ -106,7 +109,7 @@ export function AddressFields({
         />
       </label>
       <label className={labelClassName}>
-        <span className="text-sm font-semibold text-slate-700">Country</span>
+        <span className="text-sm font-semibold text-slate-700">{req("Country")}</span>
         <input
           list="country-suggestions"
           className={inputClassName}
@@ -116,7 +119,7 @@ export function AddressFields({
         />
       </label>
       <label className={labelClassName}>
-        <span className="text-sm font-semibold text-slate-700">Pincode</span>
+        <span className="text-sm font-semibold text-slate-700">{req("Pincode")}</span>
         <input
           className={inputClassName}
           value={value.pincode}

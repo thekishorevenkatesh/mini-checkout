@@ -74,6 +74,16 @@ export function formatAddress(parts: AddressParts): string {
     .join(", ");
 }
 
+export function getAddressValidationError(address: AddressParts): string {
+  if (!address.line1.trim()) return "Address line 1 is required.";
+  if (!address.city.trim()) return "City is required.";
+  if (!address.state.trim()) return "State is required.";
+  if (!address.country.trim()) return "Country is required.";
+  if (!address.pincode.trim()) return "Pincode is required.";
+  if (!/^\d{4,10}$/.test(address.pincode.trim())) return "Enter a valid pincode.";
+  return "";
+}
+
 export function parsePhone(value: string): PhoneParts {
   const raw = String(value || "").trim();
   if (!raw) {
