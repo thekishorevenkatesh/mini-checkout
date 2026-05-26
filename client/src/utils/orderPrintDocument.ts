@@ -50,7 +50,6 @@ function formatVariantLabel(item: OrderItem): string {
 
 type PrintLabels = {
   status: Record<OrderStatus, string>;
-  transferStatus: (order: Order) => string;
 };
 
 export function buildOrderPrintHtml(order: Order, seller: Seller | null | undefined, labels: PrintLabels): string {
@@ -285,7 +284,7 @@ export function buildOrderPrintHtml(order: Order, seller: Seller | null | undefi
     }
     .details-grid {
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: repeat(2, 1fr);
       gap: 12px;
       margin-top: 18px;
     }
@@ -402,10 +401,6 @@ export function buildOrderPrintHtml(order: Order, seller: Seller | null | undefi
     <div class="detail-item">
       <div class="label">Payment Status</div>
       <div class="value">${escapeHtml(labels.status[order.paymentStatus])}</div>
-    </div>
-    <div class="detail-item">
-      <div class="label">Vendor Settlement</div>
-      <div class="value">${escapeHtml(labels.transferStatus(order) || "Awaiting payment")}</div>
     </div>
   </div>
 

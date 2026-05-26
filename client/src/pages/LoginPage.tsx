@@ -385,6 +385,7 @@ const emailError =
           termsAccepted: allPoliciesAccepted,
           businessEmail: email.trim(),
           businessAddress: formatAddress(businessAddress) || undefined,
+          businessAddressParts: businessAddress,
           businessGST: businessGST.trim() || undefined,
           upiId: upiId.trim() || undefined,
           bankAccountName: bankAccountName.trim() || undefined,
@@ -406,8 +407,7 @@ const emailError =
         if (isProfileComplete) {
           navigate("/dashboard", { replace: true });
         } else {
-          setStep("profile");
-          setInfo("Welcome! Please complete your business profile.");
+          moveToRegisterWithContext("Please complete registration to continue.");
         }
       }
     } catch (err) {
@@ -437,6 +437,7 @@ const emailError =
         termsAccepted: allPoliciesAccepted,
         businessEmail: email.trim(),
         businessAddress: formatAddress(businessAddress) || undefined,
+        businessAddressParts: businessAddress,
         businessGST: businessGST.trim() || undefined,
         upiId: upiId.trim() || undefined,
         bankAccountName: bankAccountName.trim() || undefined,

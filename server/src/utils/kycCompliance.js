@@ -33,7 +33,9 @@ function getDecryptedPan(seller) {
 function getStoredPan(seller) {
   const decrypted = getDecryptedPan(seller);
   if (decrypted) return normalizePan(decrypted);
-  return normalizePan(seller?.pan || "");
+  const storedPan = String(seller?.pan || "");
+  if (storedPan.includes("*")) return "";
+  return normalizePan(storedPan);
 }
 
 function getPanCompliance(seller) {

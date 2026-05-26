@@ -78,19 +78,6 @@ const STATUS_LABEL: Record<OrderStatus, string> = {
 };
 const ORDER_STATUSES: OrderStatus[] = ["pending", "paid", "delivered", "cancelled"];
 
-const TRANSFER_STATUS_LABEL: Record<string, string> = {
-  untransferred: "Settlement pending",
-  pending: "Settlement processing",
-  processed: "Settled to vendor",
-  failed: "Settlement failed",
-  reversed: "Settlement reversed",
-};
-
-function getTransferStatusLabel(order: Order) {
-  if (order.paymentStatus === "pending" || order.paymentStatus === "cancelled") return "";
-  return TRANSFER_STATUS_LABEL[order.transferStatus || "untransferred"] || order.transferStatus || "";
-}
-
 const SOCIAL_PLATFORMS = ["Instagram", "Facebook", "Twitter/X", "YouTube", "LinkedIn", "Website", "Google Location", "Other"];
 
 const IMGBB_KEY = import.meta.env.VITE_IMGBB_API_KEY as string | undefined;
@@ -659,6 +646,7 @@ export function DashboardPage() {
         bankAccountNumber: profileBankAccountNumber.trim(),
         bankIfsc: profileBankIfsc.trim().toUpperCase(),
         businessAddress: formatAddress(profileAddress),
+        businessAddressParts: profileAddress,
         businessGST: profileGST.trim(),
         pan: profilePANUnchangedOnFile || isMaskedPanValue(profilePAN)
           ? (savedProfilePan || profilePAN)
@@ -2473,9 +2461,6 @@ export function DashboardPage() {
                       </div>
                       <p className="mt-2 text-sm text-slate-700">{getOrderItemSummary(order)||"—"}</p>
                       <p className="text-xs text-slate-500">Qty: {order.quantity} · ₹{order.amount} + ₹{order.deliveryCharge||0} = <strong>₹{order.amount+(order.deliveryCharge||0)}</strong></p>
-                      {getTransferStatusLabel(order) && (
-                        <p className="mt-1 text-[10px] font-semibold text-teal-700 dark:text-teal-300">{getTransferStatusLabel(order)}</p>
-                      )}
                       <div className="mt-3 flex gap-2">
                         <button onClick={() => setViewingOrder(order)} className="flex-1 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition">👁 View</button>
                         <select className="flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs outline-none" value={order.paymentStatus} onChange={e => handleOrderStatus(order._id, e.target.value as OrderStatus)}>
@@ -2491,7 +2476,7 @@ export function DashboardPage() {
                     <thead><tr className="border-b border-slate-200 text-xs uppercase tracking-[0.14em] text-slate-500">
                       <th className="pb-2 pr-4">Customer</th><th className="pb-2 pr-4">Product</th>
                       <th className="pb-2 pr-4">Variant</th><th className="pb-2 pr-4">Qty</th>
-                      <th className="pb-2 pr-4">Total</th><th className="pb-2 pr-4">Settlement</th><th className="pb-2 pr-4" title="Status">●</th>
+                      <th className="pb-2 pr-4">Total</th><th className="pb-2 pr-4" title="Status">●</th>
                       <th className="pb-2 pr-4">Update</th><th className="pb-2">View</th>
                     </tr></thead>
                     <tbody>
@@ -2509,7 +2494,6 @@ export function DashboardPage() {
                           <td className="py-3 pr-4 text-xs text-slate-500 whitespace-nowrap">{getOrderItems(order).map((item) => item.variantTitle || Object.values(item.selectedVariants || {}).join(", ") || "—").join(" | ")}</td>
                           <td className="py-3 pr-4 text-slate-700">{order.quantity}</td>
                           <td className="py-3 pr-4 font-semibold text-slate-900 whitespace-nowrap">₹{order.amount+(order.deliveryCharge||0)}</td>
-                          <td className="py-3 pr-4 text-[10px] font-semibold text-teal-700 dark:text-teal-300 whitespace-nowrap">{getTransferStatusLabel(order) || "—"}</td>
                           <td className="py-3 pr-4">
                             <span title={STATUS_LABEL[order.paymentStatus]} className={`inline-flex h-3 w-3 rounded-full ${STATUS_DOT[order.paymentStatus]}`} />
                           </td>
@@ -2586,14 +2570,10 @@ export function DashboardPage() {
                   <span className="text-sm font-bold text-teal-700">₹{viewingOrder.amount+(viewingOrder.deliveryCharge||0)}</span>
                 </div>
               </div>
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid gap-3 sm:grid-cols-1">
                 <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-900/80">
                   <p className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">Payment Method</p>
                   <p className="text-sm font-semibold text-slate-700 capitalize">{viewingOrder.paymentMethod||"—"}</p>
-                </div>
-                <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-900/80">
-                  <p className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">Vendor Settlement</p>
-                  <p className="text-sm font-semibold text-teal-700">{getTransferStatusLabel(viewingOrder) || "Awaiting payment"}</p>
                 </div>
               </div>
               {viewingOrder.paymentScreenshotUrl && (
@@ -2619,7 +2599,6 @@ export function DashboardPage() {
                 onClick={() => {
                   openOrderPrintDocument(viewingOrder, seller, {
                     status: STATUS_LABEL,
-                    transferStatus: getTransferStatusLabel,
                   });
                 }}
                 className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800 sm:w-auto sm:whitespace-nowrap"

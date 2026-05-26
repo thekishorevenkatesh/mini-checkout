@@ -24,12 +24,106 @@ const RAZORPAY_CATEGORY_MAP = {
   food: "food_and_beverage",
   grocery: "grocery",
   fashion: "fashion_and_lifestyle",
-  electronics: "electronics",
+  electronics: "electronics_and_furniture",
   health: "healthcare",
-  beauty: "personal_care",
-  home: "home_and_furniture",
+  beauty: "healthcare",
+  home: "ecommerce",
   services: "services",
   ecommerce: "ecommerce",
+};
+
+const RAZORPAY_SUBCATEGORY_MAP = {
+  food_and_beverage: "food_ordering",
+  grocery: "grocery",
+  fashion_and_lifestyle: "fashion_and_lifestyle",
+  electronics_and_furniture: "electronics_and_furniture",
+  healthcare: "clinic",
+  ecommerce: "ecommerce_marketplace",
+  services: "professional_services",
+  personal_care: "health_and_beauty",
+  home_and_furniture: "ecommerce_marketplace",
+};
+
+const INDIA_STATE_NAMES = {
+  andamanandnicobarislands: "Andaman and Nicobar Islands",
+  andhrapradesh: "Andhra Pradesh",
+  arunachalpradesh: "Arunachal Pradesh",
+  assam: "Assam",
+  bihar: "Bihar",
+  chandigarh: "Chandigarh",
+  chhattisgarh: "Chhattisgarh",
+  dadraandnagarhavelianddamananddiu: "Dadra and Nagar Haveli and Daman and Diu",
+  delhi: "Delhi",
+  goa: "Goa",
+  gujarat: "Gujarat",
+  haryana: "Haryana",
+  himachalpradesh: "Himachal Pradesh",
+  jammuandkashmir: "Jammu and Kashmir",
+  jharkhand: "Jharkhand",
+  karnataka: "Karnataka",
+  kerala: "Kerala",
+  ladakh: "Ladakh",
+  lakshadweep: "Lakshadweep",
+  madhyapradesh: "Madhya Pradesh",
+  maharashtra: "Maharashtra",
+  manipur: "Manipur",
+  meghalaya: "Meghalaya",
+  mizoram: "Mizoram",
+  nagaland: "Nagaland",
+  odisha: "Odisha",
+  puducherry: "Puducherry",
+  punjab: "Punjab",
+  rajasthan: "Rajasthan",
+  sikkim: "Sikkim",
+  tamilnadu: "Tamil Nadu",
+  telangana: "Telangana",
+  tripura: "Tripura",
+  uttarpradesh: "Uttar Pradesh",
+  uttarakhand: "Uttarakhand",
+  westbengal: "West Bengal",
+};
+
+const INDIA_STATE_CODES = {
+  AN: "Andaman and Nicobar Islands",
+  AP: "Andhra Pradesh",
+  AR: "Arunachal Pradesh",
+  AS: "Assam",
+  BR: "Bihar",
+  CH: "Chandigarh",
+  CT: "Chhattisgarh",
+  CG: "Chhattisgarh",
+  DD: "Dadra and Nagar Haveli and Daman and Diu",
+  DL: "Delhi",
+  GA: "Goa",
+  GJ: "Gujarat",
+  HR: "Haryana",
+  HP: "Himachal Pradesh",
+  JK: "Jammu and Kashmir",
+  JH: "Jharkhand",
+  KA: "Karnataka",
+  KL: "Kerala",
+  LA: "Ladakh",
+  LD: "Lakshadweep",
+  MP: "Madhya Pradesh",
+  MH: "Maharashtra",
+  MN: "Manipur",
+  ML: "Meghalaya",
+  MZ: "Mizoram",
+  NL: "Nagaland",
+  OR: "Odisha",
+  OD: "Odisha",
+  PY: "Puducherry",
+  PB: "Punjab",
+  RJ: "Rajasthan",
+  SK: "Sikkim",
+  TN: "Tamil Nadu",
+  TS: "Telangana",
+  TG: "Telangana",
+  TR: "Tripura",
+  UP: "Uttar Pradesh",
+  UT: "Uttarakhand",
+  UK: "Uttarakhand",
+  WB: "West Bengal",
 };
 
 function normalizePhone(phone) {
@@ -38,24 +132,137 @@ function normalizePhone(phone) {
   return digits;
 }
 
+function normalizeAddressToken(value) {
+  return String(value || "").toLowerCase().replace(/[^a-z]/g, "");
+}
+
+function normalizeIndiaStateName(value) {
+  const state = String(value || "").trim();
+  if (!state) return "";
+
+  const codeMatch = INDIA_STATE_CODES[state.toUpperCase()];
+  if (codeMatch) return codeMatch;
+
+  return INDIA_STATE_NAMES[normalizeAddressToken(state)] || state;
+}
+
+function isKnownIndiaState(value) {
+  const state = String(value || "").trim();
+  if (!state) return false;
+  return Boolean(INDIA_STATE_CODES[state.toUpperCase()] || INDIA_STATE_NAMES[normalizeAddressToken(state)]);
+}
+
+function isIndiaCountry(value) {
+  return ["in", "ind", "india"].includes(normalizeAddressToken(value));
+}
+
+function normalizeCountryCode(value) {
+  const country = String(value || "").trim();
+  if (!country) return "";
+
+  if (isIndiaCountry(country)) return "IN";
+
+  return country.toUpperCase().slice(0, 2);
+}
+
+function detectCity(parts, stateIndex, countryIndex, postalIndex) {
+  const candidates = parts
+    .map((part, index) => ({ part, index }))
+    .filter(({ part, index }) => {
+      if (!part || index === stateIndex || index === countryIndex || index === postalIndex) return false;
+      if (/^\d{4,10}$/.test(part)) return false;
+      if (isKnownIndiaState(part) || isIndiaCountry(part)) return false;
+      return true;
+    });
+
+  return candidates[candidates.length - 1]?.part || "";
+}
+
 function parseAddressParts(businessAddress) {
   const address = String(businessAddress || "").trim();
+  const parts = address
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
   const pinMatch = address.match(/\b(\d{6})\b/);
-  const postalCode = pinMatch?.[1] || process.env.RAZORPAY_DEFAULT_POSTAL_CODE || "400001";
+  const postalCode = pinMatch?.[1] || "";
+  const hasFormattedAddress =
+    parts.length >= 7 &&
+    /^\d{4,10}$/.test(parts[parts.length - 1] || "") &&
+    isKnownIndiaState(parts[4]) &&
+    Boolean(parts[5]);
+  const stateIndex = parts.findIndex((part) => isKnownIndiaState(part));
+  const countryIndex = parts.findIndex((part) => isIndiaCountry(part));
+  const postalIndex = parts.findIndex((part) => /^\d{4,10}$/.test(part));
 
+  if (hasFormattedAddress) {
+    const [line1, line2 = "", landmark = "", city = "", state = "", country = ""] = parts;
+    const street1 = [line1, line2, landmark].filter(Boolean).join(", ").slice(0, 180) || "Business Address";
+    return {
+      street1,
+      street2: [line2, landmark].filter(Boolean).join(", ").slice(0, 180) || street1,
+      city,
+      state: normalizeIndiaStateName(state),
+      postal_code: postalCode,
+      country: normalizeCountryCode(country),
+    };
+  }
+
+  if (stateIndex >= 0 || countryIndex >= 0) {
+    const state = stateIndex >= 0 ? parts[stateIndex] : "";
+    const country = countryIndex >= 0 ? parts[countryIndex] : "";
+    const city = detectCity(parts, stateIndex, countryIndex, postalIndex);
+    const streetParts = parts.filter((part, index) => (
+      index !== stateIndex &&
+      index !== countryIndex &&
+      index !== postalIndex &&
+      part !== city
+    ));
+
+    const street1 = streetParts.join(", ").slice(0, 180) || address.slice(0, 180) || "Business Address";
+    return {
+      street1,
+      street2: street1,
+      city,
+      state: normalizeIndiaStateName(state),
+      postal_code: postalCode,
+      country: normalizeCountryCode(country),
+    };
+  }
+
+  const street1 = address.slice(0, 180) || "Business Address";
   return {
-    street1: address.slice(0, 180) || "Business Address",
-    street2: "",
-    city: process.env.RAZORPAY_DEFAULT_CITY || "Mumbai",
-    state: process.env.RAZORPAY_DEFAULT_STATE || "MH",
+    street1,
+    street2: street1,
+    city: "",
+    state: "",
     postal_code: postalCode,
-    country: "IN",
+    country: "",
   };
+}
+
+function collectAddressIssues(businessAddress) {
+  if (!String(businessAddress || "").trim()) {
+    return ["businessAddress"];
+  }
+
+  const address = parseAddressParts(businessAddress);
+  const issues = [];
+
+  if (!String(address.street1 || "").trim()) issues.push("businessAddress");
+  if (!String(address.city || "").trim()) issues.push("businessAddressCity");
+  if (!String(address.state || "").trim()) issues.push("businessAddressState");
+  if (!String(address.country || "").trim()) issues.push("businessAddressCountry");
+  if (!String(address.postal_code || "").trim()) issues.push("businessAddressPincode");
+
+  return issues;
 }
 
 function mapBusinessCategory(category) {
   const key = String(category || "ecommerce").trim().toLowerCase();
-  return RAZORPAY_CATEGORY_MAP[key] || "ecommerce";
+  const mappedCategory = RAZORPAY_CATEGORY_MAP[key] || "ecommerce";
+  const mappedSubcategory = RAZORPAY_SUBCATEGORY_MAP[mappedCategory] || "ecommerce_marketplace";
+  return { category: mappedCategory, subcategory: mappedSubcategory };
 }
 
 function mapRazorpayAccountStatus(accountStatus) {
@@ -64,6 +271,11 @@ function mapRazorpayAccountStatus(accountStatus) {
   if (normalized === "suspended") return "suspended";
   if (normalized === "created" || normalized === "pending") return "pending";
   return "pending";
+}
+
+function isMissingRazorpayRouteError(error) {
+  const message = String(error?.message || "").toLowerCase();
+  return error?.statusCode === 404 || message.includes("no route matched");
 }
 
 function syncLinkedAccountOnboardingStatus(seller) {
@@ -115,7 +327,7 @@ function collectLinkedAccountBlockers(seller) {
   if (!String(seller?.businessName || "").trim()) issues.push("businessName");
   if (!String(seller?.businessEmail || "").trim()) issues.push("businessEmail");
   if (!String(seller?.phone || "").trim()) issues.push("phone");
-  if (!String(seller?.businessAddress || "").trim()) issues.push("businessAddress");
+  issues.push(...collectAddressIssues(seller?.businessAddress));
 
   const pan = getPanCompliance(seller);
   if (!pan.isPanFormatValid) issues.push("panFormat");
@@ -144,34 +356,38 @@ function getSellerBankDetails(seller) {
 }
 
 function buildLinkedAccountPayload(seller) {
-  const pan = getPanCompliance(seller).pan;
   const businessType = seller.kycDetailsEncrypted?.businessType || "individual";
-  const category = mapBusinessCategory(
+  const { category, subcategory } = mapBusinessCategory(
     seller.kycDetailsEncrypted?.businessCategory || seller.businessCategory
   );
   const registeredAddress = parseAddressParts(seller.businessAddress);
-  const referenceId = seller.razorpayReferenceId || `seller_${seller._id}`;
 
   const payload = {
     email: String(seller.businessEmail).trim().toLowerCase(),
     phone: normalizePhone(seller.phone),
     type: "route",
-    reference_id: referenceId,
     legal_business_name: String(seller.businessName).trim(),
     customer_facing_business_name: String(seller.businessName).trim(),
     business_type: businessType,
     contact_name: String(seller.panHolderName || seller.businessName).trim(),
     profile: {
       category,
-      subcategory: category,
+      subcategory,
       addresses: {
         registered: registeredAddress,
       },
     },
-    legal_info: {
-      pan,
-    },
+    legal_info: {},
   };
+
+  // Seller-entered PAN is always a personal PAN. It belongs in the
+  // stakeholder's kyc.pan field, NOT in legal_info.pan (which Razorpay
+  // treats as the business entity / company PAN and rejects personal
+  // PANs for individual, partnership, and other non-company types).
+
+  if (process.env.RAZORPAY_USE_ACCOUNT_REFERENCE_ID === "true") {
+    payload.reference_id = seller.razorpayReferenceId || `seller_${seller._id}`;
+  }
 
   const gst = decrypt(seller.kycDetailsEncrypted?.gst || "");
   if (gst) {
@@ -182,8 +398,22 @@ function buildLinkedAccountPayload(seller) {
 }
 
 function buildStakeholderPayload(seller) {
-  const registeredAddress = parseAddressParts(seller.businessAddress);
-  return {
+  const pan = getPanCompliance(seller).pan;
+  const parsedAddress = parseAddressParts(seller.businessAddress);
+
+  // Stakeholder API expects a single `street` field, not street1/street2
+  const residentialAddress = {
+    street: [parsedAddress.street1, parsedAddress.street2]
+      .filter(Boolean)
+      .join(", ")
+      .slice(0, 180) || "Business Address",
+    city: parsedAddress.city,
+    state: parsedAddress.state,
+    postal_code: parsedAddress.postal_code,
+    country: parsedAddress.country,
+  };
+
+  const payload = {
     name: String(seller.panHolderName || seller.businessName).trim(),
     email: String(seller.businessEmail).trim().toLowerCase(),
     percentage_ownership: 100,
@@ -195,9 +425,17 @@ function buildStakeholderPayload(seller) {
       primary: normalizePhone(seller.phone),
     },
     addresses: {
-      residential: registeredAddress,
+      residential: residentialAddress,
     },
   };
+
+  // For individual sellers, attach PAN to stakeholder's KYC section
+  // (Razorpay expects individual PAN here, not in the account's legal_info)
+  if (pan) {
+    payload.kyc = { pan };
+  }
+
+  return payload;
 }
 
 function razorpayApiRequest(method, path, body) {
@@ -247,6 +485,8 @@ function razorpayApiRequest(method, path, body) {
             `Razorpay API ${res.statusCode}`;
           const error = new Error(message);
           error.statusCode = res.statusCode;
+          error.method = method;
+          error.path = path;
           error.razorpay = parsed;
           reject(error);
         });
@@ -338,7 +578,8 @@ function markProvisionFailure(seller, error, actor = "system") {
   seller.linkedAccountOnboardingStatus = LINKED_ACCOUNT_ONBOARDING.LINKED_ACCOUNT_FAILED;
   seller.razorpayAccountStatus = seller.razorpayAccountId ? seller.razorpayAccountStatus : "uncreated";
   seller.payoutStatus = "blocked";
-  seller.razorpayOnboardingError = String(error?.message || error).slice(0, 500);
+  const endpoint = error?.method && error?.path ? `${error.method} ${error.path}: ` : "";
+  seller.razorpayOnboardingError = `${endpoint}${String(error?.message || error)}`.slice(0, 500);
   recordComplianceEvent(seller, "razorpay_linked_account_failed", actor, {
     reason: seller.razorpayOnboardingError,
     razorpayAccountId: seller.razorpayAccountId || "",
@@ -416,8 +657,25 @@ async function provisionVendorLinkedAccount(seller, options = {}) {
       accountStatus = account.status;
       seller.razorpayAccountId = accountId;
     } else {
-      const account = await fetchAccount(accountId);
-      accountStatus = account.status;
+      try {
+        const account = await fetchAccount(accountId);
+        accountStatus = account.status;
+      } catch (error) {
+        if (!isMissingRazorpayRouteError(error)) {
+          throw error;
+        }
+
+        seller.razorpayAccountId = "";
+        seller.razorpayStakeholderId = "";
+        seller.razorpayProductId = "";
+        seller.razorpayAccountStatus = "uncreated";
+        accountId = "";
+
+        const account = await createLinkedAccount(seller);
+        accountId = account.id;
+        accountStatus = account.status;
+        seller.razorpayAccountId = accountId;
+      }
     }
 
     let stakeholderId = seller.razorpayStakeholderId;

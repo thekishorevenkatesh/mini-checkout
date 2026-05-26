@@ -806,92 +806,147 @@ export function PublicStorePage() {
       }
 
       // 3. Post to backend to generate unified Razorpay order
-      const response = await api.post<{
-        parentOrderId: string;
-        razorpayOrderId: string;
-        amount: number;
-        currency: string;
-        keyId: string;
-        subOrders: Array<{ _id: string }>;
-      }>("/orders", {
-        items: cartEntries.map(({ item }) => ({
-          productId: item.productId,
-          variantId: item.variantId,
-          quantity: item.quantity,
-          selectedVariants: item.variants,
-        })),
-        customerName: billingContact.fullName.trim(),
-        customerPhone: formatPhone(billingContact.phone),
-        billingAddress: formatCheckoutContactAddress(billingContact),
-        shippingAddress: formatCheckoutContactAddress(
-          shippingSameAsBilling ? billingContact : shippingContact
-        ),
-        shippingSameAsBilling,
-        shippingCustomerName: shippingSameAsBilling ? "" : shippingContact.fullName.trim(),
-        shippingCustomerPhone: shippingSameAsBilling
-          ? ""
-          : formatPhone(shippingContact.phone),
-        deliveryAddress: formatCheckoutContactAddress(
-          shippingSameAsBilling ? billingContact : shippingContact
-        ),
-        deliveryCharges: deliveryChargesMap,
-        note: note.trim(),
+    const response = await api.post<{
+  parentOrderId: string;
+  razorpayOrderId: string;
+  amount: number;
+  currency: string;
+  keyId: string;
+  subOrders: Array<{ _id: string }>;
+}>("/orders", {
+  items: cartEntries.map(({ item }) => ({
+    productId: item.productId,
+    variantId: item.variantId,
+    quantity: item.quantity,
+    selectedVariants: item.variants,
+  })),
+
+  customerName: billingContact.fullName.trim(),
+  customerPhone: formatPhone(billingContact.phone),
+
+  billingAddress: formatCheckoutContactAddress(billingContact),
+  billingAddressParts: billingContact.address,
+
+  shippingAddress: formatCheckoutContactAddress(
+    shippingSameAsBilling ? billingContact : shippingContact
+  ),
+
+  shippingAddressParts: shippingSameAsBilling
+    ? billingContact.address
+    : shippingContact.address,
+
+  shippingSameAsBilling,
+
+  shippingCustomerName: shippingSameAsBilling
+    ? ""
+    : shippingContact.fullName.trim(),
+
+  shippingCustomerPhone: shippingSameAsBilling
+    ? ""
+    : formatPhone(shippingContact.phone),
+
+  deliveryAddress: formatCheckoutContactAddress(
+    shippingSameAsBilling ? billingContact : shippingContact
+  ),
+
+  deliveryAddressParts: shippingSameAsBilling
+    ? billingContact.address
+    : shippingContact.address,
+
+  deliveryCharges: deliveryChargesMap,
+
+  note: note.trim(),
+});
+
+const {
+  razorpayOrderId,
+  keyId,
+  amount,
+  currency,
+  subOrders,
+} = response.data;
+
+// Razorpay checkout
+const options = {
+  key: keyId,
+  amount: amount * 100, // paise
+  currency,
+
+  name: seller?.businessName || "Zensos Marketplace",
+
+  description: `Unified Checkout - ${subOrders.length} Shop(s)`,
+
+  image: seller?.businessLogo || "",
+
+  order_id: razorpayOrderId,
+
+  prefill: {
+    name: billingContact.fullName.trim(),
+    contact: formatPhone(billingContact.phone),
+  },
+
+  theme: {
+    color: "#0f766e",
+  },
+
+  handler: async function (paymentRes: any) {
+    try {
+      // Verify on backend so payment status becomes "paid" immediately.
+      // This avoids relying solely on Razorpay webhooks for the UI.
+      const orderIds = subOrders.map((o) => o._id);
+      try {
+        await api.post("/orders/verify-payment", {
+          razorpay_order_id: paymentRes?.razorpay_order_id,
+          razorpay_payment_id: paymentRes?.razorpay_payment_id,
+          razorpay_signature: paymentRes?.razorpay_signature,
+          orderIds,
+        });
+      } catch (verifyErr) {
+        // If verification fails, we still navigate; ThankYouPage will continue polling.
+        console.error("[verify-payment] failed:", verifyErr);
+      }
+
+      // success flow
+      setBillingContact(EMPTY_CHECKOUT_CONTACT);
+      setShippingContact(EMPTY_CHECKOUT_CONTACT);
+      setShippingSameAsBilling(true);
+      setNote("");
+      setCart({});
+      resetSavedProgress();
+
+      const params = new URLSearchParams();
+      if (sellerSlug) {
+        params.set("sellerSlug", sellerSlug);
+      }
+      params.set("orderIds", orderIds.join(","));
+
+      navigate(`/thank-you?${params.toString()}`, {
+        replace: true,
       });
+    } catch (error) {
+      console.error(error);
+      setError("Payment succeeded but post-payment flow failed.");
+    } finally {
+      setSubmitting(false);
+    }
+  },
 
-      const { razorpayOrderId, keyId, amount, currency, subOrders } = response.data;
+  modal: {
+    ondismiss: function () {
+      setSubmitting(false);
+    },
+  },
+};
 
-      // 4. Trigger Razorpay Standard Checkout SDK overlay
-      const options = {
-        key: keyId,
-        amount: amount * 100, // in paise
-        currency: currency,
-        name: seller?.businessName || "Zensos Marketplace",
-        description: `Unified Checkout - ${subOrders.length} Shop(s)`,
-        image: seller?.businessLogo || "",
-        order_id: razorpayOrderId,
-        prefill: {
-          name: billingContact.fullName.trim(),
-          contact: formatPhone(billingContact.phone),
-        },
-        theme: {
-          color: "#0f766e",
-        },
-        handler: function (_paymentRes: any) {
-          // Success! Clean cart and redirect
-          setBillingContact(EMPTY_CHECKOUT_CONTACT);
-          setShippingContact(EMPTY_CHECKOUT_CONTACT);
-          setShippingSameAsBilling(true);
-          setNote("");
-          setCart({});
-          resetSavedProgress();
+const rzp = new (window as any).Razorpay(options);
 
-          const params = new URLSearchParams();
-          if (sellerSlug) params.set("sellerSlug", sellerSlug);
-          const orderIdsList = subOrders.map((o) => o._id).join(",");
-          params.set("orderIds", orderIdsList);
-          navigate(`/thank-you?${params.toString()}`, { replace: true });
-        },
-        modal: {
-          ondismiss: function () {
-            setSubmitting(false);
-          }
-        }
-      };
-
-      const rzp = new (window as any).Razorpay(options);
-      rzp.open();
-
-    } catch (err: any) {
+rzp.open(); } catch (err: any) {
       console.error(err);
       setError(err.response?.data?.message || "Could not generate transaction order.");
       setSubmitting(false);
     }
   }
-
-
-
-  function openVariantPopup(productId: string) {
-    const product = products.find(p => p._id === productId);
+ function openVariantPopup(productId: string) {   const product = products.find(p => p._id === productId);
     if (!product) return;
     setPopupVariants(withAutoSelectedSingleVariants(product, {}));
     setPopupVariantQuantities(
@@ -1846,3 +1901,4 @@ export function PublicStorePage() {
     </>
   );
 }
+  

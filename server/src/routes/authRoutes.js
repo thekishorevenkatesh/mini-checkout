@@ -32,10 +32,12 @@ function withPolicyDefaults(sellerDoc) {
 
   const seller = sellerDoc.toObject ? sellerDoc.toObject() : sellerDoc;
   const pan = getPanCompliance(seller);
+  const businessType = seller.kycDetailsEncrypted?.businessType || seller.businessType || "individual";
   delete seller.kycDetailsEncrypted;
   return {
     ...seller,
     pan: pan.panMasked || seller.pan || "",
+    businessType,
     ...getPolicyContent(seller),
   };
 }
@@ -60,7 +62,15 @@ async function createUniqueSellerSlug(businessName, ignoreSellerId = null) {
 }
 
 function normalizePhone(phone) {
-  return String(phone || "").trim();
+  const raw = String(phone || "").trim();
+  const digits = raw.replace(/\D/g, "");
+
+  if (!digits) return raw;
+  if (digits.length > 10 && digits.startsWith("91")) {
+    return digits.slice(-10);
+  }
+
+  return digits;
 }
 
 function normalizeEmail(email) {
@@ -69,6 +79,90 @@ function normalizeEmail(email) {
 
 function isValidEmail(email) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function formatAddressParts(parts) {
+  if (!parts || typeof parts !== "object" || Array.isArray(parts)) return "";
+
+  return [
+    parts.line1,
+    parts.line2,
+    parts.landmark,
+    parts.city,
+    parts.state,
+    parts.country,
+    parts.pincode,
+  ]
+    .map((part) => String(part || "").trim())
+    .filter(Boolean)
+    .join(", ");
+}
+
+function resolveAddressString(address, addressParts) {
+  const formattedParts = formatAddressParts(addressParts);
+  const nextAddress = String(address || "").trim();
+
+  if (!nextAddress) return formattedParts;
+
+  const pincode = String(addressParts?.pincode || "").replace(/\D/g, "");
+  if (pincode && !new RegExp(`\\b${pincode}\\b`).test(nextAddress)) {
+    return formattedParts || nextAddress;
+  }
+
+  return nextAddress;
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function getPhoneLookupValues(normalizedPhone) {
+  return Array.from(
+    new Set([
+      normalizedPhone,
+      `+91 ${normalizedPhone}`,
+      `+91${normalizedPhone}`,
+      `91${normalizedPhone}`,
+    ].filter(Boolean))
+  );
+}
+
+function phoneMatches(value, normalizedPhone) {
+  return normalizePhone(value) === normalizedPhone;
+}
+
+function hasCompletedSellerProfile(seller, normalizedPhone) {
+  const businessName = String(seller?.businessName || "").trim();
+  if (!businessName) return false;
+
+  return normalizePhone(businessName) !== normalizedPhone;
+}
+
+async function findSellerByPhone(normalizedPhone) {
+  return Seller.findOne({ phone: { $in: getPhoneLookupValues(normalizedPhone) } });
+}
+
+async function findSellerByEmail(normalizedEmail) {
+  return (
+    (await Seller.findOne({ businessEmail: normalizedEmail })) ||
+    Seller.findOne({ businessEmail: new RegExp(`^${escapeRegExp(normalizedEmail)}$`, "i") })
+  );
+}
+
+async function findSellerByPhoneAndEmail(normalizedPhone, normalizedEmail) {
+  const seller = await Seller.findOne({
+    phone: { $in: getPhoneLookupValues(normalizedPhone) },
+    businessEmail: new RegExp(`^${escapeRegExp(normalizedEmail)}$`, "i"),
+  });
+
+  if (seller) return seller;
+
+  const sellerWithEmail = await findSellerByEmail(normalizedEmail);
+  if (sellerWithEmail && phoneMatches(sellerWithEmail.phone, normalizedPhone)) {
+    return sellerWithEmail;
+  }
+
+  return null;
 }
 
 async function storeAndSendOtp({ seller, email, purpose, targetId = null, intent = "" }) {
@@ -107,10 +201,7 @@ router.post("/send-otp", async (req, res) => {
     const normalizedIntent = String(intent || "").trim();
 
     if (normalizedIntent === "login") {
-      seller = await Seller.findOne({
-        phone: normalizedPhone,
-        businessEmail: normalizedEmail,
-      });
+      seller = await findSellerByPhoneAndEmail(normalizedPhone, normalizedEmail);
 
       if (!seller) {
         return res.status(404).json({
@@ -119,10 +210,10 @@ router.post("/send-otp", async (req, res) => {
         });
       }
     } else {
-      const existingByPhone = await Seller.findOne({ phone: normalizedPhone });
-      const existingByEmail = await Seller.findOne({ businessEmail: normalizedEmail });
+      const existingByPhone = await findSellerByPhone(normalizedPhone);
+      const existingByEmail = await findSellerByEmail(normalizedEmail);
 
-      if (existingByEmail && existingByEmail.phone !== normalizedPhone) {
+      if (existingByEmail && !phoneMatches(existingByEmail.phone, normalizedPhone)) {
         return res.status(409).json({
           message: "This email address is already linked to another account.",
         });
@@ -139,7 +230,7 @@ router.post("/send-otp", async (req, res) => {
         });
       } else if (!seller.businessEmail) {
         seller.businessEmail = normalizedEmail;
-      } else if (seller.businessEmail !== normalizedEmail) {
+      } else if (normalizeEmail(seller.businessEmail) !== normalizedEmail) {
         return res.status(409).json({
           message: "This phone number is already linked to a different email address.",
         });
@@ -183,10 +274,7 @@ router.post("/verify-otp", async (req, res) => {
       return res.status(400).json({ message: "Email address is required" });
     }
 
-    const seller = await Seller.findOne({
-      phone: normalizedPhone,
-      businessEmail: normalizedEmail,
-    });
+    const seller = await findSellerByPhoneAndEmail(normalizedPhone, normalizedEmail);
 
     if (!seller || !seller.otp || !seller.otpExpiry || seller.otpPurpose !== "auth") {
       return res
@@ -210,13 +298,7 @@ router.post("/verify-otp", async (req, res) => {
     seller.otpTargetId = null;
     await seller.save();
 
-    const isProfileComplete = Boolean(
-      seller.businessName &&
-      seller.upiId &&
-      seller.slug &&
-      seller.businessName !== seller.phone &&
-      collectKycIssues(seller).length === 0
-    );
+    const isProfileComplete = hasCompletedSellerProfile(seller, normalizedPhone);
 
     const token = issueToken(seller._id.toString());
     return res.json({ token, seller: withPolicyDefaults(seller), isProfileComplete });
@@ -258,6 +340,7 @@ router.post("/register", auth, async (req, res) => {
       businessCategory,
       businessEmail,
       businessAddress,
+      businessAddressParts,
       businessGST,
       upiId,
       bankAccountName,
@@ -299,7 +382,7 @@ router.post("/register", auth, async (req, res) => {
       return res.status(400).json({ message: "PAN holder legal name is required." });
     }
 
-    const formattedAddress = String(businessAddress || "").trim();
+    const formattedAddress = resolveAddressString(businessAddress, businessAddressParts);
     if (!formattedAddress) {
       return res.status(400).json({ message: "Business address is required." });
     }
@@ -439,6 +522,7 @@ router.put("/me", auth, async (req, res) => {
       businessCategory,
       businessEmail,
       businessAddress,
+      businessAddressParts,
       businessGST,
       upiId,
       bankAccountName,
@@ -486,7 +570,9 @@ router.put("/me", auth, async (req, res) => {
     }
 
     seller.businessEmail = nextBusinessEmail;
-    if (businessAddress !== undefined) seller.businessAddress = String(businessAddress).trim();
+    if (businessAddress !== undefined || businessAddressParts !== undefined) {
+      seller.businessAddress = resolveAddressString(businessAddress, businessAddressParts);
+    }
     if (typeof upiId === "string") seller.upiId = upiId.trim();
     if (typeof bankName === "string") seller.bankName = bankName.trim();
     if (typeof bankIfsc === "string") seller.bankIfsc = bankIfsc.trim().toUpperCase();

@@ -1,4 +1,5 @@
 const express = require("express");
+const crypto = require("crypto");
 const Product = require("../models/Product");
 const Order = require("../models/Order");
 const Seller = require("../models/Seller");
@@ -142,10 +143,41 @@ function buildOrderResponse(order) {
 const razorpay = require("../utils/razorpay");
 const ParentOrder = require("../models/ParentOrder");
 
+function formatAddressParts(parts) {
+  if (!parts || typeof parts !== "object" || Array.isArray(parts)) return "";
+
+  return [
+    parts.line1,
+    parts.line2,
+    parts.landmark,
+    parts.city,
+    parts.state,
+    parts.country,
+    parts.pincode,
+  ]
+    .map((part) => String(part || "").trim())
+    .filter(Boolean)
+    .join(", ");
+}
+
+function resolveAddressString(address, addressParts) {
+  const formattedParts = formatAddressParts(addressParts);
+  const nextAddress = String(address || "").trim();
+
+  if (!nextAddress) return formattedParts;
+
+  const pincode = String(addressParts?.pincode || "").replace(/\D/g, "");
+  if (pincode && !new RegExp(`\\b${pincode}\\b`).test(nextAddress)) {
+    return formattedParts || nextAddress;
+  }
+
+  return nextAddress;
+}
+
 function normalizeOrderAddresses(body = {}) {
-  const deliveryAddress = String(body.deliveryAddress || "").trim();
-  const billingAddress = String(body.billingAddress || "").trim();
-  const shippingAddress = String(body.shippingAddress || "").trim();
+  const deliveryAddress = resolveAddressString(body.deliveryAddress, body.deliveryAddressParts);
+  const billingAddress = resolveAddressString(body.billingAddress, body.billingAddressParts);
+  const shippingAddress = resolveAddressString(body.shippingAddress, body.shippingAddressParts);
   const shippingCustomerName = String(body.shippingCustomerName || "").trim();
   const shippingCustomerPhone = String(body.shippingCustomerPhone || "").trim();
   const shippingSameAsBilling =
@@ -401,6 +433,76 @@ router.post("/", async (req, res) => {
   } catch (error) {
     console.error("[Order Creation Error]:", error);
     return res.status(500).json({ message: "Unable to create marketplace order", error: error.message });
+  }
+});
+
+// Verify payment after Razorpay checkout succeeds on the client.
+// This runs synchronously so orders are marked "paid" immediately,
+// rather than waiting for the asynchronous webhook.
+router.post("/verify-payment", async (req, res) => {
+  try {
+    const {
+      razorpay_order_id,
+      razorpay_payment_id,
+      razorpay_signature,
+      orderIds,
+    } = req.body;
+
+    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+      return res.status(400).json({ message: "Missing payment verification fields" });
+    }
+
+    // Signature verification (skip when running mock / env not fully configured)
+    const isMockMode =
+      !process.env.RAZORPAY_KEY_ID ||
+      !process.env.RAZORPAY_KEY_SECRET ||
+      process.env.RAZORPAY_KEY_ID === "rzp_test_mock_id";
+
+    if (!isMockMode) {
+      const keySecret = process.env.RAZORPAY_KEY_SECRET;
+      const expectedSignature = crypto
+        .createHmac("sha256", keySecret)
+        .update(`${razorpay_order_id}|${razorpay_payment_id}`)
+        .digest("hex");
+
+      if (expectedSignature !== razorpay_signature) {
+        return res.status(400).json({ message: "Payment signature verification failed" });
+      }
+    }
+
+    // Update ParentOrder
+    const parentOrder = await ParentOrder.findOne({
+      razorpayOrderId: razorpay_order_id,
+    }).populate("subOrders");
+
+    if (!parentOrder) {
+      return res.status(404).json({ message: "Order not found for this payment" });
+    }
+
+    if (parentOrder.paymentStatus !== "paid") {
+      parentOrder.paymentStatus = "paid";
+      parentOrder.razorpayPaymentId = razorpay_payment_id;
+      await parentOrder.save();
+    }
+
+    // Update all sub-orders
+    const updatedOrders = [];
+    for (const subOrder of parentOrder.subOrders) {
+      if (subOrder.paymentStatus !== "paid" && subOrder.paymentStatus !== "delivered") {
+        subOrder.paymentStatus = "paid";
+        await subOrder.save();
+      }
+      updatedOrders.push({ _id: subOrder._id, paymentStatus: subOrder.paymentStatus });
+    }
+
+    return res.json({
+      verified: true,
+      message: "Payment verified and orders updated",
+      orders: updatedOrders,
+    });
+  } catch (error) {
+    console.error("[Payment Verification Error]:", error);
+    return res.status(500).json({ message: "Payment verification failed", error: error.message });
   }
 });
 

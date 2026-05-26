@@ -8,6 +8,7 @@ import {
 } from "react";
 import { api, setApiToken } from "../api/client";
 import type { Seller } from "../types";
+import type { AddressParts } from "../utils/contactFields";
 
 interface SendOtpInput {
   phone?: string;
@@ -27,6 +28,7 @@ interface RegisterInput {
   termsAccepted: boolean;
   businessEmail?: string;
   businessAddress?: string;
+  businessAddressParts?: AddressParts;
   businessGST?: string;
   upiId?: string;
   bankAccountName?: string;
@@ -51,6 +53,7 @@ interface UpdateProfileInput {
   businessCategory?: string;
   businessEmail?: string;
   businessAddress?: string;
+  businessAddressParts?: AddressParts;
   businessGST?: string;
   upiId?: string;
   bankAccountName?: string;
