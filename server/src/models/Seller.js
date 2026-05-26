@@ -85,6 +85,51 @@ const sellerSchema = new mongoose.Schema(
       trim: true,
       default: "",
     },
+    pan: {
+      type: String,
+      trim: true,
+      uppercase: true,
+      default: "",
+    },
+    panHash: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    panHolderName: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    panDocumentUrl: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    panVerificationStatus: {
+      type: String,
+      enum: ["unsubmitted", "pending", "verified", "rejected"],
+      default: "unsubmitted",
+      index: true,
+    },
+    kycStatus: {
+      type: String,
+      enum: ["incomplete", "pending", "verified", "rejected"],
+      default: "incomplete",
+      index: true,
+    },
+    onboardingProgress: {
+      type: String,
+      enum: ["otp_verified", "profile_submitted", "kyc_pending", "kyc_verified", "approved"],
+      default: "otp_verified",
+      index: true,
+    },
+    payoutStatus: {
+      type: String,
+      enum: ["blocked", "enabled", "suspended"],
+      default: "blocked",
+      index: true,
+    },
     profileImageUrl: {
       type: String,
       trim: true,
@@ -169,9 +214,82 @@ const sellerSchema = new mongoose.Schema(
     },
     approvalStatus: {
       type: String,
-      enum: ["draft", "pending", "approved", "rejected"],
+      enum: ["draft", "pending", "approved", "rejected", "suspended"],
       default: "draft",
       index: true,
+    },
+    razorpayAccountId: {
+      type: String,
+      default: "",
+      index: true,
+    },
+    razorpayReferenceId: {
+      type: String,
+      default: "",
+      index: true,
+    },
+    razorpayStakeholderId: {
+      type: String,
+      default: "",
+    },
+    razorpayProductId: {
+      type: String,
+      default: "",
+    },
+    razorpayLinkedAccountCreatedAt: {
+      type: Date,
+      default: null,
+    },
+    razorpayOnboardingError: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    linkedAccountOnboardingStatus: {
+      type: String,
+      enum: [
+        "not_started",
+        "kyc_incomplete",
+        "pending_approval",
+        "linked_account_pending",
+        "linked_account_created",
+        "linked_account_failed",
+        "payout_enabled",
+      ],
+      default: "not_started",
+      index: true,
+    },
+    razorpayAccountStatus: {
+      type: String,
+      enum: ["uncreated", "pending", "active", "suspended"],
+      default: "uncreated",
+    },
+    kycDetailsEncrypted: {
+      pan: { type: String, default: "" },
+      panHolderName: { type: String, default: "" },
+      gst: { type: String, default: "" },
+      bankAccountName: { type: String, default: "" },
+      bankAccountNumber: { type: String, default: "" },
+      bankName: { type: String, default: "" },
+      bankIfsc: { type: String, default: "" },
+      businessType: { type: String, default: "individual" },
+      businessCategory: { type: String, default: "" },
+    },
+    commissionConfig: {
+      commissionType: {
+        type: String,
+        enum: ["percentage", "fixed"],
+        default: "percentage",
+      },
+      commissionValue: {
+        type: Number,
+        default: 0, // Disabled — vendors receive full order amount; field kept for future use
+      },
+      categoryCommissions: {
+        type: Map,
+        of: Number,
+        default: {},
+      },
     },
     storePublished: {
       type: Boolean,
@@ -193,6 +311,17 @@ const sellerSchema = new mongoose.Schema(
     termsAcceptedAt: {
       type: Date,
       default: null,
+    },
+    complianceAudit: {
+      type: [
+        {
+          action: { type: String, trim: true, required: true },
+          actor: { type: String, trim: true, default: "system" },
+          metadata: { type: mongoose.Schema.Types.Mixed, default: {} },
+          at: { type: Date, default: Date.now },
+        },
+      ],
+      default: [],
     },
     // OTP fields (transient — cleared after verification)
     otp: {
@@ -217,5 +346,14 @@ const sellerSchema = new mongoose.Schema(
     timestamps: true,
   }
 );
+
+sellerSchema.index(
+  { panHash: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { panHash: { $type: "string", $gt: "" } },
+  }
+);
+sellerSchema.index({ kycStatus: 1, payoutStatus: 1, approvalStatus: 1 });
 
 module.exports = mongoose.model("Seller", sellerSchema);

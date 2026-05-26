@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import axios from "axios";
 import { api } from "../api/client";
 import { AppIcon } from "../components/ui/AppIcon";
 import { Button } from "../components/ui/Button";
@@ -6,9 +7,9 @@ import { Card } from "../components/ui/Card";
 import { InputField } from "../components/ui/FormField";
 import { useI18n } from "../context/I18nContext";
 import { useToast } from "../context/ToastContext";
-import type { Seller } from "../types";
+import type { Seller, LinkedAccountOnboardingStatus } from "../types";
 
-type ApprovalStatus = "pending" | "approved" | "rejected";
+type ApprovalStatus = "pending" | "approved" | "rejected" | "suspended";
 type SortBy = "latest" | "oldest" | "business";
 
 const ADMIN_TOKEN_KEY = "zensos_admin_token";
@@ -16,6 +17,7 @@ const ADMIN_TOKEN_KEY = "zensos_admin_token";
 function statusBadge(status: ApprovalStatus) {
   if (status === "approved") return "bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800";
   if (status === "rejected") return "bg-rose-100 text-rose-700 border-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800";
+  if (status === "suspended") return "bg-slate-200 text-slate-700 border-slate-300 dark:bg-slate-800 dark:text-slate-200 dark:border-slate-700";
   return "bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800";
 }
 
@@ -35,6 +37,18 @@ function formatDeliveryMode(mode?: Seller["deliveryMode"]) {
   if (mode === "flat_rate") return "Flat delivery charge";
   if (mode === "always_free") return "Always free delivery";
   return "";
+}
+
+function formatLinkedAccountStatus(status?: LinkedAccountOnboardingStatus) {
+  if (!status) return "Not started";
+  return status.replace(/_/g, " ");
+}
+
+function linkedAccountStatusBadge(status?: LinkedAccountOnboardingStatus) {
+  if (status === "payout_enabled") return "bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800";
+  if (status === "linked_account_failed" || status === "kyc_incomplete") return "bg-rose-100 text-rose-700 border-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800";
+  if (status === "linked_account_pending" || status === "linked_account_created" || status === "pending_approval") return "bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800";
+  return "bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700";
 }
 
 function DetailCell({ label, value }: { label: string; value?: string | null }) {
@@ -69,7 +83,7 @@ function SectionCard({
 }) {
   return (
     <article
-      className={`rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card dark:border-teal-900/35 dark:bg-gradient-to-br dark:from-slate-950 dark:to-slate-900 ${className}`}
+      className={`rounded-2xl border border-white/70 bg-white/90 p-4 shadow-card sm:rounded-3xl sm:p-5 dark:border-teal-900/35 dark:bg-gradient-to-br dark:from-slate-950 dark:to-slate-900 ${className}`}
     >
       <div className="mb-4 flex items-start justify-between gap-3">
         <div>
@@ -86,6 +100,338 @@ function SectionCard({
       </div>
       {children}
     </article>
+  );
+}
+
+function kycStatusBadgeClass(kyc?: Seller["kycStatus"]) {
+  if (kyc === "verified") return "bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800";
+  if (kyc === "rejected") return "bg-rose-100 text-rose-700 border-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800";
+  return "bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800";
+}
+
+function ReviewStatusPill({
+  label,
+  value,
+  badgeClass,
+  compact = false,
+}: {
+  label: string;
+  value: string;
+  badgeClass: string;
+  compact?: boolean;
+}) {
+  return (
+    <div
+      className={`shrink-0 rounded-xl border border-slate-200/80 bg-white/90 dark:border-slate-700 dark:bg-slate-900/60 ${
+        compact ? "min-w-[132px] snap-start px-2.5 py-2" : "min-w-0 flex-1 px-3 py-2"
+      }`}
+    >
+      <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{label}</p>
+      <p
+        className={`mt-1 inline-flex max-w-full rounded-full border px-2 py-0.5 font-semibold capitalize ${badgeClass} ${
+          compact ? "text-[10px]" : "truncate text-xs"
+        }`}
+      >
+        {value}
+      </p>
+    </div>
+  );
+}
+
+type SellerActionKey = "kyc-verify" | "kyc-reject" | "approve" | "reject" | "pending" | "retry-linked";
+
+function ReviewActionButton({
+  label,
+  description,
+  icon,
+  variant,
+  onClick,
+  disabled,
+  loading,
+  compact = false,
+  className = "",
+}: {
+  label: string;
+  description?: string;
+  icon: ReactNode;
+  variant: "success" | "danger" | "secondary";
+  onClick: () => void;
+  disabled?: boolean;
+  loading?: boolean;
+  compact?: boolean;
+  className?: string;
+}) {
+  const tone =
+    variant === "success"
+      ? "border-teal-200 bg-teal-50 hover:bg-teal-100 text-teal-800 dark:border-teal-800 dark:bg-teal-950/40 dark:text-teal-200 dark:hover:bg-teal-950/70"
+      : variant === "danger"
+        ? "border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-800 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-200 dark:hover:bg-rose-950/70"
+        : "border-slate-200 bg-white hover:bg-slate-50 text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800";
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled || loading}
+      className={`flex w-full transition disabled:cursor-not-allowed disabled:opacity-50 ${tone} ${
+        compact
+          ? "flex-col items-center justify-center gap-1.5 rounded-xl border px-2 py-2.5 text-center"
+          : "items-start gap-3 rounded-2xl border px-3.5 py-3 text-left"
+      } ${className}`}
+    >
+      <span
+        className={`flex shrink-0 items-center justify-center rounded-xl bg-white/80 shadow-sm dark:bg-slate-950/50 ${
+          compact ? "h-8 w-8" : "mt-0.5 h-9 w-9"
+        }`}
+      >
+        {loading ? (
+          <span className="inline-flex h-4 w-4 animate-spin text-current">
+            <AppIcon name="refresh" className="text-[14px]" />
+          </span>
+        ) : (
+          icon
+        )}
+      </span>
+      <span className={`min-w-0 ${compact ? "w-full" : "flex-1"}`}>
+        <span className={`block font-bold ${compact ? "text-[11px] leading-tight" : "text-sm"}`}>{label}</span>
+        {description && !compact ? (
+          <span className="mt-0.5 block text-xs font-medium opacity-80">{description}</span>
+        ) : null}
+      </span>
+    </button>
+  );
+}
+
+function SellerReviewActions({
+  seller,
+  actionLoading,
+  compact = false,
+  onVerifyKyc,
+  onRejectKyc,
+  onApprove,
+  onReject,
+  onPending,
+  onRetryLinkedAccount,
+}: {
+  seller: Seller;
+  actionLoading: SellerActionKey | null;
+  compact?: boolean;
+  onVerifyKyc: () => void;
+  onRejectKyc: () => void;
+  onApprove: () => void;
+  onReject: () => void;
+  onPending: () => void;
+  onRetryLinkedAccount: () => void;
+}) {
+  const approval = (seller.approvalStatus || "pending") as ApprovalStatus;
+  const kyc = seller.kycStatus || "incomplete";
+  const pan = seller.panVerificationStatus || "unsubmitted";
+  const isKycVerified = kyc === "verified" && pan === "verified";
+  const isKycRejected = kyc === "rejected" || pan === "rejected";
+  const busy = (key: SellerActionKey) => actionLoading === key;
+  const linkedAccountLabel = formatLinkedAccountStatus(seller.linkedAccountOnboardingStatus);
+
+  const statusPills = (
+    <>
+      <ReviewStatusPill label="Approval" value={approval} badgeClass={statusBadge(approval)} compact={compact} />
+      <ReviewStatusPill label="KYC" value={kyc} badgeClass={kycStatusBadgeClass(kyc)} compact={compact} />
+      <ReviewStatusPill
+        label="PAN"
+        value={pan}
+        badgeClass={kycStatusBadgeClass(pan === "verified" ? "verified" : pan === "rejected" ? "rejected" : "incomplete")}
+        compact={compact}
+      />
+      <ReviewStatusPill
+        label="Linked acct"
+        value={linkedAccountLabel}
+        badgeClass={linkedAccountStatusBadge(seller.linkedAccountOnboardingStatus)}
+        compact={compact}
+      />
+    </>
+  );
+
+  return (
+    <div className={compact ? "space-y-3" : "space-y-4"}>
+      {compact ? (
+        <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 snap-x snap-mandatory">{statusPills}</div>
+      ) : (
+        <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">{statusPills}</div>
+      )}
+
+      <div className={`grid gap-3 ${compact ? "" : "gap-4 lg:grid-cols-2"}`}>
+        <div className="rounded-2xl border border-amber-200/80 bg-amber-50/50 p-2.5 sm:p-3 dark:border-amber-900/50 dark:bg-amber-950/20">
+          <div className={`mb-2.5 gap-2 ${compact ? "space-y-2" : "mb-3 flex items-start justify-between"}`}>
+            <div className="min-w-0 flex-1">
+              <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-amber-800 dark:text-amber-300 sm:text-xs">
+                Step 1 · KYC review
+              </p>
+              {!compact ? (
+                <p className="mt-0.5 text-xs text-amber-700/90 dark:text-amber-200/80">
+                  Verify documents before approving the store.
+                </p>
+              ) : null}
+            </div>
+            <span
+              className={`inline-flex shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase ${kycStatusBadgeClass(kyc)}`}
+            >
+              {isKycVerified ? "Done" : isKycRejected ? "Rejected" : "Pending"}
+            </span>
+          </div>
+          <div className={`grid gap-2 ${compact ? "grid-cols-2" : "sm:grid-cols-2"}`}>
+            <ReviewActionButton
+              label="Verify KYC"
+              description="Mark PAN and identity checks as verified"
+              icon={<AppIcon name="check" className="text-[16px] text-teal-600" />}
+              variant="success"
+              onClick={onVerifyKyc}
+              disabled={isKycVerified}
+              loading={busy("kyc-verify")}
+              compact={compact}
+            />
+            <ReviewActionButton
+              label="Reject KYC"
+              description="Send seller back to fix documents"
+              icon={<AppIcon name="inactive" className="text-[16px] text-rose-600" />}
+              variant="danger"
+              onClick={onRejectKyc}
+              disabled={isKycRejected}
+              loading={busy("kyc-reject")}
+              compact={compact}
+            />
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-teal-200/80 bg-teal-50/40 p-2.5 sm:p-3 dark:border-teal-900/50 dark:bg-teal-950/20">
+          <div className={`gap-2 ${compact ? "mb-2.5 space-y-2" : "mb-3 flex items-start justify-between"}`}>
+            <div className="min-w-0 flex-1">
+              <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-teal-800 dark:text-teal-300 sm:text-xs">
+                Step 2 · Store decision
+              </p>
+              {!compact ? (
+                <p className="mt-0.5 text-xs text-teal-700/90 dark:text-teal-200/80">
+                  Approve to publish the seller store, or reject the application.
+                </p>
+              ) : null}
+            </div>
+            <span
+              className={`inline-flex shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase capitalize ${statusBadge(approval)}`}
+            >
+              {approval}
+            </span>
+          </div>
+          <div className="grid gap-2">
+            <ReviewActionButton
+              label="Approve store"
+              description="Allow seller to go live on the marketplace"
+              icon={<AppIcon name="active" className="text-[16px] text-teal-600" />}
+              variant="success"
+              onClick={onApprove}
+              disabled={approval === "approved"}
+              loading={busy("approve")}
+              compact={compact}
+            />
+            <div className={`grid gap-2 ${compact ? "grid-cols-2" : "sm:grid-cols-2"}`}>
+              <ReviewActionButton
+                label="Reject"
+                description="Decline this seller registration"
+                icon={<AppIcon name="inactive" className="text-[16px] text-rose-600" />}
+                variant="danger"
+                onClick={onReject}
+                disabled={approval === "rejected"}
+                loading={busy("reject")}
+                compact={compact}
+              />
+              <ReviewActionButton
+                label="Pending"
+                description="Return seller to review queue"
+                icon={<AppIcon name="pending" className="text-[16px] text-slate-600" />}
+                variant="secondary"
+                onClick={onPending}
+                disabled={approval === "pending"}
+                loading={busy("pending")}
+                compact={compact}
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {seller.approvalStatus === "approved" ? (
+        <div className="rounded-2xl border border-slate-200 bg-white p-2.5 sm:p-3 dark:border-slate-700 dark:bg-slate-900/50">
+          <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-slate-500 sm:text-xs">Razorpay setup</p>
+          {!compact ? (
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              Retry linked account provisioning if Route onboarding failed.
+            </p>
+          ) : null}
+          <div className={compact ? "mt-2" : "mt-3"}>
+            <ReviewActionButton
+              label={compact ? "Retry account" : "Retry linked account"}
+              description="Re-trigger Razorpay Route onboarding"
+              icon={<AppIcon name="refresh" className="text-[16px] text-slate-600" />}
+              variant="secondary"
+              onClick={onRetryLinkedAccount}
+              loading={busy("retry-linked")}
+              compact={compact}
+              className={compact ? "" : "max-w-md"}
+            />
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function SellerReviewActionHandlers({
+  seller,
+  actionLoading,
+  compact,
+  confirmSellerAction,
+  updateKycStatus,
+  updateApproval,
+  retryLinkedAccount,
+}: {
+  seller: Seller;
+  actionLoading: SellerActionKey | null;
+  compact?: boolean;
+  confirmSellerAction: (message: string) => boolean;
+  updateKycStatus: (
+    sellerId: string,
+    panVerificationStatus: Seller["panVerificationStatus"],
+    kycStatus: Seller["kycStatus"],
+    actionKey: SellerActionKey
+  ) => Promise<void>;
+  updateApproval: (sellerId: string, nextStatus: ApprovalStatus, actionKey: SellerActionKey) => Promise<void>;
+  retryLinkedAccount: (sellerId: string) => Promise<void>;
+}) {
+  return (
+    <SellerReviewActions
+      seller={seller}
+      actionLoading={actionLoading}
+      compact={compact}
+      onVerifyKyc={() => {
+        if (!confirmSellerAction("Mark this seller's KYC and PAN as verified?")) return;
+        void updateKycStatus(seller._id, "verified", "verified", "kyc-verify");
+      }}
+      onRejectKyc={() => {
+        if (!confirmSellerAction("Reject this seller's KYC? They will need to resubmit documents.")) return;
+        void updateKycStatus(seller._id, "rejected", "rejected", "kyc-reject");
+      }}
+      onApprove={() => {
+        if (!confirmSellerAction("Approve this seller and allow their store to go live?")) return;
+        void updateApproval(seller._id, "approved", "approve");
+      }}
+      onReject={() => {
+        if (!confirmSellerAction("Reject this seller application?")) return;
+        void updateApproval(seller._id, "rejected", "reject");
+      }}
+      onPending={() => {
+        void updateApproval(seller._id, "pending", "pending");
+      }}
+      onRetryLinkedAccount={() => {
+        void retryLinkedAccount(seller._id);
+      }}
+    />
   );
 }
 
@@ -139,6 +485,7 @@ export function AdminPage() {
   const [sortBy, setSortBy] = useState<SortBy>("latest");
   const [selectedSeller, setSelectedSeller] = useState<Seller | null>(null);
   const [loadingSellerDetail, setLoadingSellerDetail] = useState(false);
+  const [sellerActionLoading, setSellerActionLoading] = useState<SellerActionKey | null>(null);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
@@ -234,16 +581,54 @@ export function AdminPage() {
   function closeSellerDetail() {
     setSelectedSeller(null);
     setLoadingSellerDetail(false);
+    setSellerActionLoading(null);
+  }
+
+  async function retryLinkedAccount(sellerId: string) {
+    if (!token) return;
+    setError("");
+    setSuccess("");
+    setSellerActionLoading("retry-linked");
+    try {
+      const response = await api.post<{ seller: Seller; message: string }>(
+        `/admin/sellers/${sellerId}/linked-account/retry`,
+        {},
+        { headers: authHeaders }
+      );
+      setSuccess(response.data.message || "Linked account provisioning retried.");
+      await loadSellers(status);
+      if (selectedSeller?._id === sellerId && response.data.seller) {
+        setSelectedSeller(response.data.seller);
+      }
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        const message = error.response?.data?.message;
+        const detail = error.response?.data?.detail;
+        const missingFields = Array.isArray(error.response?.data?.missingFields)
+          ? error.response?.data?.missingFields
+          : [];
+        setError(
+          [message, detail, missingFields.length ? `Missing: ${missingFields.join(", ")}` : ""]
+            .filter(Boolean)
+            .join(" ")
+        );
+      } else {
+        setError("Unable to retry Razorpay linked account provisioning.");
+      }
+    } finally {
+      setSellerActionLoading(null);
+    }
   }
 
   async function updateApproval(
     sellerId: string,
     nextStatus: ApprovalStatus,
-    closeModal: boolean = false
+    actionKey: SellerActionKey
   ) {
     if (!token) return;
     setError("");
     setSuccess("");
+    setSellerActionLoading(actionKey);
     try {
       const response = await api.patch<{ seller: Seller }>(
         `/admin/sellers/${sellerId}/approval`,
@@ -255,12 +640,59 @@ export function AdminPage() {
       if (selectedSeller?._id === sellerId && response.data.seller) {
         setSelectedSeller(response.data.seller);
       }
-      if (closeModal) {
-        closeSellerDetail();
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        const message = error.response?.data?.message;
+        const missingFields = Array.isArray(error.response?.data?.missingFields)
+          ? error.response?.data?.missingFields
+          : [];
+        setError(missingFields.length ? `${message} Missing: ${missingFields.join(", ")}.` : message || "Unable to update approval status.");
+      } else {
+        setError("Unable to update approval status.");
       }
-    } catch {
-      setError("Unable to update approval status.");
+    } finally {
+      setSellerActionLoading(null);
     }
+  }
+
+  async function updateKycStatus(
+    sellerId: string,
+    panVerificationStatus: Seller["panVerificationStatus"],
+    kycStatus: Seller["kycStatus"],
+    actionKey: SellerActionKey
+  ) {
+    if (!token) return;
+    setError("");
+    setSuccess("");
+    setSellerActionLoading(actionKey);
+    try {
+      const response = await api.patch<{ seller: Seller }>(
+        `/admin/sellers/${sellerId}/kyc`,
+        { panVerificationStatus, kycStatus },
+        { headers: authHeaders }
+      );
+      setSuccess("Seller KYC status updated.");
+      await loadSellers(status);
+      if (selectedSeller?._id === sellerId && response.data.seller) {
+        setSelectedSeller(response.data.seller);
+      }
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        const message = error.response?.data?.message;
+        const missingFields = Array.isArray(error.response?.data?.missingFields)
+          ? error.response?.data?.missingFields
+          : [];
+        setError(missingFields.length ? `${message} Missing: ${missingFields.join(", ")}.` : message || "Unable to update KYC status.");
+      } else {
+        setError("Unable to update KYC status.");
+      }
+    } finally {
+      setSellerActionLoading(null);
+    }
+  }
+
+  function confirmSellerAction(message: string) {
+    return window.confirm(message);
   }
 
   const filteredSellers = useMemo(() => {
@@ -418,6 +850,7 @@ export function AdminPage() {
               <option value="pending">Pending</option>
               <option value="approved">Approved</option>
               <option value="rejected">Rejected</option>
+              <option value="suspended">Suspended</option>
             </select>
           </label>
           <label className="block space-y-1.5">
@@ -495,10 +928,10 @@ export function AdminPage() {
                         <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => void openSellerDetail(seller)}>
                           View
                         </Button>
-                        <Button variant="success" className="px-2.5 py-1 text-xs" onClick={() => void updateApproval(seller._id, "approved")}>
+                        <Button variant="success" className="px-2.5 py-1 text-xs" onClick={() => void updateApproval(seller._id, "approved", "approve")}>
                           Approve
                         </Button>
-                        <Button variant="danger" className="px-2.5 py-1 text-xs" onClick={() => void updateApproval(seller._id, "rejected")}>
+                        <Button variant="danger" className="px-2.5 py-1 text-xs" onClick={() => void updateApproval(seller._id, "rejected", "reject")}>
                           Reject
                         </Button>
                       </div>
@@ -535,8 +968,8 @@ export function AdminPage() {
               </div>
               <div className="flex flex-wrap gap-2">
                 <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => void openSellerDetail(seller)}>View</Button>
-                <Button variant="success" className="px-2.5 py-1 text-xs" onClick={() => void updateApproval(seller._id, "approved")}>Approve</Button>
-                <Button variant="danger" className="px-2.5 py-1 text-xs" onClick={() => void updateApproval(seller._id, "rejected")}>Reject</Button>
+                <Button variant="success" className="px-2.5 py-1 text-xs" onClick={() => void updateApproval(seller._id, "approved", "approve")}>Approve</Button>
+                <Button variant="danger" className="px-2.5 py-1 text-xs" onClick={() => void updateApproval(seller._id, "rejected", "reject")}>Reject</Button>
               </div>
             </Card>
           ))
@@ -546,45 +979,68 @@ export function AdminPage() {
       {/* Seller detail modal */}
       {selectedSeller ? (
         <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/55 px-3 py-3 backdrop-blur-sm sm:items-center sm:px-4"
+          className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/55 backdrop-blur-sm sm:items-center sm:p-4"
           onClick={closeSellerDetail}
         >
           <div
-            className="flex max-h-[94vh] w-full max-w-4xl flex-col overflow-hidden rounded-[28px] border border-slate-200/80 bg-white shadow-[0_24px_80px_rgba(15,23,42,0.2)] dark:border-slate-800 dark:bg-slate-950"
+            className="flex max-h-[min(100dvh,940px)] w-full max-w-4xl flex-col overflow-hidden rounded-t-[24px] border border-slate-200/80 bg-white shadow-[0_24px_80px_rgba(15,23,42,0.2)] sm:max-h-[94vh] sm:rounded-[28px] dark:border-slate-800 dark:bg-slate-950"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="shrink-0 border-b border-slate-200 bg-gradient-to-r from-white via-teal-50/60 to-sky-50/50 px-5 py-4 dark:border-slate-800 dark:from-slate-950 dark:via-slate-900 dark:to-slate-900 sm:px-6">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                <div className="min-w-0">
-                  <p className="text-xs font-bold uppercase tracking-[0.18em] text-teal-700 dark:text-teal-300">
-                    Seller review
-                  </p>
-                  <h3 className="mt-1 font-heading text-2xl font-bold text-slate-900 dark:text-slate-100 truncate">
-                    {selectedSeller.businessName || "Unnamed business"}
-                  </h3>
-                  <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-                    <span>Slug: <span className="font-semibold text-slate-700 dark:text-slate-200">{selectedSeller.slug || "—"}</span></span>
-                    <span className={`rounded-full border px-2.5 py-0.5 text-xs font-semibold capitalize ${statusBadge((selectedSeller.approvalStatus || status) as ApprovalStatus)}`}>
-                      {selectedSeller.approvalStatus || status}
+            <div className="shrink-0 border-b border-slate-200 bg-gradient-to-r from-white via-teal-50/60 to-sky-50/50 px-4 py-3 dark:border-slate-800 dark:from-slate-950 dark:via-slate-900 dark:to-slate-900 sm:px-6 sm:py-4">
+              <div className="flex flex-col gap-3">
+                <div className="flex min-w-0 items-start gap-3">
+                  {selectedSeller.businessLogo ? (
+                    <img
+                      src={selectedSeller.businessLogo}
+                      alt=""
+                      className="h-11 w-11 shrink-0 rounded-xl border border-slate-200 bg-white object-contain p-1 sm:h-14 sm:w-14 sm:rounded-2xl dark:border-slate-700"
+                    />
+                  ) : (
+                    <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-base font-bold text-teal-700 sm:h-14 sm:w-14 sm:rounded-2xl sm:text-lg dark:border-slate-700 dark:bg-slate-900">
+                      {(selectedSeller.businessName || "?").slice(0, 1).toUpperCase()}
                     </span>
-                    {selectedSeller.createdAt ? (
-                      <span>Joined {new Date(selectedSeller.createdAt).toLocaleDateString("en-IN")}</span>
-                    ) : null}
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-teal-700 dark:text-teal-300 sm:text-xs">
+                      Seller review
+                    </p>
+                    <h3 className="mt-0.5 font-heading text-lg font-bold leading-tight text-slate-900 dark:text-slate-100 sm:mt-1 sm:text-2xl">
+                      {selectedSeller.businessName || "Unnamed business"}
+                    </h3>
+                    <div className="mt-1.5 space-y-0.5 text-[11px] text-slate-500 dark:text-slate-400 sm:mt-2 sm:flex sm:flex-wrap sm:items-center sm:gap-x-3 sm:gap-y-1 sm:space-y-0 sm:text-xs">
+                      <p className="truncate">
+                        Slug:{" "}
+                        <span className="font-semibold text-slate-700 dark:text-slate-200">
+                          {selectedSeller.slug || "—"}
+                        </span>
+                      </p>
+                      {selectedSeller.phone ? <p className="truncate">{selectedSeller.phone}</p> : null}
+                      {selectedSeller.businessEmail ? (
+                        <p className="truncate">{selectedSeller.businessEmail}</p>
+                      ) : null}
+                      {selectedSeller.createdAt ? (
+                        <p>Joined {new Date(selectedSeller.createdAt).toLocaleDateString("en-IN")}</p>
+                      ) : null}
+                    </div>
                   </div>
                 </div>
-                <div className="flex shrink-0 flex-wrap gap-2">
+                <div className="grid grid-cols-2 gap-2 sm:flex sm:justify-end">
                   {selectedSeller.slug ? (
                     <a
                       href={getAdminPreviewUrl(selectedSeller)}
                       target="_blank"
                       rel="noreferrer"
-                      className="inline-flex items-center gap-1.5 rounded-xl border border-teal-200 bg-teal-50 px-3 py-2 text-xs font-semibold text-teal-700 hover:bg-teal-100 dark:border-teal-800 dark:bg-teal-950/50 dark:text-teal-300"
+                      className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-teal-200 bg-teal-50 px-3 py-2.5 text-xs font-semibold text-teal-700 hover:bg-teal-100 dark:border-teal-800 dark:bg-teal-950/50 dark:text-teal-300 sm:py-2"
                     >
                       <AppIcon name="website" className="text-[13px]" />
-                      Preview store
+                      Preview
                     </a>
                   ) : null}
-                  <Button variant="secondary" onClick={closeSellerDetail} className="px-3 py-2 text-xs">
+                  <Button
+                    variant="secondary"
+                    onClick={closeSellerDetail}
+                    className={`px-3 py-2.5 text-xs sm:py-2 ${selectedSeller.slug ? "" : "col-span-2"}`}
+                  >
                     <AppIcon name="close" className="text-[12px]" />
                     Close
                   </Button>
@@ -592,7 +1048,21 @@ export function AdminPage() {
               </div>
             </div>
 
-            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-3 py-3 sm:space-y-4 sm:px-6 sm:py-5">
+              <div className="sm:hidden">
+                <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">Review actions</p>
+                <SellerReviewActionHandlers
+                  seller={selectedSeller}
+                  actionLoading={sellerActionLoading}
+                  compact
+                  confirmSellerAction={confirmSellerAction}
+                  updateKycStatus={updateKycStatus}
+                  updateApproval={updateApproval}
+                  retryLinkedAccount={retryLinkedAccount}
+                />
+                <div className="my-3 border-t border-slate-200 dark:border-slate-800" />
+                <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">Seller details</p>
+              </div>
               {loadingSellerDetail ? (
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm font-semibold text-slate-500 dark:border-slate-800 dark:bg-slate-900/50 dark:text-slate-400">
                   Loading full seller profile…
@@ -613,6 +1083,11 @@ export function AdminPage() {
                   <DetailCell label="Business email" value={selectedSeller.businessEmail} />
                   <DetailCell label="Registered phone" value={selectedSeller.phone} />
                   <DetailCell label="GST number" value={selectedSeller.businessGST} />
+                  <DetailCell label="PAN" value={selectedSeller.pan} />
+                  <DetailCell label="PAN holder" value={selectedSeller.panHolderName} />
+                  <DetailCell label="PAN verification" value={selectedSeller.panVerificationStatus} />
+                  <DetailCell label="KYC status" value={selectedSeller.kycStatus} />
+                  <DetailCell label="Payout status" value={selectedSeller.payoutStatus} />
                   <DetailCell label="Business address" value={selectedSeller.businessAddress} />
                 </div>
               </SectionCard>
@@ -731,6 +1206,48 @@ export function AdminPage() {
               </SectionCard>
 
               <SectionCard
+                title="Razorpay linked account"
+                eyebrow="Route onboarding"
+                icon={
+                  <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-teal-50 text-teal-600 text-sm dark:bg-teal-950/50">
+                    ₹
+                  </span>
+                }
+              >
+                <div className="mb-4 flex flex-wrap items-center gap-2">
+                  <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold capitalize ${linkedAccountStatusBadge(selectedSeller.linkedAccountOnboardingStatus)}`}>
+                    {formatLinkedAccountStatus(selectedSeller.linkedAccountOnboardingStatus)}
+                  </span>
+                  {selectedSeller.razorpayAccountStatus ? (
+                    <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+                      Account: {selectedSeller.razorpayAccountStatus}
+                    </span>
+                  ) : null}
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <DetailCell label="Linked account ID" value={selectedSeller.razorpayAccountId} />
+                  <DetailCell label="Reference ID" value={selectedSeller.razorpayReferenceId} />
+                  <DetailCell label="Stakeholder ID" value={selectedSeller.razorpayStakeholderId} />
+                  <DetailCell label="Route product ID" value={selectedSeller.razorpayProductId} />
+                  <DetailCell label="Payout status" value={selectedSeller.payoutStatus} />
+                  <DetailCell
+                    label="Linked account created"
+                    value={
+                      selectedSeller.razorpayLinkedAccountCreatedAt
+                        ? new Date(selectedSeller.razorpayLinkedAccountCreatedAt).toLocaleString("en-IN")
+                        : ""
+                    }
+                  />
+                </div>
+                {selectedSeller.razorpayOnboardingError ? (
+                  <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-300">
+                    <p className="font-semibold">Last onboarding error</p>
+                    <p className="mt-1">{selectedSeller.razorpayOnboardingError}</p>
+                  </div>
+                ) : null}
+              </SectionCard>
+
+              <SectionCard
                 title="KYC documents"
                 icon={
                   <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-amber-50 text-amber-600 text-sm dark:bg-amber-950/50">
@@ -742,6 +1259,11 @@ export function AdminPage() {
                   Verify identity and address proofs before approving the store.
                 </p>
                 <div className="grid gap-4 sm:grid-cols-2">
+                  <DocumentPreview
+                    label="PAN document"
+                    hint="PAN card document when provided"
+                    url={selectedSeller.panDocumentUrl}
+                  />
                   <DocumentPreview
                     label="ID proof"
                     hint="Aadhaar, PAN, Passport, Voter ID, Driving Licence"
@@ -775,31 +1297,15 @@ export function AdminPage() {
               </div>
             </div>
 
-            <div className="shrink-0 border-t border-slate-200 bg-slate-50/80 px-4 py-3 dark:border-slate-800 dark:bg-slate-900/80 sm:px-6">
-              <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
-                <Button
-                  variant="success"
-                  onClick={() => void updateApproval(selectedSeller._id, "approved", true)}
-                  className="w-full sm:w-auto"
-                >
-                  <AppIcon name="check" className="text-[14px]" />
-                  Approve
-                </Button>
-                <Button
-                  variant="danger"
-                  onClick={() => void updateApproval(selectedSeller._id, "rejected", true)}
-                  className="w-full sm:w-auto"
-                >
-                  Reject
-                </Button>
-                <Button
-                  variant="secondary"
-                  onClick={() => void updateApproval(selectedSeller._id, "pending", true)}
-                  className="w-full sm:w-auto"
-                >
-                  Move to pending
-                </Button>
-              </div>
+            <div className="hidden shrink-0 border-t border-slate-200 bg-gradient-to-b from-slate-50 to-white px-6 py-4 dark:border-slate-800 dark:from-slate-900 dark:to-slate-950 sm:block">
+              <SellerReviewActionHandlers
+                seller={selectedSeller}
+                actionLoading={sellerActionLoading}
+                confirmSellerAction={confirmSellerAction}
+                updateKycStatus={updateKycStatus}
+                updateApproval={updateApproval}
+                retryLinkedAccount={retryLinkedAccount}
+              />
             </div>
           </div>
         </div>

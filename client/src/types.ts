@@ -1,4 +1,13 @@
 export type OrderStatus = "pending" | "paid" | "delivered" | "cancelled";
+export type LinkedAccountOnboardingStatus =
+  | "not_started"
+  | "kyc_incomplete"
+  | "pending_approval"
+  | "linked_account_pending"
+  | "linked_account_created"
+  | "linked_account_failed"
+  | "payout_enabled";
+export type TransferStatus = "untransferred" | "pending" | "processed" | "failed" | "reversed";
 export type PaymentMode = "prepaid_only" | "cod_only" | "both";
 export type PaymentMethod = "prepaid" | "cod";
 
@@ -55,7 +64,7 @@ export interface Seller {
   privacyPolicy: string;
   returnRefundPolicy: string;
   termsAndConditions: string;
-  approvalStatus: "draft" | "pending" | "approved" | "rejected";
+  approvalStatus: "draft" | "pending" | "approved" | "rejected" | "suspended";
   storePublished?: boolean;
   publishRequestedAt?: string | null;
   approvedAt?: string | null;
@@ -64,6 +73,32 @@ export interface Seller {
   createdAt?: string;
   idProofUrl?: string;
   addressProofUrl?: string;
+  pan?: string;
+  panHolderName?: string;
+  panDocumentUrl?: string;
+  panVerificationStatus?: "unsubmitted" | "pending" | "verified" | "rejected";
+  kycStatus?: "incomplete" | "pending" | "verified" | "rejected";
+  onboardingProgress?: "otp_verified" | "profile_submitted" | "kyc_pending" | "kyc_verified" | "approved";
+  payoutStatus?: "blocked" | "enabled" | "suspended";
+  businessType?: string;
+  razorpayAccountId?: string;
+  razorpayReferenceId?: string;
+  razorpayStakeholderId?: string;
+  razorpayProductId?: string;
+  razorpayLinkedAccountCreatedAt?: string | null;
+  razorpayOnboardingError?: string;
+  linkedAccountOnboardingStatus?: LinkedAccountOnboardingStatus;
+  razorpayAccountStatus?: string;
+  kycDetailsEncrypted?: {
+    pan?: string;
+    gst?: string;
+    bankAccountName?: string;
+    bankAccountNumber?: string;
+    bankName?: string;
+    bankIfsc?: string;
+    businessType?: string;
+    businessCategory?: string;
+  };
 }
 
 export interface Product {
@@ -110,6 +145,11 @@ export interface Order {
   customerName: string;
   customerPhone: string;
   deliveryAddress: string;
+  billingAddress?: string;
+  shippingAddress?: string;
+  shippingSameAsBilling?: boolean;
+  shippingCustomerName?: string;
+  shippingCustomerPhone?: string;
   note: string;
   amount: number;
   quantity: number;
@@ -118,5 +158,8 @@ export interface Order {
   paymentMethod: PaymentMethod;
   paymentStatus: OrderStatus;
   paymentScreenshotUrl: string;
+  transferId?: string;
+  transferStatus?: TransferStatus;
+  commissionAmountPaise?: number;
   createdAt: string;
 }

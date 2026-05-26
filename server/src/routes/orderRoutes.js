@@ -1,4 +1,5 @@
 const express = require("express");
+const crypto = require("crypto");
 const Product = require("../models/Product");
 const Order = require("../models/Order");
 const Seller = require("../models/Seller");
@@ -139,22 +140,88 @@ function buildOrderResponse(order) {
   };
 }
 
+const razorpay = require("../utils/razorpay");
+const ParentOrder = require("../models/ParentOrder");
+
+function formatAddressParts(parts) {
+  if (!parts || typeof parts !== "object" || Array.isArray(parts)) return "";
+
+  return [
+    parts.line1,
+    parts.line2,
+    parts.landmark,
+    parts.city,
+    parts.state,
+    parts.country,
+    parts.pincode,
+  ]
+    .map((part) => String(part || "").trim())
+    .filter(Boolean)
+    .join(", ");
+}
+
+function resolveAddressString(address, addressParts) {
+  const formattedParts = formatAddressParts(addressParts);
+  const nextAddress = String(address || "").trim();
+
+  if (!nextAddress) return formattedParts;
+
+  const pincode = String(addressParts?.pincode || "").replace(/\D/g, "");
+  if (pincode && !new RegExp(`\\b${pincode}\\b`).test(nextAddress)) {
+    return formattedParts || nextAddress;
+  }
+
+  return nextAddress;
+}
+
+function normalizeOrderAddresses(body = {}) {
+  const deliveryAddress = resolveAddressString(body.deliveryAddress, body.deliveryAddressParts);
+  const billingAddress = resolveAddressString(body.billingAddress, body.billingAddressParts);
+  const shippingAddress = resolveAddressString(body.shippingAddress, body.shippingAddressParts);
+  const shippingCustomerName = String(body.shippingCustomerName || "").trim();
+  const shippingCustomerPhone = String(body.shippingCustomerPhone || "").trim();
+  const shippingSameAsBilling =
+    body.shippingSameAsBilling === false || body.shippingSameAsBilling === "false"
+      ? false
+      : true;
+
+  if (!billingAddress && !shippingAddress && deliveryAddress) {
+    return {
+      billingAddress: deliveryAddress,
+      shippingAddress: deliveryAddress,
+      deliveryAddress,
+      shippingSameAsBilling: true,
+      shippingCustomerName: "",
+      shippingCustomerPhone: "",
+    };
+  }
+
+  const resolvedBilling = billingAddress || deliveryAddress || "";
+  const resolvedShipping = shippingSameAsBilling
+    ? resolvedBilling
+    : shippingAddress || resolvedBilling;
+
+  return {
+    billingAddress: resolvedBilling,
+    shippingAddress: resolvedShipping,
+    deliveryAddress: resolvedShipping || resolvedBilling,
+    shippingSameAsBilling,
+    shippingCustomerName: shippingSameAsBilling ? "" : shippingCustomerName,
+    shippingCustomerPhone: shippingSameAsBilling ? "" : shippingCustomerPhone,
+  };
+}
+
 router.post("/", async (req, res) => {
   try {
     const {
       items,
-      productId,
-      variantId = "",
       customerName,
       customerPhone,
       note,
-      quantity = 1,
-      deliveryAddress = "",
-      deliveryCharge = 0,
-      selectedVariants = {},
-      paymentMethod = "prepaid",
-      paymentScreenshotUrl = "",
+      deliveryCharges = {}, // sellerId -> charge number
     } = req.body;
+
+    const addressFields = normalizeOrderAddresses(req.body);
 
     if (!customerName || !customerPhone) {
       return res.status(400).json({
@@ -162,17 +229,16 @@ router.post("/", async (req, res) => {
       });
     }
 
-    const requestedItems = Array.isArray(items) && items.length > 0
-      ? items
-      : [{ productId, variantId, quantity, selectedVariants }];
-
+    const requestedItems = Array.isArray(items) ? items : [];
     if (requestedItems.length === 0) {
       return res.status(400).json({ message: "At least one cart item is required" });
     }
 
     const normalizedOrderItems = [];
+    const sellerIdsSet = new Set();
     const productDocs = new Map();
 
+    // 1. Normalize items and verify products
     for (const requestedItem of requestedItems) {
       const requestedProductId = String(requestedItem?.productId || "").trim();
       if (!requestedProductId) {
@@ -180,12 +246,11 @@ router.post("/", async (req, res) => {
       }
 
       const parsedQuantity = Number(requestedItem?.quantity);
-      const safeQuantity =
-        Number.isInteger(parsedQuantity) && parsedQuantity > 0 ? parsedQuantity : 1;
+      const safeQuantity = Number.isInteger(parsedQuantity) && parsedQuantity > 0 ? parsedQuantity : 1;
 
       let product = productDocs.get(requestedProductId);
       if (!product) {
-        product = await Product.findById(requestedProductId).populate("seller", "_id");
+        product = await Product.findById(requestedProductId).populate("seller");
         if (!product || !product.isActive) {
           return res.status(404).json({ message: "One or more products are unavailable" });
         }
@@ -222,8 +287,11 @@ router.post("/", async (req, res) => {
       const unitPrice = matchedVariant ? matchedVariant.price : Number(product.price) || 0;
       const lineTotal = unitPrice * safeQuantity;
 
+      sellerIdsSet.add(product.seller._id.toString());
+
       normalizedOrderItems.push({
         sellerId: product.seller._id,
+        sellerDoc: product.seller,
         productId: product._id,
         productTitle: product.title,
         productCategory: product.category || "",
@@ -240,52 +308,201 @@ router.post("/", async (req, res) => {
       });
     }
 
-    const sellerIds = [...new Set(normalizedOrderItems.map((item) => String(item.sellerId)))];
-    if (sellerIds.length !== 1) {
-      return res.status(400).json({
-        message: "All cart items in one order must belong to the same seller",
-      });
-    }
-
-    const totalQuantity = normalizedOrderItems.reduce((sum, item) => sum + item.quantity, 0);
-    const amount = normalizedOrderItems.reduce((sum, item) => sum + item.lineTotal, 0);
-    const safeDeliveryCharge = Number(deliveryCharge) >= 0 ? Number(deliveryCharge) : 0;
-    const safePaymentMethod = paymentMethod === "cod" ? "cod" : "prepaid";
-    const firstItem = normalizedOrderItems[0];
-
-    const order = await Order.create({
-      seller: firstItem.sellerId,
-      product: firstItem.productId,
-      items: normalizedOrderItems.map((item) => ({
-        product: item.productId,
-        productTitle: item.productTitle,
-        productCategory: item.productCategory,
-        productImageUrl: item.productImageUrl,
-        variantId: item.variantId,
-        variantTitle: item.variantTitle,
-        selectedVariants: item.selectedVariants,
-        unitPrice: item.unitPrice,
-        quantity: item.quantity,
-        lineTotal: item.lineTotal,
-      })),
+    // 2. Create ParentOrder shell to derive ID
+    const parentOrder = new ParentOrder({
+      razorpayOrderId: "pending_creation_" + Math.random().toString(36).substring(2, 10),
+      razorpayPaymentId: "",
       customerName: String(customerName).trim(),
       customerPhone: String(customerPhone).trim(),
-      deliveryAddress: String(deliveryAddress).trim(),
+      deliveryAddress: addressFields.deliveryAddress,
+      billingAddress: addressFields.billingAddress,
+      shippingAddress: addressFields.shippingAddress,
+      shippingSameAsBilling: addressFields.shippingSameAsBilling,
+      shippingCustomerName: addressFields.shippingCustomerName,
+      shippingCustomerPhone: addressFields.shippingCustomerPhone,
       note: note ? String(note).trim() : "",
-      amount,
-      quantity: totalQuantity,
-      deliveryCharge: safeDeliveryCharge,
-      selectedVariants: firstItem.selectedVariants,
-      paymentMethod: safePaymentMethod,
-      paymentStatus: safePaymentMethod === "cod" ? "confirmed" : "pending",
-      paymentScreenshotUrl:
-        safePaymentMethod === "prepaid" ? String(paymentScreenshotUrl || "").trim() : "",
+      totalAmountPaise: 0,
+      paymentStatus: "pending",
+      subOrders: [],
+    });
+    await parentOrder.save();
+
+    let grandTotalPaise = 0;
+    const createdSubOrders = [];
+
+    // 3. Group by Seller & calculate server-side splits in integer paise
+    const itemsBySeller = new Map();
+    for (const item of normalizedOrderItems) {
+      const sellerIdStr = item.sellerId.toString();
+      if (!itemsBySeller.has(sellerIdStr)) {
+        itemsBySeller.set(sellerIdStr, {
+          sellerDoc: item.sellerDoc,
+          lines: [],
+        });
+      }
+      itemsBySeller.get(sellerIdStr).lines.push(item);
+    }
+
+    for (const [sellerIdStr, data] of itemsBySeller.entries()) {
+      const seller = data.sellerDoc;
+      const lines = data.lines;
+
+      // Extract delivery charge for this seller (with safe fallback)
+      const inputDeliveryCharge = Number(deliveryCharges[sellerIdStr]) || 0;
+      const deliveryChargePaise = Math.round(inputDeliveryCharge * 100);
+
+      let itemRevenuePaise = 0;
+      for (const line of lines) {
+        const lineTotalPaise = Math.round(line.unitPrice * 100) * line.quantity;
+        itemRevenuePaise += lineTotalPaise;
+      }
+
+      // Direct settlement: vendor receives full sub-order total (items + delivery).
+      // commissionAmountPaise retained on schema for historical orders only; always 0 for new orders.
+      const commissionPaise = 0;
+
+      const totalSubOrderPaise = itemRevenuePaise + deliveryChargePaise;
+      grandTotalPaise += totalSubOrderPaise;
+
+      // Create Sub-Order
+      const subOrder = await Order.create({
+        seller: seller._id,
+        parentOrder: parentOrder._id,
+        razorpayOrderId: "", // will update post Razorpay Order creation
+        items: lines.map((line) => ({
+          product: line.productId,
+          productTitle: line.productTitle,
+          productCategory: line.productCategory,
+          productImageUrl: line.productImageUrl,
+          variantId: line.variantId,
+          variantTitle: line.variantTitle,
+          selectedVariants: line.selectedVariants,
+          unitPrice: line.unitPrice,
+          quantity: line.quantity,
+          lineTotal: line.lineTotal,
+        })),
+        customerName: parentOrder.customerName,
+        customerPhone: parentOrder.customerPhone,
+        deliveryAddress: parentOrder.deliveryAddress,
+        billingAddress: parentOrder.billingAddress,
+        shippingAddress: parentOrder.shippingAddress,
+        shippingSameAsBilling: parentOrder.shippingSameAsBilling,
+        shippingCustomerName: parentOrder.shippingCustomerName,
+        shippingCustomerPhone: parentOrder.shippingCustomerPhone,
+        note: parentOrder.note,
+        amount: itemRevenuePaise / 100, // keep decimal representation for existing UI compatibility
+        quantity: lines.reduce((sum, l) => sum + l.quantity, 0),
+        deliveryCharge: inputDeliveryCharge,
+        selectedVariants: lines[0].selectedVariants,
+        paymentMethod: "prepaid",
+        paymentStatus: "pending",
+        commissionAmountPaise: commissionPaise,
+        transferStatus: "untransferred",
+      });
+
+      createdSubOrders.push(subOrder);
+    }
+
+    // 4. Create Razorpay unified Order
+    const rpOrder = await razorpay.orders.create({
+      amount: grandTotalPaise,
+      currency: "INR",
+      receipt: parentOrder._id.toString(),
     });
 
-    return res.status(201).json({ order });
+    // 5. Update ParentOrder and Sub-Orders with Razorpay reference IDs
+    parentOrder.razorpayOrderId = rpOrder.id;
+    parentOrder.totalAmountPaise = grandTotalPaise;
+    parentOrder.subOrders = createdSubOrders.map((o) => o._id);
+    await parentOrder.save();
+
+    for (const subOrder of createdSubOrders) {
+      subOrder.razorpayOrderId = rpOrder.id;
+      await subOrder.save();
+    }
+
+    return res.status(201).json({
+      parentOrderId: parentOrder._id,
+      razorpayOrderId: rpOrder.id,
+      amount: grandTotalPaise / 100,
+      currency: "INR",
+      keyId: process.env.RAZORPAY_KEY_ID || "rzp_test_mock_id",
+      subOrders: createdSubOrders,
+    });
+
   } catch (error) {
-    console.error(error);
-    return res.status(500).json({ message: "Unable to create order" });
+    console.error("[Order Creation Error]:", error);
+    return res.status(500).json({ message: "Unable to create marketplace order", error: error.message });
+  }
+});
+
+// Verify payment after Razorpay checkout succeeds on the client.
+// This runs synchronously so orders are marked "paid" immediately,
+// rather than waiting for the asynchronous webhook.
+router.post("/verify-payment", async (req, res) => {
+  try {
+    const {
+      razorpay_order_id,
+      razorpay_payment_id,
+      razorpay_signature,
+      orderIds,
+    } = req.body;
+
+    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+      return res.status(400).json({ message: "Missing payment verification fields" });
+    }
+
+    // Signature verification (skip when running mock / env not fully configured)
+    const isMockMode =
+      !process.env.RAZORPAY_KEY_ID ||
+      !process.env.RAZORPAY_KEY_SECRET ||
+      process.env.RAZORPAY_KEY_ID === "rzp_test_mock_id";
+
+    if (!isMockMode) {
+      const keySecret = process.env.RAZORPAY_KEY_SECRET;
+      const expectedSignature = crypto
+        .createHmac("sha256", keySecret)
+        .update(`${razorpay_order_id}|${razorpay_payment_id}`)
+        .digest("hex");
+
+      if (expectedSignature !== razorpay_signature) {
+        return res.status(400).json({ message: "Payment signature verification failed" });
+      }
+    }
+
+    // Update ParentOrder
+    const parentOrder = await ParentOrder.findOne({
+      razorpayOrderId: razorpay_order_id,
+    }).populate("subOrders");
+
+    if (!parentOrder) {
+      return res.status(404).json({ message: "Order not found for this payment" });
+    }
+
+    if (parentOrder.paymentStatus !== "paid") {
+      parentOrder.paymentStatus = "paid";
+      parentOrder.razorpayPaymentId = razorpay_payment_id;
+      await parentOrder.save();
+    }
+
+    // Update all sub-orders
+    const updatedOrders = [];
+    for (const subOrder of parentOrder.subOrders) {
+      if (subOrder.paymentStatus !== "paid" && subOrder.paymentStatus !== "delivered") {
+        subOrder.paymentStatus = "paid";
+        await subOrder.save();
+      }
+      updatedOrders.push({ _id: subOrder._id, paymentStatus: subOrder.paymentStatus });
+    }
+
+    return res.json({
+      verified: true,
+      message: "Payment verified and orders updated",
+      orders: updatedOrders,
+    });
+  } catch (error) {
+    console.error("[Payment Verification Error]:", error);
+    return res.status(500).json({ message: "Payment verification failed", error: error.message });
   }
 });
 

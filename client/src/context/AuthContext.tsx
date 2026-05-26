@@ -8,6 +8,7 @@ import {
 } from "react";
 import { api, setApiToken } from "../api/client";
 import type { Seller } from "../types";
+import type { AddressParts } from "../utils/contactFields";
 
 interface SendOtpInput {
   phone?: string;
@@ -27,12 +28,16 @@ interface RegisterInput {
   termsAccepted: boolean;
   businessEmail?: string;
   businessAddress?: string;
+  businessAddressParts?: AddressParts;
   businessGST?: string;
   upiId?: string;
   bankAccountName?: string;
   bankName?: string;
   bankAccountNumber?: string;
   bankIfsc?: string;
+  pan: string;
+  panHolderName: string;
+  panDocumentUrl?: string;
   businessLogo?: string;
   whatsappNumber?: string;
   callNumber?: string;
@@ -48,6 +53,7 @@ interface UpdateProfileInput {
   businessCategory?: string;
   businessEmail?: string;
   businessAddress?: string;
+  businessAddressParts?: AddressParts;
   businessGST?: string;
   upiId?: string;
   bankAccountName?: string;
@@ -64,6 +70,10 @@ interface UpdateProfileInput {
   privacyPolicy?: string;
   returnRefundPolicy?: string;
   termsAndConditions?: string;
+  pan?: string;
+  panHolderName?: string;
+  panDocumentUrl?: string;
+  businessType?: string;
 }
 
 interface AuthContextShape {

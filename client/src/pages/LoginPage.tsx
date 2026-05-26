@@ -16,6 +16,7 @@ import {
   EMPTY_ADDRESS,
   formatAddress,
   formatPhone,
+  getAddressValidationError,
   type AddressParts,
   type PhoneParts,
 } from "../utils/contactFields";
@@ -26,6 +27,11 @@ type Step = "contact" | "otp" | "profile";
 type RegisterSection = "contact" | "business" | "bank" | "address" | "kyc" | "policies";
 
 const IMGBB_KEY = import.meta.env.VITE_IMGBB_API_KEY as string | undefined;
+const PAN_PATTERN = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
+
+function normalizePan(value: string) {
+  return value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 10);
+}
 
 function ImageUploadField({
   value,
@@ -117,6 +123,9 @@ export function LoginPage() {
   const [businessCategoryOther, setBusinessCategoryOther] = useState("");
   const [businessAddress, setBusinessAddress] = useState<AddressParts>(EMPTY_ADDRESS);
   const [businessGST, setBusinessGST] = useState("");
+  const [pan, setPan] = useState("");
+  const [panHolderName, setPanHolderName] = useState("");
+  const [panDocumentUrl, setPanDocumentUrl] = useState("");
   const [upiId, setUpiId] = useState("");
   const [bankAccountName, setBankAccountName] = useState("");
   const [bankName, setBankName] = useState("");
@@ -167,13 +176,32 @@ const emailError =
       : "";
   const otpError =
     otp.length > 0 && otp.length < 6 ? "OTP must be 6 digits." : "";
+  const normalizedPan = normalizePan(pan);
+  const panError =
+    pan.trim().length === 0
+      ? "PAN number is required."
+      : !PAN_PATTERN.test(normalizedPan)
+        ? "Enter PAN in ABCDE1234F format."
+        : "";
+  const panHolderNameError =
+    panHolderName.trim().length === 0 ? "PAN holder legal name is required." : "";
 
   const canSendOtp =
     phoneDigits.length === 10 &&
     !emailError &&
-    (mode !== "register" || (businessName.trim().length >= 3 && allPoliciesAccepted));
+    (mode !== "register" ||
+      (businessName.trim().length >= 3 &&
+        !panError &&
+        !panHolderNameError &&
+        allPoliciesAccepted));
   const canVerifyOtp = otp.length === 6;
-  const canCompleteProfile = businessName.trim().length >= 3 && allPoliciesAccepted;
+  const canCompleteProfile =
+    businessName.trim().length >= 3 &&
+    !panError &&
+    !panHolderNameError &&
+    !getAddressValidationError(businessAddress) &&
+    panDocumentUrl.trim().length > 0 &&
+    allPoliciesAccepted;
   const registerSections: { key: RegisterSection; label: string }[] = [
     { key: "contact", label: "Contact" },
     { key: "business", label: "Business" },
@@ -214,6 +242,9 @@ const emailError =
     setBankName("");
     setBankAccountNumber("");
     setBankIfsc("");
+    setPan("");
+    setPanHolderName("");
+    setPanDocumentUrl("");
   }
 
   function moveToRegisterWithContext(message: string) {
@@ -237,7 +268,14 @@ const emailError =
       if (businessName.trim().length < 3) return "Business name should be at least 3 characters.";
       if (!selectedBusinessCategory) return "Please select business category.";
     }
+    if (section === "address") {
+      const addressError = getAddressValidationError(businessAddress);
+      if (addressError) return addressError;
+    }
     if (section === "kyc") {
+      if (panError) return panError;
+      if (panHolderNameError) return panHolderNameError;
+      if (!panDocumentUrl.trim()) return "Please upload your PAN card document before continuing.";
       if (!idProofUrl.trim()) return "Please add ID proof before continuing.";
       if (!addressProofUrl.trim()) return "Please add address proof before continuing.";
     }
@@ -290,6 +328,21 @@ const emailError =
       setError("Please accept all vendor policy checklist items to continue.");
       return;
     }
+    if (mode === "register" && (panError || panHolderNameError)) {
+      setError(panError || panHolderNameError);
+      return;
+    }
+    if (mode === "register") {
+      const addressError = getAddressValidationError(businessAddress);
+      if (addressError) {
+        setError(addressError);
+        return;
+      }
+      if (!panDocumentUrl.trim()) {
+        setError("Please upload your PAN card document before continuing.");
+        return;
+      }
+    }
     setSubmitting(true);
     try {
       const result = await sendOtp({
@@ -332,12 +385,16 @@ const emailError =
           termsAccepted: allPoliciesAccepted,
           businessEmail: email.trim(),
           businessAddress: formatAddress(businessAddress) || undefined,
+          businessAddressParts: businessAddress,
           businessGST: businessGST.trim() || undefined,
           upiId: upiId.trim() || undefined,
           bankAccountName: bankAccountName.trim() || undefined,
           bankName: bankName.trim() || undefined,
           bankAccountNumber: bankAccountNumber.trim() || undefined,
           bankIfsc: bankIfsc.trim().toUpperCase() || undefined,
+          pan: normalizedPan,
+          panHolderName: panHolderName.trim(),
+          panDocumentUrl: panDocumentUrl.trim() || undefined,
           businessLogo: businessLogo.trim() || undefined,
           idProofUrl: idProofUrl.trim() || undefined,
           addressProofUrl: addressProofUrl.trim() || undefined,
@@ -350,8 +407,7 @@ const emailError =
         if (isProfileComplete) {
           navigate("/dashboard", { replace: true });
         } else {
-          setStep("profile");
-          setInfo("Welcome! Please complete your business profile.");
+          moveToRegisterWithContext("Please complete registration to continue.");
         }
       }
     } catch (err) {
@@ -368,6 +424,10 @@ const emailError =
     if (!businessName.trim()) { setError("Business name is required."); return; }
     if (businessName.trim().length < 3) { setError("Business name should be at least 3 characters."); return; }
     if (!selectedBusinessCategory) { setError("Please select business category."); return; }
+    if (panError || panHolderNameError) { setError(panError || panHolderNameError); return; }
+    const addressError = getAddressValidationError(businessAddress);
+    if (addressError) { setError(addressError); return; }
+    if (!panDocumentUrl.trim()) { setError("Please upload your PAN card document before continuing."); return; }
     if (!allPoliciesAccepted) { setError("Please accept all vendor policy checklist items to continue."); return; }
     setSubmitting(true);
     try {
@@ -377,12 +437,16 @@ const emailError =
         termsAccepted: allPoliciesAccepted,
         businessEmail: email.trim(),
         businessAddress: formatAddress(businessAddress) || undefined,
+        businessAddressParts: businessAddress,
         businessGST: businessGST.trim() || undefined,
         upiId: upiId.trim() || undefined,
         bankAccountName: bankAccountName.trim() || undefined,
         bankName: bankName.trim() || undefined,
         bankAccountNumber: bankAccountNumber.trim() || undefined,
         bankIfsc: bankIfsc.trim().toUpperCase() || undefined,
+        pan: normalizedPan,
+        panHolderName: panHolderName.trim(),
+        panDocumentUrl: panDocumentUrl.trim() || undefined,
         businessLogo: businessLogo.trim() || undefined,
         idProofUrl: idProofUrl.trim() || undefined,
         addressProofUrl: addressProofUrl.trim() || undefined,
@@ -548,6 +612,7 @@ const emailError =
 
             <form
               className={`mt-5 ${mode === "register" ? "grid gap-3 sm:grid-cols-2" : "space-y-4"}`}
+              noValidate={mode === "register"}
               onSubmit={mode === "register" ? handleRegisterSectionSubmit : handleSendOtp}
             >
               {/* Phone */}
@@ -560,7 +625,6 @@ const emailError =
                     readOnly
                     disabled
                     placeholder="+91"
-                    required={mode === "login" || registerSection === "contact"}
                   />
                   <input
                     className="min-w-0 rounded-xl border border-slate-200 bg-white px-4 py-3 text-base text-slate-900 outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50 sm:text-sm"
@@ -706,6 +770,7 @@ const emailError =
                       value={businessAddress}
                       onChange={setBusinessAddress}
                       inputClassName="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50"
+                      required={registerSection === "address"}
                     />
                   </div>
 
@@ -738,9 +803,51 @@ const emailError =
                   {/* KYC Documents */}
                   <div className={`sm:col-span-2 ${registerSection === "kyc" ? "flex" : "hidden"} items-center gap-3 pt-1`}>
                     <div className="h-px flex-1 bg-slate-200" />
-                    <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">KYC Documents</span>
+                    <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">PAN & KYC Documents</span>
                     <div className="h-px flex-1 bg-slate-200" />
                   </div>
+                  <label className={`space-y-1 ${registerSection === "kyc" ? "block" : "hidden"}`}>
+                    <span className="text-sm font-semibold text-slate-700">PAN number <span className="text-rose-500">*</span></span>
+                    <input
+                      className={`w-full rounded-xl border px-3 py-2.5 text-sm uppercase outline-none transition focus:ring-2 ${
+                        pan && panError
+                          ? "border-rose-300 focus:border-rose-400 focus:ring-rose-50"
+                          : "border-slate-200 focus:border-teal-400 focus:ring-teal-50"
+                      }`}
+                      placeholder="ABCDE1234F"
+                      maxLength={10}
+                      value={pan}
+                      onChange={(e) => setPan(normalizePan(e.target.value))}
+                      required={registerSection === "kyc"}
+                    />
+                    {(panError && pan) || (!pan && registerSection === "kyc") ? (
+                      <span className="text-xs text-rose-600">{panError}</span>
+                    ) : (
+                      <span className="text-xs text-slate-400">Required for Razorpay linked account and settlements.</span>
+                    )}
+                  </label>
+                  <label className={`space-y-1 ${registerSection === "kyc" ? "block" : "hidden"}`}>
+                    <span className="text-sm font-semibold text-slate-700">PAN holder legal name <span className="text-rose-500">*</span></span>
+                    <input
+                      className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50"
+                      placeholder="Name exactly as on PAN"
+                      value={panHolderName}
+                      onChange={(e) => setPanHolderName(e.target.value)}
+                      required={registerSection === "kyc"}
+                    />
+                    {panHolderNameError && panHolderName.length === 0 ? (
+                      <span className="text-xs text-rose-600">{panHolderNameError}</span>
+                    ) : null}
+                  </label>
+                  <label className={`space-y-1 sm:col-span-2 ${registerSection === "kyc" ? "block" : "hidden"}`}>
+                    <span className="text-sm font-semibold text-slate-700">PAN document <span className="text-rose-500">*</span></span>
+                    <p className="text-xs text-slate-400">Upload a clear photo or scan of your PAN card.</p>
+                    <ImageUploadField
+                      value={panDocumentUrl}
+                      onChange={setPanDocumentUrl}
+                      placeholder="Paste image URL of your PAN card..."
+                    />
+                  </label>
                   <label className={`space-y-1 sm:col-span-2 ${registerSection === "kyc" ? "block" : "hidden"}`}>
                     <span className="text-sm font-semibold text-slate-700">ID Proof <span className="text-rose-500">*</span></span>
                     <p className="text-xs text-slate-400">Aadhaar, PAN, Passport, Voter ID, Driving Licence</p>
@@ -984,6 +1091,7 @@ const emailError =
                 value={businessAddress}
                 onChange={setBusinessAddress}
                 inputClassName="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50"
+                required
               />
               {/* GST */}
               <label className="block space-y-1">
@@ -993,6 +1101,40 @@ const emailError =
                   placeholder="22AAAAA0000A1Z5"
                   value={businessGST}
                   onChange={(e) => setBusinessGST(e.target.value)}
+                />
+              </label>
+              <label className="block space-y-1">
+                <span className="text-sm font-semibold text-slate-700">PAN number *</span>
+                <input
+                  className={`w-full rounded-xl border px-3 py-2.5 text-sm uppercase outline-none transition focus:ring-2 ${
+                    pan && panError
+                      ? "border-rose-300 focus:border-rose-400 focus:ring-rose-50"
+                      : "border-slate-200 focus:border-teal-400 focus:ring-teal-50"
+                  }`}
+                  placeholder="ABCDE1234F"
+                  maxLength={10}
+                  value={pan}
+                  onChange={(e) => setPan(normalizePan(e.target.value))}
+                  required
+                />
+                {panError && pan ? <span className="text-xs text-rose-600">{panError}</span> : null}
+              </label>
+              <label className="block space-y-1">
+                <span className="text-sm font-semibold text-slate-700">PAN holder legal name *</span>
+                <input
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-50"
+                  placeholder="Name exactly as on PAN"
+                  value={panHolderName}
+                  onChange={(e) => setPanHolderName(e.target.value)}
+                  required
+                />
+              </label>
+              <label className="block space-y-1 sm:col-span-2">
+                <span className="text-sm font-semibold text-slate-700">PAN document *</span>
+                <ImageUploadField
+                  value={panDocumentUrl}
+                  onChange={setPanDocumentUrl}
+                  placeholder="Paste image URL of your PAN card..."
                 />
               </label>
               {/* Business Logo */}

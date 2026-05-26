@@ -8,6 +8,16 @@ const Order = require("../models/Order");
 const { generateOtp, hashOtp, verifyOtp: verifyHashedOtp } = require("../utils/otp");
 const { getPolicyContent } = require("../utils/policyDefaults");
 const { sendOtpEmail } = require("../utils/mailer");
+const {
+  applyKycStateFromPan,
+  collectKycIssues,
+  getPanCompliance,
+  isValidPan,
+  maskPan,
+  normalizePan,
+  panHash,
+  recordComplianceEvent,
+} = require("../utils/kycCompliance");
 
 const router = express.Router();
 
@@ -21,8 +31,13 @@ function withPolicyDefaults(sellerDoc) {
   if (!sellerDoc) return sellerDoc;
 
   const seller = sellerDoc.toObject ? sellerDoc.toObject() : sellerDoc;
+  const pan = getPanCompliance(seller);
+  const businessType = seller.kycDetailsEncrypted?.businessType || seller.businessType || "individual";
+  delete seller.kycDetailsEncrypted;
   return {
     ...seller,
+    pan: pan.panMasked || seller.pan || "",
+    businessType,
     ...getPolicyContent(seller),
   };
 }
@@ -47,7 +62,15 @@ async function createUniqueSellerSlug(businessName, ignoreSellerId = null) {
 }
 
 function normalizePhone(phone) {
-  return String(phone || "").trim();
+  const raw = String(phone || "").trim();
+  const digits = raw.replace(/\D/g, "");
+
+  if (!digits) return raw;
+  if (digits.length > 10 && digits.startsWith("91")) {
+    return digits.slice(-10);
+  }
+
+  return digits;
 }
 
 function normalizeEmail(email) {
@@ -56,6 +79,90 @@ function normalizeEmail(email) {
 
 function isValidEmail(email) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function formatAddressParts(parts) {
+  if (!parts || typeof parts !== "object" || Array.isArray(parts)) return "";
+
+  return [
+    parts.line1,
+    parts.line2,
+    parts.landmark,
+    parts.city,
+    parts.state,
+    parts.country,
+    parts.pincode,
+  ]
+    .map((part) => String(part || "").trim())
+    .filter(Boolean)
+    .join(", ");
+}
+
+function resolveAddressString(address, addressParts) {
+  const formattedParts = formatAddressParts(addressParts);
+  const nextAddress = String(address || "").trim();
+
+  if (!nextAddress) return formattedParts;
+
+  const pincode = String(addressParts?.pincode || "").replace(/\D/g, "");
+  if (pincode && !new RegExp(`\\b${pincode}\\b`).test(nextAddress)) {
+    return formattedParts || nextAddress;
+  }
+
+  return nextAddress;
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function getPhoneLookupValues(normalizedPhone) {
+  return Array.from(
+    new Set([
+      normalizedPhone,
+      `+91 ${normalizedPhone}`,
+      `+91${normalizedPhone}`,
+      `91${normalizedPhone}`,
+    ].filter(Boolean))
+  );
+}
+
+function phoneMatches(value, normalizedPhone) {
+  return normalizePhone(value) === normalizedPhone;
+}
+
+function hasCompletedSellerProfile(seller, normalizedPhone) {
+  const businessName = String(seller?.businessName || "").trim();
+  if (!businessName) return false;
+
+  return normalizePhone(businessName) !== normalizedPhone;
+}
+
+async function findSellerByPhone(normalizedPhone) {
+  return Seller.findOne({ phone: { $in: getPhoneLookupValues(normalizedPhone) } });
+}
+
+async function findSellerByEmail(normalizedEmail) {
+  return (
+    (await Seller.findOne({ businessEmail: normalizedEmail })) ||
+    Seller.findOne({ businessEmail: new RegExp(`^${escapeRegExp(normalizedEmail)}$`, "i") })
+  );
+}
+
+async function findSellerByPhoneAndEmail(normalizedPhone, normalizedEmail) {
+  const seller = await Seller.findOne({
+    phone: { $in: getPhoneLookupValues(normalizedPhone) },
+    businessEmail: new RegExp(`^${escapeRegExp(normalizedEmail)}$`, "i"),
+  });
+
+  if (seller) return seller;
+
+  const sellerWithEmail = await findSellerByEmail(normalizedEmail);
+  if (sellerWithEmail && phoneMatches(sellerWithEmail.phone, normalizedPhone)) {
+    return sellerWithEmail;
+  }
+
+  return null;
 }
 
 async function storeAndSendOtp({ seller, email, purpose, targetId = null, intent = "" }) {
@@ -94,10 +201,7 @@ router.post("/send-otp", async (req, res) => {
     const normalizedIntent = String(intent || "").trim();
 
     if (normalizedIntent === "login") {
-      seller = await Seller.findOne({
-        phone: normalizedPhone,
-        businessEmail: normalizedEmail,
-      });
+      seller = await findSellerByPhoneAndEmail(normalizedPhone, normalizedEmail);
 
       if (!seller) {
         return res.status(404).json({
@@ -106,10 +210,10 @@ router.post("/send-otp", async (req, res) => {
         });
       }
     } else {
-      const existingByPhone = await Seller.findOne({ phone: normalizedPhone });
-      const existingByEmail = await Seller.findOne({ businessEmail: normalizedEmail });
+      const existingByPhone = await findSellerByPhone(normalizedPhone);
+      const existingByEmail = await findSellerByEmail(normalizedEmail);
 
-      if (existingByEmail && existingByEmail.phone !== normalizedPhone) {
+      if (existingByEmail && !phoneMatches(existingByEmail.phone, normalizedPhone)) {
         return res.status(409).json({
           message: "This email address is already linked to another account.",
         });
@@ -126,7 +230,7 @@ router.post("/send-otp", async (req, res) => {
         });
       } else if (!seller.businessEmail) {
         seller.businessEmail = normalizedEmail;
-      } else if (seller.businessEmail !== normalizedEmail) {
+      } else if (normalizeEmail(seller.businessEmail) !== normalizedEmail) {
         return res.status(409).json({
           message: "This phone number is already linked to a different email address.",
         });
@@ -170,10 +274,7 @@ router.post("/verify-otp", async (req, res) => {
       return res.status(400).json({ message: "Email address is required" });
     }
 
-    const seller = await Seller.findOne({
-      phone: normalizedPhone,
-      businessEmail: normalizedEmail,
-    });
+    const seller = await findSellerByPhoneAndEmail(normalizedPhone, normalizedEmail);
 
     if (!seller || !seller.otp || !seller.otpExpiry || seller.otpPurpose !== "auth") {
       return res
@@ -197,10 +298,7 @@ router.post("/verify-otp", async (req, res) => {
     seller.otpTargetId = null;
     await seller.save();
 
-    const isProfileComplete = Boolean(
-      seller.businessName && seller.upiId && seller.slug &&
-      seller.businessName !== seller.phone // not a placeholder
-    );
+    const isProfileComplete = hasCompletedSellerProfile(seller, normalizedPhone);
 
     const token = issueToken(seller._id.toString());
     return res.json({ token, seller: withPolicyDefaults(seller), isProfileComplete });
@@ -209,6 +307,29 @@ router.post("/verify-otp", async (req, res) => {
     return res.status(500).json({ message: "Could not verify OTP" });
   }
 });
+
+const { encrypt, decrypt } = require("../utils/encryption");
+const TransactionLedger = require("../models/TransactionLedger");
+
+function maskText(text, visibleCount = 4) {
+  if (!text) return "";
+  const clean = String(text).trim();
+  if (clean.length <= visibleCount) return "*".repeat(clean.length);
+  return "*".repeat(clean.length - visibleCount) + clean.slice(-visibleCount);
+}
+
+async function assertPanIsUnique(normalizedPan, sellerId) {
+  const duplicate = await Seller.findOne({
+    panHash: panHash(normalizedPan),
+    _id: { $ne: sellerId },
+  }).select("_id");
+
+  if (duplicate) {
+    const error = new Error("This PAN is already linked to another seller account.");
+    error.statusCode = 409;
+    throw error;
+  }
+}
 
 // ─── POST /auth/register ──────────────────────────────────────────────────
 // Called after OTP verification for new sellers to complete their profile
@@ -219,12 +340,17 @@ router.post("/register", auth, async (req, res) => {
       businessCategory,
       businessEmail,
       businessAddress,
+      businessAddressParts,
       businessGST,
       upiId,
       bankAccountName,
       bankName,
       bankAccountNumber,
       bankIfsc,
+      pan,
+      panHolderName,
+      panDocumentUrl,
+      businessType = "individual",
       businessLogo,
       whatsappNumber,
       callNumber,
@@ -244,10 +370,33 @@ router.post("/register", auth, async (req, res) => {
       return res.status(400).json({ message: "You must accept Terms & Conditions." });
     }
 
+    const normalizedPan = normalizePan(pan);
+    const normalizedPanHolderName = String(panHolderName || businessName || "").trim();
+    if (!normalizedPan) {
+      return res.status(400).json({ message: "PAN number is mandatory for vendor onboarding." });
+    }
+    if (!isValidPan(normalizedPan)) {
+      return res.status(400).json({ message: "Enter a valid PAN in ABCDE1234F format." });
+    }
+    if (!normalizedPanHolderName) {
+      return res.status(400).json({ message: "PAN holder legal name is required." });
+    }
+
+    const formattedAddress = resolveAddressString(businessAddress, businessAddressParts);
+    if (!formattedAddress) {
+      return res.status(400).json({ message: "Business address is required." });
+    }
+
+    const normalizedPanDocumentUrl = String(panDocumentUrl || "").trim();
+    if (!normalizedPanDocumentUrl) {
+      return res.status(400).json({ message: "PAN document upload is required." });
+    }
+
     const seller = await Seller.findById(req.sellerId);
     if (!seller) {
       return res.status(404).json({ message: "Seller not found" });
     }
+    await assertPanIsUnique(normalizedPan, seller._id);
 
     const nextBusinessEmail = normalizeEmail(businessEmail || seller.businessEmail);
     if (!nextBusinessEmail) {
@@ -273,12 +422,9 @@ router.post("/register", auth, async (req, res) => {
     );
 
     seller.businessEmail = nextBusinessEmail;
-    if (businessAddress) seller.businessAddress = String(businessAddress).trim();
-    if (businessGST) seller.businessGST = String(businessGST).trim();
+    seller.businessAddress = formattedAddress;
     if (upiId) seller.upiId = String(upiId).trim();
-    if (bankAccountName) seller.bankAccountName = String(bankAccountName).trim();
     if (bankName) seller.bankName = String(bankName).trim();
-    if (bankAccountNumber) seller.bankAccountNumber = String(bankAccountNumber).trim();
     if (bankIfsc) seller.bankIfsc = String(bankIfsc).trim().toUpperCase();
     if (businessLogo) seller.businessLogo = String(businessLogo).trim();
     if (whatsappNumber) seller.whatsappNumber = String(whatsappNumber).trim();
@@ -288,8 +434,44 @@ router.post("/register", auth, async (req, res) => {
     if (typeof privacyPolicy === "string") seller.privacyPolicy = privacyPolicy.trim();
     if (typeof returnRefundPolicy === "string") seller.returnRefundPolicy = returnRefundPolicy.trim();
     if (typeof termsAndConditions === "string") seller.termsAndConditions = termsAndConditions.trim();
+    
+    // Cryptographic Storage for sensitive details
+    if (!seller.kycDetailsEncrypted) {
+      seller.kycDetailsEncrypted = {};
+    }
+    
+    if (bankAccountName) {
+      seller.kycDetailsEncrypted.bankAccountName = encrypt(bankAccountName);
+      seller.bankAccountName = maskText(bankAccountName, 3);
+    }
+    if (bankAccountNumber) {
+      seller.kycDetailsEncrypted.bankAccountNumber = encrypt(bankAccountNumber);
+      seller.bankAccountNumber = maskText(bankAccountNumber, 4);
+    }
+    seller.kycDetailsEncrypted.pan = encrypt(normalizedPan);
+    seller.kycDetailsEncrypted.panHolderName = encrypt(normalizedPanHolderName);
+    seller.pan = maskPan(normalizedPan);
+    seller.panHash = panHash(normalizedPan);
+    seller.panHolderName = normalizedPanHolderName;
+    seller.panDocumentUrl = normalizedPanDocumentUrl;
+    if (businessGST) {
+      seller.kycDetailsEncrypted.gst = encrypt(businessGST);
+      seller.businessGST = maskText(businessGST, 4);
+    }
+    
+    seller.kycDetailsEncrypted.bankIfsc = seller.bankIfsc;
+    seller.kycDetailsEncrypted.bankName = seller.bankName;
+    seller.kycDetailsEncrypted.businessType = businessType;
+    seller.kycDetailsEncrypted.businessCategory = businessCategory || "";
+
     seller.approvalStatus = "draft";
     seller.storePublished = false;
+    seller.onboardingProgress = "profile_submitted";
+    applyKycStateFromPan(seller);
+    recordComplianceEvent(seller, "vendor_registration_pan_submitted", "seller", {
+      panVerificationStatus: seller.panVerificationStatus,
+      kycStatus: seller.kycStatus,
+    });
     seller.publishRequestedAt = null;
     seller.approvedAt = null;
     seller.approvedBy = "";
@@ -299,6 +481,12 @@ router.post("/register", auth, async (req, res) => {
     return res.json({ seller: withPolicyDefaults(seller) });
   } catch (error) {
     console.error(error);
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ message: error.message });
+    }
+    if (error.code === 11000 && error.keyPattern?.panHash) {
+      return res.status(409).json({ message: "This PAN is already linked to another seller account." });
+    }
     return res.status(500).json({ message: "Could not complete registration" });
   }
 });
@@ -334,12 +522,17 @@ router.put("/me", auth, async (req, res) => {
       businessCategory,
       businessEmail,
       businessAddress,
+      businessAddressParts,
       businessGST,
       upiId,
       bankAccountName,
       bankName,
       bankAccountNumber,
       bankIfsc,
+      pan,
+      panHolderName,
+      panDocumentUrl,
+      businessType,
       profileImageUrl,
       businessLogo,
       favicon,
@@ -357,7 +550,7 @@ router.put("/me", auth, async (req, res) => {
       return res.status(404).json({ message: "Seller not found" });
     }
 
-    const nextBusinessEmail = normalizeEmail(businessEmail);
+    const nextBusinessEmail = normalizeEmail(businessEmail || seller.businessEmail);
 
     if (businessName) seller.businessName = String(businessName).trim();
     if (businessCategory !== undefined) seller.businessCategory = String(businessCategory).trim();
@@ -377,12 +570,11 @@ router.put("/me", auth, async (req, res) => {
     }
 
     seller.businessEmail = nextBusinessEmail;
-    if (businessAddress !== undefined) seller.businessAddress = String(businessAddress).trim();
-    if (businessGST !== undefined) seller.businessGST = String(businessGST).trim();
+    if (businessAddress !== undefined || businessAddressParts !== undefined) {
+      seller.businessAddress = resolveAddressString(businessAddress, businessAddressParts);
+    }
     if (typeof upiId === "string") seller.upiId = upiId.trim();
-    if (typeof bankAccountName === "string") seller.bankAccountName = bankAccountName.trim();
     if (typeof bankName === "string") seller.bankName = bankName.trim();
-    if (typeof bankAccountNumber === "string") seller.bankAccountNumber = bankAccountNumber.trim();
     if (typeof bankIfsc === "string") seller.bankIfsc = bankIfsc.trim().toUpperCase();
     if (typeof profileImageUrl === "string") seller.profileImageUrl = profileImageUrl.trim();
     if (typeof businessLogo === "string") seller.businessLogo = businessLogo.trim();
@@ -395,6 +587,72 @@ router.put("/me", auth, async (req, res) => {
     if (typeof returnRefundPolicy === "string") seller.returnRefundPolicy = returnRefundPolicy.trim();
     if (typeof termsAndConditions === "string") seller.termsAndConditions = termsAndConditions.trim();
 
+    // Secure cryptographic updates for KYC & bank details
+    if (!seller.kycDetailsEncrypted) {
+      seller.kycDetailsEncrypted = {};
+    }
+
+    if (typeof bankAccountName === "string" && bankAccountName.trim()) {
+      if (!bankAccountName.includes("*")) { // Only encrypt if it's a new raw value
+        seller.kycDetailsEncrypted.bankAccountName = encrypt(bankAccountName);
+        seller.bankAccountName = maskText(bankAccountName, 3);
+      }
+    }
+    if (typeof bankAccountNumber === "string" && bankAccountNumber.trim()) {
+      if (!bankAccountNumber.includes("*")) { // Only encrypt if it's a new raw value
+        seller.kycDetailsEncrypted.bankAccountNumber = encrypt(bankAccountNumber);
+        seller.bankAccountNumber = maskText(bankAccountNumber, 4);
+      }
+    }
+    const existingPan = getPanCompliance(seller);
+    const nextRawPan = typeof pan === "string" && !pan.includes("*")
+      ? normalizePan(pan)
+      : existingPan.pan;
+    const nextPanHolderName = typeof panHolderName === "string"
+      ? panHolderName.trim()
+      : seller.panHolderName;
+
+    if (!nextRawPan) {
+      return res.status(400).json({ message: "PAN number is mandatory for vendor onboarding." });
+    }
+    if (!isValidPan(nextRawPan)) {
+      return res.status(400).json({ message: "Enter a valid PAN in ABCDE1234F format." });
+    }
+    if (!nextPanHolderName) {
+      return res.status(400).json({ message: "PAN holder legal name is required." });
+    }
+
+    if (nextRawPan !== existingPan.pan) {
+      await assertPanIsUnique(nextRawPan, seller._id);
+      seller.kycDetailsEncrypted.pan = encrypt(nextRawPan);
+      seller.pan = maskPan(nextRawPan);
+      seller.panHash = panHash(nextRawPan);
+      seller.panVerificationStatus = "pending";
+      seller.kycStatus = "pending";
+      seller.payoutStatus = "blocked";
+      if (seller.razorpayAccountStatus === "active") {
+        seller.razorpayAccountStatus = "suspended";
+      }
+      recordComplianceEvent(seller, "pan_changed_reverification_required", "seller");
+    }
+    seller.panHolderName = nextPanHolderName;
+    seller.kycDetailsEncrypted.panHolderName = encrypt(nextPanHolderName);
+    if (typeof panDocumentUrl === "string") seller.panDocumentUrl = panDocumentUrl.trim();
+    if (typeof businessGST === "string" && businessGST.trim()) {
+      if (!businessGST.includes("*")) { // Only encrypt if it's a new raw value
+        seller.kycDetailsEncrypted.gst = encrypt(businessGST);
+        seller.businessGST = maskText(businessGST, 4);
+      }
+    }
+
+    if (businessType) seller.kycDetailsEncrypted.businessType = businessType;
+    if (businessCategory) seller.kycDetailsEncrypted.businessCategory = businessCategory;
+    seller.kycDetailsEncrypted.bankIfsc = seller.bankIfsc;
+    seller.kycDetailsEncrypted.bankName = seller.bankName;
+    applyKycStateFromPan(seller);
+    const kycIssues = collectKycIssues(seller);
+    seller.onboardingProgress = kycIssues.length ? "kyc_pending" : "profile_submitted";
+
     if (!seller.slug) {
       seller.slug = await createUniqueSellerSlug(
         seller.businessName,
@@ -405,7 +663,58 @@ router.put("/me", auth, async (req, res) => {
     await seller.save();
     return res.json({ seller: withPolicyDefaults(seller) });
   } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ message: error.message });
+    }
+    if (error.code === 11000 && error.keyPattern?.panHash) {
+      return res.status(409).json({ message: "This PAN is already linked to another seller account." });
+    }
     return res.status(500).json({ message: "Unable to update profile" });
+  }
+});
+
+// ─── GET /auth/earnings ──────────────────────────────────────────────────
+// Returns the seller's sales, ledger logs, and settlement breakdowns
+router.get("/earnings", auth, async (req, res) => {
+  try {
+    const ledgers = await TransactionLedger.find({ sellerId: req.sellerId })
+      .populate("orderId", "_id customerName createdAt amount deliveryCharge")
+      .sort({ createdAt: -1 });
+
+    let grossRevenuePaise = 0;
+    let netEarningsPaise = 0;
+    let deliveryFeesPaise = 0;
+    let reversalsPaise = 0;
+
+    for (const log of ledgers) {
+      if (log.type === "credit") {
+        if (log.purpose === "order_item_revenue") {
+          grossRevenuePaise += log.amountPaise;
+          netEarningsPaise += log.amountPaise;
+        } else if (log.purpose === "delivery_fee") {
+          deliveryFeesPaise += log.amountPaise;
+          netEarningsPaise += log.amountPaise;
+        }
+      } else if (log.type === "debit") {
+        reversalsPaise += log.amountPaise;
+        netEarningsPaise -= log.amountPaise;
+      }
+    }
+
+    return res.json({
+      summary: {
+        grossRevenue: grossRevenuePaise / 100,
+        netEarnings: netEarningsPaise / 100,
+        deliveryFees: deliveryFeesPaise / 100,
+        reversals: reversalsPaise / 100,
+        refunds: reversalsPaise / 100,
+        settlementModel: "direct",
+      },
+      ledger: ledgers,
+    });
+  } catch (error) {
+    console.error("[Get Earnings Error]:", error);
+    return res.status(500).json({ message: "Unable to fetch seller financial metrics" });
   }
 });
 

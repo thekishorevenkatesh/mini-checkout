@@ -5,6 +5,7 @@ const auth = require("../middleware/auth");
 const { getPolicyContent } = require("../utils/policyDefaults");
 const { generateOtp, hashOtp, verifyOtp: verifyHashedOtp } = require("../utils/otp");
 const { sendOtpEmail } = require("../utils/mailer");
+const { collectKycIssues } = require("../utils/kycCompliance");
 
 const router = express.Router();
 
@@ -31,9 +32,14 @@ function getMissingPublishFields(seller) {
     ["addressProofUrl", seller?.addressProofUrl],
   ];
 
-  return checks
+  const missingProfileFields = checks
     .filter(([, value]) => !String(value || "").trim())
     .map(([field]) => field);
+  const missingKycFields = collectKycIssues(seller, {
+    requireDocuments: true,
+  });
+
+  return [...new Set([...missingProfileFields, ...missingKycFields])];
 }
 
 function isValidEmail(email) {
@@ -87,8 +93,11 @@ router.post("/publish", auth, async (req, res) => {
 
     const missingFields = getMissingPublishFields(seller);
     if (missingFields.length > 0) {
+      seller.kycStatus = "incomplete";
+      seller.payoutStatus = "blocked";
+      await seller.save();
       return res.status(400).json({
-        message: "Complete your business profile before publishing the store.",
+        message: "Complete your business profile and mandatory PAN KYC before publishing the store.",
         missingFields,
       });
     }

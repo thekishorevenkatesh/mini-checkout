@@ -15,6 +15,9 @@ type AddressFieldsProps = {
   gridClassName?: string;
   labelClassName?: string;
   showSuggestionHint?: boolean;
+  required?: boolean;
+  pincodeLabel?: string;
+  datalistIdPrefix?: string;
 };
 
 function updateAddressField(
@@ -53,15 +56,22 @@ export function AddressFields({
   gridClassName = "sm:col-span-2 grid gap-3 sm:grid-cols-2",
   labelClassName = "block space-y-1",
   showSuggestionHint = true,
+  required = false,
+  pincodeLabel = "Pincode",
+  datalistIdPrefix = "",
 }: AddressFieldsProps) {
   const countrySuggestions = getCountrySuggestions(value.country);
   const stateSuggestions = getStateSuggestions(value.country, value.state);
   const citySuggestions = getCitySuggestions(value.country, value.state, value.city);
+  const req = (label: string) => (required ? `${label} *` : label);
+  const countryListId = `${datalistIdPrefix}country-suggestions`;
+  const stateListId = `${datalistIdPrefix}state-suggestions`;
+  const cityListId = `${datalistIdPrefix}city-suggestions`;
 
   return (
     <div className={gridClassName}>
       <label className={labelClassName}>
-        <span className="text-sm font-semibold text-slate-700">Address line 1</span>
+        <span className="text-sm font-semibold text-slate-700">{req("Address line 1")}</span>
         <input
           className={inputClassName}
           value={value.line1}
@@ -86,9 +96,9 @@ export function AddressFields({
         />
       </label>
       <label className={labelClassName}>
-        <span className="text-sm font-semibold text-slate-700">City</span>
+        <span className="text-sm font-semibold text-slate-700">{req("City")}</span>
         <input
-          list="city-suggestions"
+          list={cityListId}
           className={inputClassName}
           value={value.city}
           onChange={(event) => updateCityField(value, onChange, event.target.value)}
@@ -96,9 +106,9 @@ export function AddressFields({
         />
       </label>
       <label className={labelClassName}>
-        <span className="text-sm font-semibold text-slate-700">State</span>
+        <span className="text-sm font-semibold text-slate-700">{req("State")}</span>
         <input
-          list="state-suggestions"
+          list={stateListId}
           className={inputClassName}
           value={value.state}
           onChange={(event) => updateAddressField(value, onChange, "state", event.target.value)}
@@ -106,9 +116,9 @@ export function AddressFields({
         />
       </label>
       <label className={labelClassName}>
-        <span className="text-sm font-semibold text-slate-700">Country</span>
+        <span className="text-sm font-semibold text-slate-700">{req("Country")}</span>
         <input
-          list="country-suggestions"
+          list={countryListId}
           className={inputClassName}
           value={value.country}
           onChange={(event) => updateAddressField(value, onChange, "country", event.target.value)}
@@ -116,7 +126,7 @@ export function AddressFields({
         />
       </label>
       <label className={labelClassName}>
-        <span className="text-sm font-semibold text-slate-700">Pincode</span>
+        <span className="text-sm font-semibold text-slate-700">{req(pincodeLabel)}</span>
         <input
           className={inputClassName}
           value={value.pincode}
@@ -131,17 +141,17 @@ export function AddressFields({
         </p>
       ) : null}
 
-      <datalist id="country-suggestions">
+      <datalist id={countryListId}>
         {countrySuggestions.map((country) => (
           <option key={country} value={country} />
         ))}
       </datalist>
-      <datalist id="state-suggestions">
+      <datalist id={stateListId}>
         {stateSuggestions.map((state) => (
           <option key={state} value={state} />
         ))}
       </datalist>
-      <datalist id="city-suggestions">
+      <datalist id={cityListId}>
         {citySuggestions.map((city) => (
           <option key={city} value={city} />
         ))}

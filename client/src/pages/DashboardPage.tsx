@@ -4,6 +4,9 @@ import { QRCodeCanvas } from "qrcode.react";
 import { api } from "../api/client";
 import { AppIcon } from "../components/ui/AppIcon";
 import { AddressFields } from "../components/forms/AddressFields";
+import { OrderAddressCards } from "../components/orders/OrderAddressCards";
+import { getOrderShippingSummary } from "../utils/orderAddresses";
+import { openOrderPrintDocument } from "../utils/orderPrintDocument";
 import { useAuth } from "../context/AuthContext";
 import { useI18n } from "../context/I18nContext";
 import { useToast } from "../context/ToastContext";
@@ -25,7 +28,17 @@ import {
   productMatchesCategory,
 } from "../utils/productCategories";
 
-type Tab = "dashboard" | "store" | "products" | "orders" | "reports" | "profile" | "policies";
+type Tab = "dashboard" | "store" | "products" | "orders" | "reports" | "earnings" | "profile" | "policies";
+const PAN_PATTERN = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
+
+function normalizePan(value: string) {
+  return value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 10);
+}
+
+function isMaskedPanValue(value: string) {
+  return String(value).includes("*");
+}
+
 type ProductFormVariant = {
   label: string;   // value / size  e.g. "500"
   uom: string;     // unit of measure e.g. "g", "ml", "Pack"
@@ -275,6 +288,10 @@ export function DashboardPage() {
   const [profileUpi, setProfileUpi] = useState(seller?.upiId || "");
   const [profileAddress, setProfileAddress] = useState<AddressParts>(parseAddress(seller?.businessAddress || ""));
   const [profileGST, setProfileGST] = useState(seller?.businessGST || "");
+  const [profilePAN, setProfilePAN] = useState(seller?.pan || "");
+  const [profilePANHolderName, setProfilePANHolderName] = useState(seller?.panHolderName || "");
+  const [profilePANDocumentUrl, setProfilePANDocumentUrl] = useState(seller?.panDocumentUrl || "");
+  const [profileBusinessType, setProfileBusinessType] = useState(seller?.businessType || "individual");
   const [profileLogo, setProfileLogo] = useState(seller?.businessLogo || "");
   const [profileFavicon, setProfileFavicon] = useState(seller?.favicon || "");
   const [profileCategory, setProfileCategory] = useState(seller?.businessCategory || "");
@@ -338,6 +355,8 @@ export function DashboardPage() {
     topProducts: { title: string; unitsSold: number; revenue: number }[];
   } | null>(null);
   const [loadingReport, setLoadingReport] = useState(false);
+  const [earningsData, setEarningsData] = useState<any>(null);
+  const [loadingEarnings, setLoadingEarnings] = useState(false);
 
   // ── Real-time order refresh
   const ordersIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -362,6 +381,10 @@ export function DashboardPage() {
     setProfileUpi(seller.upiId || "");
     setProfileAddress(parseAddress(seller.businessAddress || ""));
     setProfileGST(seller.businessGST || "");
+    setProfilePAN(seller.pan || "");
+    setProfilePANHolderName(seller.panHolderName || "");
+    setProfilePANDocumentUrl(seller.panDocumentUrl || "");
+    setProfileBusinessType(seller.businessType || "individual");
     setProfileLogo(seller.businessLogo || "");
     setProfileFavicon(seller.favicon || "");
     setProfileCategory(seller.businessCategory || "");
@@ -446,7 +469,20 @@ export function DashboardPage() {
     finally { setLoadingReport(false); }
   }
 
+  async function loadEarnings() {
+    setLoadingEarnings(true);
+    try {
+      const response = await api.get("/auth/earnings");
+      setEarningsData(response.data);
+    } catch {
+      setError("Could not load earnings metrics.");
+    } finally {
+      setLoadingEarnings(false);
+    }
+  }
+
   useEffect(() => { if (tab === "reports") void loadReport(); }, [tab, reportDays]);
+  useEffect(() => { if (tab === "earnings") void loadEarnings(); }, [tab]);
 
   const stats = useMemo(() => {
     const now = Date.now();
@@ -567,6 +603,23 @@ export function DashboardPage() {
     return "Draft";
   }
 
+  const savedProfilePan = seller?.pan ?? "";
+  const normalizedProfilePAN = normalizePan(profilePAN);
+  const profilePANUnchangedOnFile =
+    Boolean(savedProfilePan) &&
+    (profilePAN === savedProfilePan ||
+      (isMaskedPanValue(profilePAN) && isMaskedPanValue(savedProfilePan)));
+  const profilePANError =
+    profilePAN.trim().length === 0
+      ? "PAN number is required."
+      : profilePANUnchangedOnFile || PAN_PATTERN.test(normalizedProfilePAN)
+        ? ""
+        : "Enter PAN in ABCDE1234F format.";
+  const profilePANHolderNameError =
+    profilePANHolderName.trim().length === 0 ? "PAN holder legal name is required." : "";
+  const isProfileFormValid =
+    !profilePANError && !profilePANHolderNameError && profileEmail.trim() && isValidEmail(profileEmail);
+
   // ── Profile save
   async function handleProfileSave(e: FormEvent) {
     e.preventDefault(); setError(""); setSuccess("");
@@ -576,6 +629,10 @@ export function DashboardPage() {
     }
     if (!isValidEmail(profileEmail)) {
       setError("Enter a valid business email address.");
+      return;
+    }
+    if (profilePANError || profilePANHolderNameError) {
+      setError(profilePANError || profilePANHolderNameError);
       return;
     }
     setIsSavingProfile(true);
@@ -589,7 +646,14 @@ export function DashboardPage() {
         bankAccountNumber: profileBankAccountNumber.trim(),
         bankIfsc: profileBankIfsc.trim().toUpperCase(),
         businessAddress: formatAddress(profileAddress),
+        businessAddressParts: profileAddress,
         businessGST: profileGST.trim(),
+        pan: profilePANUnchangedOnFile || isMaskedPanValue(profilePAN)
+          ? (savedProfilePan || profilePAN)
+          : normalizedProfilePAN,
+        panHolderName: profilePANHolderName.trim(),
+        panDocumentUrl: profilePANDocumentUrl.trim(),
+        businessType: profileBusinessType,
         businessLogo: profileLogo.trim(),
         favicon: profileFavicon.trim(),
         businessCategory: profileCategory.trim(),
@@ -597,7 +661,7 @@ export function DashboardPage() {
         addressProofUrl: profileAddressProof.trim(),
       });
       setSuccess("Profile saved.");
-    } catch { setError("Could not save profile."); }
+    } catch (error) { setError(getApiErrorMessage(error, "Could not save profile.")); }
     finally { setIsSavingProfile(false); }
   }
 
@@ -1099,6 +1163,7 @@ export function DashboardPage() {
     { key: "products", label: t("nav.products", "Products"), icon: "products" },
     { key: "orders", label: t("nav.orders", "Orders"), icon: "orders" },
     { key: "reports", label: t("nav.reports", "Reports"), icon: "reports" },
+    { key: "earnings", label: t("nav.earnings", "Earnings & Payouts"), icon: "earnings" },
     { key: "profile", label: t("nav.profile", "Profile"), icon: "profile" },
     { key: "policies", label: t("nav.policies", "Policies"), icon: "policies" },
   ];
@@ -2388,7 +2453,7 @@ export function DashboardPage() {
                         <div>
                           <p className="font-semibold text-slate-800">{order.customerName}</p>
                           <p className="text-xs text-slate-500">{order.customerPhone}</p>
-                          {order.deliveryAddress && <p className="mt-0.5 flex items-center gap-1.5 text-xs text-slate-400"><span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 dark:from-teal-500 dark:to-sky-500"><AppIcon name="location" className="text-[8px]" /></span>{order.deliveryAddress}</p>}
+                          {getOrderShippingSummary(order) && <p className="mt-0.5 flex items-center gap-1.5 text-xs text-slate-400"><span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 dark:from-teal-500 dark:to-sky-500"><AppIcon name="location" className="text-[8px]" /></span><span className="line-clamp-2">{getOrderShippingSummary(order)}</span></p>}
                         </div>
                         <span className={`flex items-center gap-1.5 rounded-full border px-2 py-1 text-xs font-semibold ${statusClasses[order.paymentStatus]}`}>
                           <span className={`h-1.5 w-1.5 rounded-full ${STATUS_DOT[order.paymentStatus]}`} />{STATUS_LABEL[order.paymentStatus]}
@@ -2420,7 +2485,7 @@ export function DashboardPage() {
                           <td className="py-3 pr-4">
                             <p className="font-semibold text-slate-800 whitespace-nowrap">{order.customerName}</p>
                             <p className="text-xs text-slate-500">{order.customerPhone}</p>
-                            {order.deliveryAddress && <p className="flex items-center gap-1.5 text-xs text-slate-400 max-w-[160px] truncate" title={order.deliveryAddress}><span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 dark:from-teal-500 dark:to-sky-500"><AppIcon name="location" className="text-[8px]" /></span>{order.deliveryAddress}</p>}
+                            {getOrderShippingSummary(order) && <p className="flex items-center gap-1.5 text-xs text-slate-400 max-w-[160px] truncate" title={getOrderShippingSummary(order)}><span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 dark:from-teal-500 dark:to-sky-500"><AppIcon name="location" className="text-[8px]" /></span>{getOrderShippingSummary(order)}</p>}
                           </td>
                           <td className="py-3 pr-4">
                             <p className="text-slate-700">{getOrderItemSummary(order)||"—"}</p>
@@ -2481,12 +2546,7 @@ export function DashboardPage() {
                   <p className="text-xs text-slate-400">{new Date(viewingOrder.createdAt).toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"})}</p>
                 </div>
               </div>
-              {viewingOrder.deliveryAddress && (
-                <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-900/80">
-                  <p className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-400 mb-1"><span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 dark:from-teal-500 dark:to-sky-500"><AppIcon name="location" className="text-[8px]" /></span>Delivery Address</p>
-                  <p className="text-sm text-slate-700">{viewingOrder.deliveryAddress}</p>
-                </div>
-              )}
+              <OrderAddressCards order={viewingOrder} />
               <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-900/80">
                 <p className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">Product</p>
                 <div className="space-y-2">
@@ -2510,18 +2570,18 @@ export function DashboardPage() {
                   <span className="text-sm font-bold text-teal-700">₹{viewingOrder.amount+(viewingOrder.deliveryCharge||0)}</span>
                 </div>
               </div>
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid gap-3 sm:grid-cols-1">
                 <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-900/80">
                   <p className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">Payment Method</p>
                   <p className="text-sm font-semibold text-slate-700 capitalize">{viewingOrder.paymentMethod||"—"}</p>
                 </div>
+              </div>
+              {viewingOrder.paymentScreenshotUrl && (
                 <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-900/80">
                   <p className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">Payment Proof</p>
-                  {viewingOrder.paymentScreenshotUrl
-                    ?<a href={viewingOrder.paymentScreenshotUrl} target="_blank" rel="noreferrer" className="text-sm font-semibold text-teal-700 underline">View Screenshot</a>
-                    :<p className="text-sm text-slate-400">Not uploaded</p>}
+                  <a href={viewingOrder.paymentScreenshotUrl} target="_blank" rel="noreferrer" className="text-sm font-semibold text-teal-700 underline">View Screenshot</a>
                 </div>
-              </div>
+              )}
               {viewingOrder.note&&(
                 <div className="rounded-xl bg-amber-50 border border-amber-200 p-3">
                   <p className="text-xs font-bold uppercase tracking-wider text-amber-600 mb-1">Customer Note</p>
@@ -2537,10 +2597,9 @@ export function DashboardPage() {
               </select>
               <button
                 onClick={() => {
-                  const o = viewingOrder;
-                  const w = window.open("","_blank"); if(!w) return;
-                  w.document.write(`<html><head><title>Order #${o._id.slice(-8).toUpperCase()}</title><style>body{font-family:sans-serif;padding:24px;color:#0f172a}h1{font-size:20px}h2{font-size:15px;margin-top:18px}table{width:100%;border-collapse:collapse;margin-top:12px}td,th{border:1px solid #e2e8f0;padding:8px 12px;text-align:left}th{background:#f8fafc;font-size:11px;text-transform:uppercase}</style></head><body><h1>Order #${o._id.slice(-8).toUpperCase()}</h1><p><b>Date:</b> ${new Date(o.createdAt).toLocaleString("en-IN")}</p><p><b>Status:</b> ${STATUS_LABEL[o.paymentStatus]}</p><h2>Customer</h2><p>${o.customerName} &middot; ${o.customerPhone}</p>${o.deliveryAddress?`<p>${o.deliveryAddress}</p>`:""}<h2>Product</h2><p>${o.product?.title||"?"} ${o.product?.category?`(${o.product.category})`:""}</p><table><tr><th>Qty</th><th>Amount</th><th>Delivery</th><th>Grand Total</th></tr><tr><td>${o.quantity}</td><td>₹${o.amount}</td><td>₹${o.deliveryCharge||0}</td><td><b>₹${o.amount+(o.deliveryCharge||0)}</b></td></tr></table><p style="margin-top:14px"><b>Payment:</b> ${o.paymentMethod||"?"}</p>${o.note?`<p><b>Note:</b> ${o.note}</p>`:""}<script>window.onload=()=>window.print()<\/script></body></html>`);
-                  w.document.close();
+                  openOrderPrintDocument(viewingOrder, seller, {
+                    status: STATUS_LABEL,
+                  });
                 }}
                 className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800 sm:w-auto sm:whitespace-nowrap"
               ><AppIcon name="orders" className="text-[10px]" /> Print / PDF</button>
@@ -2742,6 +2801,87 @@ export function DashboardPage() {
           )}
         </div>
       )}
+      {tab === "earnings" && (
+        <div className="mx-auto max-w-4xl space-y-5">
+          {/* Earnings Header Summary Cards */}
+          {loadingEarnings ? (
+            <div className="text-center py-10 text-slate-500">Loading earnings ledger...</div>
+          ) : earningsData ? (
+            <>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <article className="rounded-3xl border border-white/70 bg-gradient-to-br from-emerald-500 to-teal-600 p-5 text-white shadow-card">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-emerald-100">Gross Sales</p>
+                  <p className="mt-2 font-heading text-2xl font-bold">₹{earningsData.summary.grossRevenue.toLocaleString("en-IN")}</p>
+                  <p className="text-[10px] text-emerald-200 mt-1">Total revenue processed before splits</p>
+                </article>
+                <article className="rounded-3xl border border-white/70 bg-gradient-to-br from-teal-600 to-sky-600 p-5 text-white shadow-card">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-teal-100">Direct Settlements</p>
+                  <p className="mt-2 font-heading text-2xl font-bold">₹{earningsData.summary.netEarnings.toLocaleString("en-IN")}</p>
+                  <p className="text-[10px] text-teal-200 mt-1">Transferred to your linked account after each payment</p>
+                </article>
+                <article className="rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card dark:border-teal-900/35 dark:bg-slate-900">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Refunds & Reversals</p>
+                  <p className="mt-2 font-heading text-2xl font-bold text-slate-900 dark:text-white">₹{(earningsData.summary.refunds ?? earningsData.summary.reversals).toLocaleString("en-IN")}</p>
+                  <p className="text-[10px] text-slate-500 mt-1">Amounts clawed back from refunds</p>
+                </article>
+                <article className="rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card dark:border-teal-900/35 dark:bg-slate-900">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Delivery Fees</p>
+                  <p className="mt-2 font-heading text-2xl font-bold text-slate-900 dark:text-white">₹{earningsData.summary.deliveryFees.toLocaleString("en-IN")}</p>
+                  <p className="text-[10px] text-slate-500 mt-1">Total delivery earnings retained</p>
+                </article>
+              </div>
+
+              {/* Transaction Ledger Table */}
+              <article className="rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card dark:border-teal-900/35 dark:bg-slate-900/90">
+                <div className="mb-4">
+                  <h3 className="font-heading text-base font-bold text-slate-800 dark:text-white">Transaction & Payout Ledger</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">Direct vendor settlements via Razorpay Route after payment capture</p>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="border-b border-slate-100 text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:border-slate-800">
+                        <th className="py-2.5 px-2">Date</th>
+                        <th className="py-2.5 px-2">Transaction Ref</th>
+                        <th className="py-2.5 px-2">Purpose</th>
+                        <th className="py-2.5 px-2">Type</th>
+                        <th className="py-2.5 px-2 text-right">Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {earningsData.ledger.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="text-center py-10 text-slate-500">No direct settlements recorded yet.</td>
+                        </tr>
+                      ) : (
+                        earningsData.ledger.map((log: any) => (
+                          <tr key={log._id} className="border-b border-slate-100 hover:bg-slate-50/50 dark:border-slate-800 dark:hover:bg-slate-800/40">
+                            <td className="py-3 px-2 text-slate-500 whitespace-nowrap">{new Date(log.createdAt).toLocaleDateString("en-IN")}</td>
+                            <td className="py-3 px-2 font-mono text-slate-700 dark:text-slate-300 font-semibold">{log.razorpayTransferId || "platform_ledger"}</td>
+                            <td className="py-3 px-2">
+                              <span className="capitalize">{log.purpose.replace(/_/g, " ")}</span>
+                            </td>
+                            <td className="py-3 px-2">
+                              <span className={`inline-block rounded-full px-2 py-0.5 font-bold uppercase text-[9px] ${log.type === "credit" ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : "bg-rose-50 text-rose-700 border border-rose-200"}`}>
+                                {log.type}
+                              </span>
+                            </td>
+                            <td className={`py-3 px-2 text-right font-bold font-mono ${log.type === "credit" ? "text-emerald-600" : "text-rose-600"}`}>
+                              {log.type === "credit" ? "+" : "-"}₹{(log.amountPaise / 100).toLocaleString("en-IN")}
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </article>
+            </>
+          ) : (
+            <div className="text-center py-10 text-slate-500">Failed to load earnings metrics.</div>
+          )}
+        </div>
+      )}
       {tab === "profile" && (
         <div className="mx-auto max-w-3xl space-y-5">
           {/* Account banner */}
@@ -2764,6 +2904,85 @@ export function DashboardPage() {
             </span>
           </div>
 
+          {seller?.razorpayOnboardingError ? (
+            <div className="flex items-start gap-3 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 dark:border-rose-800/50 dark:bg-rose-950/40">
+              <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-rose-500 text-white text-sm">!</span>
+              <div>
+                <p className="text-sm font-bold text-rose-800 dark:text-rose-300">Razorpay onboarding needs attention</p>
+                <p className="mt-0.5 text-xs text-rose-700 dark:text-rose-400">{seller.razorpayOnboardingError}</p>
+              </div>
+            </div>
+          ) : null}
+
+          {/* ── Razorpay Payout Account Status Banner ── */}
+          {(() => {
+            const rzpStatus = seller?.razorpayAccountStatus;
+            if (seller?.payoutStatus === "blocked" || seller?.kycStatus !== "verified" || seller?.panVerificationStatus !== "verified") {
+              return (
+                <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 dark:border-amber-800/50 dark:bg-amber-950/40">
+                  <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-amber-400 text-white text-sm">!</span>
+                  <div>
+                    <p className="text-sm font-bold text-amber-800 dark:text-amber-300">Payouts Blocked Until PAN KYC Is Verified</p>
+                    <p className="mt-0.5 text-xs text-amber-700 dark:text-amber-400">
+                      Add a valid PAN, PAN holder legal name, bank details, and KYC proofs. Admin approval and Razorpay linked account activation require verified PAN KYC before direct settlements can be sent.
+                    </p>
+                  </div>
+                </div>
+              );
+            }
+            if (rzpStatus === "active") {
+              return (
+                <div className="flex items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 dark:border-emerald-800/50 dark:bg-emerald-950/40">
+                  <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-emerald-500 text-white text-sm">✓</span>
+                  <div>
+                    <p className="text-sm font-bold text-emerald-800 dark:text-emerald-300">Payout Account Active</p>
+                    <p className="mt-0.5 text-xs text-emerald-700 dark:text-emerald-400">
+                      Your Razorpay linked account is verified and active. When a customer pays, your full order amount is transferred directly to your linked account.
+                    </p>
+                  </div>
+                </div>
+              );
+            }
+            if (rzpStatus === "pending") {
+              return (
+                <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 dark:border-amber-800/50 dark:bg-amber-950/40">
+                  <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-amber-400 text-white text-sm">⏳</span>
+                  <div>
+                    <p className="text-sm font-bold text-amber-800 dark:text-amber-300">Payout Account — Pending Activation</p>
+                    <p className="mt-0.5 text-xs text-amber-700 dark:text-amber-400">
+                      Your linked account has been created and is pending Razorpay's KYC review. This usually takes 1–3 business days. Settlements begin once activation completes.
+                    </p>
+                  </div>
+                </div>
+              );
+            }
+            if (rzpStatus === "suspended") {
+              return (
+                <div className="flex items-start gap-3 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 dark:border-rose-800/50 dark:bg-rose-950/40">
+                  <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-rose-500 text-white text-sm">✕</span>
+                  <div>
+                    <p className="text-sm font-bold text-rose-800 dark:text-rose-300">Payout Account Suspended</p>
+                    <p className="mt-0.5 text-xs text-rose-700 dark:text-rose-400">
+                      Your Razorpay linked account has been suspended. Contact the platform admin to resolve this issue.
+                    </p>
+                  </div>
+                </div>
+              );
+            }
+            // uncreated — show what's needed
+            return (
+              <div className="flex items-start gap-3 rounded-2xl border border-sky-200 bg-sky-50 px-5 py-4 dark:border-sky-800/50 dark:bg-sky-950/40">
+                <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-sky-500 text-white text-sm">ℹ</span>
+                <div>
+                  <p className="text-sm font-bold text-sky-800 dark:text-sky-300">Payout Account Not Yet Set Up</p>
+                  <p className="mt-0.5 text-xs text-sky-700 dark:text-sky-400">
+                    To receive automatic payouts, fill in your <strong>Bank Account details</strong> and <strong>Business Type</strong> below, then save your profile. The platform admin will create your Razorpay linked account upon approving your store.
+                  </p>
+                </div>
+              </div>
+            );
+          })()}
+
           <article className="rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card dark:border-teal-900/35 dark:bg-gradient-to-br dark:from-slate-950 dark:to-slate-900">
             <div className="mb-4 flex items-center justify-between gap-3">
               <div>
@@ -2781,6 +3000,13 @@ export function DashboardPage() {
                 { label: "Business email", value: seller?.businessEmail },
                 { label: "Registered phone", value: seller?.phone },
                 { label: "GST number", value: seller?.businessGST },
+                { label: "PAN", value: seller?.pan },
+                { label: "PAN holder", value: seller?.panHolderName },
+                { label: "PAN verification", value: seller?.panVerificationStatus },
+                { label: "KYC status", value: seller?.kycStatus },
+                { label: "Payout status", value: seller?.payoutStatus },
+                { label: "Route onboarding", value: seller?.linkedAccountOnboardingStatus?.replace(/_/g, " ") },
+                { label: "Linked account", value: seller?.razorpayAccountId ? `${seller.razorpayAccountStatus || "pending"}` : "Not created" },
                 { label: "Business address", value: seller?.businessAddress },
                 { label: "UPI ID", value: seller?.upiId },
                 { label: "Account holder", value: seller?.bankAccountName },
@@ -2791,6 +3017,7 @@ export function DashboardPage() {
                 { label: "Call number", value: seller?.callNumber },
                 { label: "ID proof", value: seller?.idProofUrl ? "Uploaded" : "" },
                 { label: "Address proof", value: seller?.addressProofUrl ? "Uploaded" : "" },
+                { label: "PAN document", value: seller?.panDocumentUrl ? "Uploaded" : "" },
               ].map(({ label, value }) => (
                 <div key={label} className="min-w-0 rounded-2xl border border-slate-100 bg-slate-50/80 px-3 py-2.5">
                   <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">{label}</p>
@@ -2800,7 +3027,7 @@ export function DashboardPage() {
             </div>
           </article>
 
-          <form onSubmit={handleProfileSave} className="space-y-5">
+          <form onSubmit={handleProfileSave} noValidate className="space-y-5">
             {/* Business Identity */}
             <article className="rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card dark:border-teal-900/35 dark:bg-gradient-to-br dark:from-slate-950 dark:to-slate-900">
               <h3 className="font-heading text-base font-bold text-slate-800 mb-4 flex items-center gap-2">
@@ -2823,11 +3050,46 @@ export function DashboardPage() {
                 </label>
                 <label className="block space-y-1">
                   <span className="text-sm font-semibold text-slate-700">GST number</span>
-                  <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-teal-400" placeholder="22AAAAA0000A1Z5" value={profileGST} onChange={e => setProfileGST(e.target.value)} />
+                  <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-teal-400 dark:bg-slate-900 dark:border-slate-700 dark:text-slate-100" placeholder="22AAAAA0000A1Z5" value={profileGST} onChange={e => setProfileGST(e.target.value)} />
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-sm font-semibold text-slate-700">PAN details</span>
+                  <input
+                    className={`w-full rounded-xl border px-3 py-2.5 text-sm uppercase outline-none focus:ring-2 dark:bg-slate-900 dark:text-slate-100 ${profilePAN && profilePANError ? "border-rose-300 focus:border-rose-400 focus:ring-rose-50 dark:border-rose-700" : "border-slate-200 focus:border-teal-400 focus:ring-teal-50 dark:border-slate-700"}`}
+                    placeholder="ABCDE1234F"
+                    maxLength={10}
+                    value={profilePAN}
+                    onChange={(e) => {
+                      const next = e.target.value.toUpperCase();
+                      setProfilePAN(next.includes("*") ? next.replace(/[^A-Z0-9*]/g, "").slice(0, 10) : normalizePan(next));
+                    }}
+                    required={!profilePANUnchangedOnFile}
+                  />
+                  {profilePANError ? (
+                    <span className="text-xs text-rose-600">{profilePANError}</span>
+                  ) : profilePANUnchangedOnFile ? (
+                    <span className="text-xs text-slate-400">PAN is saved on file. Enter a new full PAN only if you need to change it.</span>
+                  ) : (
+                    <span className="text-xs text-slate-400">Mandatory for Razorpay linked account creation and settlements.</span>
+                  )}
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-sm font-semibold text-slate-700">PAN holder legal name *</span>
+                  <input className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-teal-400 dark:bg-slate-900 dark:border-slate-700 dark:text-slate-100" placeholder="Name exactly as on PAN" value={profilePANHolderName} onChange={e => setProfilePANHolderName(e.target.value)} required />
+                  {profilePANHolderNameError ? <span className="text-xs text-rose-600">{profilePANHolderNameError}</span> : null}
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-sm font-semibold text-slate-700">Business type</span>
+                  <select className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-teal-400 dark:bg-slate-900 dark:border-slate-700 dark:text-slate-100" value={profileBusinessType} onChange={e => setProfileBusinessType(e.target.value)}>
+                    <option value="individual">Individual / Proprietorship</option>
+                    <option value="partnership">Partnership</option>
+                    <option value="company">Private / Public Company</option>
+                    <option value="llp">Limited Liability Partnership (LLP)</option>
+                  </select>
                 </label>
                 <label className="block space-y-1">
                   <span className="text-sm font-semibold text-slate-700">Business email</span>
-                  <input type="email" className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-teal-400" placeholder="shop@example.com" value={profileEmail} onChange={e => setProfileEmail(e.target.value)} />
+                  <input type="email" className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-teal-400 dark:bg-slate-900 dark:border-slate-700 dark:text-slate-100" placeholder="shop@example.com" value={profileEmail} onChange={e => setProfileEmail(e.target.value)} />
                 </label>
               </div>
             </article>
@@ -2914,6 +3176,16 @@ export function DashboardPage() {
               <p className="text-xs text-slate-500 mb-4">Upload clear images of your documents. Required for admin verification and store approval.</p>
               <div className="grid gap-5 sm:grid-cols-2">
                 <div className="space-y-2">
+                  <p className="text-sm font-semibold text-slate-700">PAN Document <span className="text-rose-500">*</span></p>
+                  <p className="text-xs text-slate-400">Upload when requested for PAN review</p>
+                  {profilePANDocumentUrl && (
+                    <a href={profilePANDocumentUrl} target="_blank" rel="noreferrer">
+                      <img src={profilePANDocumentUrl} alt="PAN Document" className="h-28 w-full rounded-xl object-cover border border-slate-200 hover:opacity-90 transition" />
+                    </a>
+                  )}
+                  <ImageUploadField value={profilePANDocumentUrl} onChange={setProfilePANDocumentUrl} />
+                </div>
+                <div className="space-y-2">
                   <p className="text-sm font-semibold text-slate-700">ID Proof <span className="text-rose-500">*</span></p>
                   <p className="text-xs text-slate-400">Aadhaar, PAN, Passport, Voter ID, Driving Licence</p>
                   {profileIdProof && (
@@ -2936,7 +3208,7 @@ export function DashboardPage() {
               </div>
             </article>
 
-            <button type="submit" disabled={isSavingProfile}
+            <button type="submit" disabled={isSavingProfile || !isProfileFormValid}
               className="w-full rounded-xl bg-gradient-to-r from-emerald-500 via-teal-500 to-sky-500 px-4 py-3 text-sm font-semibold text-white transition hover:from-emerald-400 hover:via-teal-400 hover:to-sky-400 disabled:from-slate-300 disabled:via-slate-300 disabled:to-slate-300 shadow-sm">
               {isSavingProfile ? "Saving…" : "💾 Save Profile"}
             </button>

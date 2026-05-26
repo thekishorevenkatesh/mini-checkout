@@ -66,6 +66,31 @@ const orderSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+    parentOrder: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ParentOrder",
+      index: true,
+      default: null,
+    },
+    razorpayOrderId: {
+      type: String,
+      index: true,
+      default: "",
+    },
+    commissionAmountPaise: {
+      type: Number,
+      default: 0,
+    },
+    transferId: {
+      type: String,
+      default: "",
+    },
+    transferStatus: {
+      type: String,
+      enum: ["untransferred", "pending", "processed", "failed", "reversed"],
+      default: "untransferred",
+      index: true,
+    },
     product: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Product",
@@ -86,6 +111,30 @@ const orderSchema = new mongoose.Schema(
       trim: true,
     },
     deliveryAddress: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    billingAddress: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    shippingAddress: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    shippingSameAsBilling: {
+      type: Boolean,
+      default: true,
+    },
+    shippingCustomerName: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    shippingCustomerPhone: {
       type: String,
       trim: true,
       default: "",
