@@ -616,6 +616,15 @@ export function PublicStorePage() {
   }, [seller, setPublicStoreHeader]);
 
   useEffect(() => {
+    const previousTitle = document.title;
+    document.title = seller?.businessName ? `${seller.businessName}` : "Zensos";
+
+    return () => {
+      document.title = previousTitle;
+    };
+  }, [seller?.businessName]);
+
+  useEffect(() => {
     const faviconElement = document.querySelector<HTMLLinkElement>("link[rel='icon']");
     if (!faviconElement) return;
 
