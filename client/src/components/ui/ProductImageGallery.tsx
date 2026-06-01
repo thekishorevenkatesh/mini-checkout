@@ -129,7 +129,7 @@ export function ProductImageGallery({
       {lightboxOpen &&
         createPortal(
           <div
-            className="fixed inset-0 z-[999] bg-black"
+            className="fixed inset-0 z-[999] overflow-hidden bg-black"
             role="dialog"
             aria-modal="true"
             onClick={closeLightbox}
@@ -137,7 +137,7 @@ export function ProductImageGallery({
             <button
               type="button"
               onClick={closeLightbox}
-              className="absolute right-4 top-4 z-20 flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white backdrop-blur-sm"
+              className="absolute right-3 top-3 z-20 flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white backdrop-blur-sm sm:right-4 sm:top-4"
             >
               ✕
             </button>
@@ -155,17 +155,17 @@ export function ProductImageGallery({
 
                 setLightboxIndex(index);
               }}
-              className="flex h-full w-full snap-x snap-mandatory overflow-x-auto touch-pan-y [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+              className="flex h-dvh w-dvw snap-x snap-mandatory overflow-x-auto overflow-y-hidden touch-pan-x [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
             >
               {safeImages.map((imageUrl, index) => (
                 <div
                   key={`${productId}-lightbox-${index}`}
-                  className="flex h-full min-w-full shrink-0 snap-center items-center justify-center p-4"
+                  className="flex h-dvh w-dvw min-w-[100dvw] shrink-0 snap-center items-center justify-center p-3 sm:p-4"
                 >
                   <img
                     src={imageUrl}
                     alt={`${title} full screen ${index + 1}`}
-                    className="h-auto max-h-[100dvh] w-auto max-w-full object-contain select-none"
+                    className="h-auto max-h-[calc(100dvh-1.5rem)] w-auto max-w-[calc(100dvw-1.5rem)] object-contain select-none sm:max-h-[calc(100dvh-2rem)] sm:max-w-[calc(100dvw-2rem)]"
                     style={{
                       touchAction: "pan-x pan-y pinch-zoom",
                     }}

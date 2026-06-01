@@ -12,6 +12,7 @@ import {
 } from "../components/forms/CheckoutAddressSection";
 import { DEFAULT_POLICY_CONTENT } from "../constants/policyDefaults";
 import { useI18n } from "../context/I18nContext";
+import { usePublicStoreHeader } from "../context/PublicStoreHeaderContext";
 import { useToast } from "../context/ToastContext";
 import { formatPhone } from "../utils/contactFields";
 import {
@@ -366,6 +367,7 @@ function CategoryScrollRow({
 export function PublicStorePage() {
   const { t } = useI18n();
   const { showError, showSuccess } = useToast();
+  const { setPublicStoreHeader } = usePublicStoreHeader();
   const navigate = useNavigate();
   const { sellerSlug } = useParams<{ sellerSlug: string }>();
   const [searchParams] = useSearchParams();
@@ -598,6 +600,20 @@ export function PublicStorePage() {
 
 
 
+
+  useEffect(() => {
+    if (!seller) {
+      setPublicStoreHeader(null);
+      return;
+    }
+
+    setPublicStoreHeader({
+      name: seller.businessName,
+      logo: seller.businessLogo ? normalizeImageUrl(seller.businessLogo) : "",
+    });
+
+    return () => setPublicStoreHeader(null);
+  }, [seller, setPublicStoreHeader]);
 
   useEffect(() => {
     const faviconElement = document.querySelector<HTMLLinkElement>("link[rel='icon']");
@@ -1080,46 +1096,11 @@ rzp.open(); } catch (err: any) {
 
   return (
     <>
-    <main className="mx-auto min-h-screen w-full max-w-7xl px-3 py-6 sm:px-5 sm:py-10">
+    <main className="mx-auto min-h-screen w-full max-w-7xl px-3 pb-24 pt-5 sm:px-5 sm:pb-28 sm:pt-8">
 
       {/* -- LEFT: Store + Products --------------------------- */}
       <section className="space-y-6">
-        {/* Store Header */}
-        <div className="surface-card-strong rounded-[32px] bg-gradient-to-br from-white via-slate-50 to-teal-50/70 p-4 sm:p-5 dark:from-slate-950 dark:via-slate-900 dark:to-slate-900">
-          <div className="flex flex-wrap items-center gap-4">
-            {/* Logo + Name */}
-            <div className="flex min-w-0 flex-1 items-center gap-3">
-              {seller.businessLogo && (
-                <img
-                  src={seller.businessLogo}
-                  alt=""
-                  className="h-14 w-14 shrink-0 rounded-2xl border border-slate-200/80 bg-white object-contain p-1 shadow-sm dark:border-slate-700 dark:bg-slate-900 sm:h-16 sm:w-16"
-                />
-              )}
-              <div className="min-w-0">
-                <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">Online Store</p>
-                <h1 className="truncate font-heading text-xl font-bold leading-tight tracking-tight text-slate-900 sm:text-2xl dark:text-slate-100">
-                  {seller.businessName}
-                </h1>
-              </div>
-            </div>
             {/* Social + contact icons � right side */}
-            <div className="flex shrink-0 items-center gap-1.5">
-              {/* Cart button */}
-              <button type="button" onClick={openCartAndScroll} aria-label="Open cart"
-                className="relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-slate-900 text-base text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-950 dark:hover:bg-white">
-                <AppIcon name="cart" className="text-sm" />
-                {cartCount > 0 && (
-                  <span className="absolute -right-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-rose-500 text-[9px] font-bold text-white leading-none">
-                    {cartCount > 9 ? "9+" : cartCount}
-                  </span>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-
-
         {/* Banners */}
         {seller.banners?.length > 0 && (
           <BannerCarousel banners={seller.banners} />
@@ -1384,6 +1365,22 @@ rzp.open(); } catch (err: any) {
         })()}
       </section>
     </main>
+
+    {!showCart && (
+      <button
+        type="button"
+        onClick={openCartAndScroll}
+        aria-label="Open cart"
+        className="fixed bottom-4 right-4 z-30 flex h-14 w-14 items-center justify-center rounded-full bg-slate-900 text-white shadow-[0_16px_40px_rgba(15,23,42,0.28)] transition hover:-translate-y-0.5 hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-950 dark:hover:bg-white sm:bottom-6 sm:right-6 sm:h-16 sm:w-16"
+      >
+        <AppIcon name="cart" className="text-lg" />
+        {cartCount > 0 && (
+          <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold leading-none text-white">
+            {cartCount > 99 ? "99+" : cartCount}
+          </span>
+        )}
+      </button>
+    )}
 
     {/* Backdrop */}
     {showCart && <div className="fixed inset-0 z-40 bg-black/40 backdrop-blur-[1px]" onClick={() => setShowCart(false)} />}
@@ -1901,4 +1898,3 @@ rzp.open(); } catch (err: any) {
     </>
   );
 }
-  
