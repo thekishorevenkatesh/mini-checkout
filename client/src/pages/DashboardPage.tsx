@@ -501,6 +501,10 @@ export function DashboardPage() {
       value30d: recent30.reduce((s, o) => s + o.amount + (o.deliveryCharge || 0), 0),
     };
   }, [orders, products]);
+  const unreadOrderCount = useMemo(
+    () => orders.filter(order => !order.isViewed).length,
+    [orders]
+  );
 
   const storeUrl = useMemo(() => {
     if (!seller?.slug) return "";
@@ -1137,6 +1141,28 @@ export function DashboardPage() {
     catch { setError("Could not update status."); }
   }
 
+  async function handleViewOrder(order: Order) {
+    setViewingOrder({ ...order, isViewed: true });
+
+    if (order.isViewed) return;
+
+    setOrders(current =>
+      current.map(item => item._id === order._id ? { ...item, isViewed: true } : item)
+    );
+
+    try {
+      await api.patch(`/orders/${order._id}/viewed`);
+    } catch {
+      setOrders(current =>
+        current.map(item => item._id === order._id ? { ...item, isViewed: false } : item)
+      );
+      setViewingOrder(current =>
+        current?._id === order._id ? { ...current, isViewed: false } : current
+      );
+      setError("Could not mark order as read.");
+    }
+  }
+
   // ── CSV export
   async function handleExport() {
     try {
@@ -1228,6 +1254,11 @@ export function DashboardPage() {
               <AppIcon name={t.icon} className="text-[11px]" />
             </span>
             {t.label}
+            {t.key === "orders" && unreadOrderCount > 0 && (
+              <span className={`inline-flex min-w-5 items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-bold leading-none shadow-sm ring-1 ${tab === t.key ? "!bg-white !text-zinc-950 ring-white/70 dark:!bg-white dark:!text-zinc-950" : "bg-zinc-700 text-white ring-black/5 dark:bg-white dark:text-zinc-950 dark:ring-white/20"}`}>
+                {unreadOrderCount > 99 ? "99+" : unreadOrderCount}
+              </span>
+            )}
           </button>
         ))}
       </nav>
@@ -2370,7 +2401,14 @@ export function DashboardPage() {
         <article className="rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card dark:border-teal-900/35 dark:bg-gradient-to-br dark:from-slate-950 dark:to-slate-900">
           {/* Header */}
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <h2 className="font-heading text-xl font-bold text-slate-900">Orders</h2>
+            <div className="flex items-center gap-2">
+              <h2 className="font-heading text-xl font-bold text-slate-900 dark:text-white">Orders</h2>
+              {unreadOrderCount > 0 && (
+                <span className="rounded-full bg-zinc-700 px-2.5 py-1 text-xs font-bold text-white shadow-sm ring-1 ring-black/5 dark:bg-white dark:text-zinc-950 dark:ring-white/20">
+                  {unreadOrderCount} unread
+                </span>
+              )}
+            </div>
             <div className="flex items-center gap-3">
               {ordersLastUpdated && (
                 <span className="flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
@@ -2447,13 +2485,18 @@ export function DashboardPage() {
               <>
                 {/* Mobile cards */}
                 <div className="mt-4 space-y-3 md:hidden">
-                  {filtered.map(order => (
-                    <article key={order._id} className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                  {filtered.map(order => {
+                    const isUnread = !order.isViewed;
+                    return (
+                    <article key={order._id} className={`rounded-2xl border p-3 transition ${isUnread ? "border-zinc-400 bg-zinc-200 shadow-md dark:border-zinc-600 dark:bg-zinc-800 [&>p]:text-zinc-800 dark:[&>p]:text-zinc-100 [&>p>strong]:text-zinc-950 dark:[&>p>strong]:text-white" : "border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-900/70"}`}>
                       <div className="flex items-start justify-between gap-2">
                         <div>
-                          <p className="font-semibold text-slate-800">{order.customerName}</p>
-                          <p className="text-xs text-slate-500">{order.customerPhone}</p>
-                          {getOrderShippingSummary(order) && <p className="mt-0.5 flex items-center gap-1.5 text-xs text-slate-400"><span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 dark:from-teal-500 dark:to-sky-500"><AppIcon name="location" className="text-[8px]" /></span><span className="line-clamp-2">{getOrderShippingSummary(order)}</span></p>}
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className={`font-semibold ${isUnread ? "text-zinc-950 dark:text-white" : "text-slate-800 dark:text-slate-100"}`}>{order.customerName}</p>
+                            {isUnread && <span className="rounded-full bg-zinc-700 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white dark:bg-zinc-300 dark:text-zinc-950">Unread</span>}
+                          </div>
+                          <p className={`text-xs ${isUnread ? "text-zinc-700 dark:text-zinc-300" : "text-slate-500 dark:text-slate-400"}`}>{order.customerPhone}</p>
+                          {getOrderShippingSummary(order) && <p className={`mt-0.5 flex items-center gap-1.5 text-xs ${isUnread ? "text-zinc-700 dark:text-zinc-300" : "text-slate-400"}`}><span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 dark:from-teal-500 dark:to-sky-500"><AppIcon name="location" className="text-[8px]" /></span><span className="line-clamp-2">{getOrderShippingSummary(order)}</span></p>}
                         </div>
                         <span className={`flex items-center gap-1.5 rounded-full border px-2 py-1 text-xs font-semibold ${statusClasses[order.paymentStatus]}`}>
                           <span className={`h-1.5 w-1.5 rounded-full ${STATUS_DOT[order.paymentStatus]}`} />{STATUS_LABEL[order.paymentStatus]}
@@ -2462,13 +2505,14 @@ export function DashboardPage() {
                       <p className="mt-2 text-sm text-slate-700">{getOrderItemSummary(order)||"—"}</p>
                       <p className="text-xs text-slate-500">Qty: {order.quantity} · ₹{order.amount} + ₹{order.deliveryCharge||0} = <strong>₹{order.amount+(order.deliveryCharge||0)}</strong></p>
                       <div className="mt-3 flex gap-2">
-                        <button onClick={() => setViewingOrder(order)} className="flex-1 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition">👁 View</button>
+                        <button onClick={() => void handleViewOrder(order)} className="flex-1 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition">👁 View</button>
                         <select className="flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs outline-none" value={order.paymentStatus} onChange={e => handleOrderStatus(order._id, e.target.value as OrderStatus)}>
                           {ORDER_STATUSES.map(s => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
                         </select>
                       </div>
                     </article>
-                  ))}
+                    );
+                  })}
                 </div>
                 {/* Desktop table */}
                 <div className="hidden overflow-x-auto md:block mt-4">
@@ -2480,12 +2524,17 @@ export function DashboardPage() {
                       <th className="pb-2 pr-4">Update</th><th className="pb-2">View</th>
                     </tr></thead>
                     <tbody>
-                      {filtered.map(order => (
-                        <tr key={order._id} className="border-b border-slate-100 hover:bg-slate-50/60 transition">
+                      {filtered.map(order => {
+                        const isUnread = !order.isViewed;
+                        return (
+                        <tr key={order._id} className={`border-b transition ${isUnread ? "border-zinc-300 bg-zinc-200 hover:bg-zinc-300 dark:border-zinc-700 dark:bg-zinc-800 dark:hover:bg-zinc-700 [&_td]:text-zinc-800 dark:[&_td]:text-zinc-200 [&_td_p]:text-zinc-900 dark:[&_td_p]:text-zinc-100" : "border-slate-100 hover:bg-slate-50/60 dark:border-slate-800 dark:hover:bg-slate-800/50"}`}>
                           <td className="py-3 pr-4">
-                            <p className="font-semibold text-slate-800 whitespace-nowrap">{order.customerName}</p>
-                            <p className="text-xs text-slate-500">{order.customerPhone}</p>
-                            {getOrderShippingSummary(order) && <p className="flex items-center gap-1.5 text-xs text-slate-400 max-w-[160px] truncate" title={getOrderShippingSummary(order)}><span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 dark:from-teal-500 dark:to-sky-500"><AppIcon name="location" className="text-[8px]" /></span>{getOrderShippingSummary(order)}</p>}
+                            <div className="flex items-center gap-2">
+                              <p className={`font-semibold whitespace-nowrap ${isUnread ? "text-zinc-950 dark:text-white" : "text-slate-800 dark:text-slate-100"}`}>{order.customerName}</p>
+                              {isUnread && <span className="rounded-full bg-zinc-700 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white dark:bg-zinc-300 dark:text-zinc-950">Unread</span>}
+                            </div>
+                            <p className={`text-xs ${isUnread ? "text-zinc-700 dark:text-zinc-300" : "text-slate-500 dark:text-slate-400"}`}>{order.customerPhone}</p>
+                            {getOrderShippingSummary(order) && <p className={`flex items-center gap-1.5 text-xs max-w-[160px] truncate ${isUnread ? "text-zinc-700 dark:text-zinc-300" : "text-slate-400"}`} title={getOrderShippingSummary(order)}><span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 dark:from-teal-500 dark:to-sky-500"><AppIcon name="location" className="text-[8px]" /></span>{getOrderShippingSummary(order)}</p>}
                           </td>
                           <td className="py-3 pr-4">
                             <p className="text-slate-700">{getOrderItemSummary(order)||"—"}</p>
@@ -2503,10 +2552,11 @@ export function DashboardPage() {
                             </select>
                           </td>
                           <td className="py-3">
-                            <button onClick={() => setViewingOrder(order)} className="inline-flex items-center gap-2 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-600 px-3 py-1 text-xs font-semibold text-white hover:from-emerald-400 hover:to-teal-500 transition whitespace-nowrap"><AppIcon name="orders" className="text-[9px]" /> View</button>
+                            <button onClick={() => void handleViewOrder(order)} className="inline-flex items-center gap-2 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-600 px-3 py-1 text-xs font-semibold text-white hover:from-emerald-400 hover:to-teal-500 transition whitespace-nowrap"><AppIcon name="orders" className="text-[9px]" /> View</button>
                           </td>
                         </tr>
-                      ))}
+                        );
+                      })}
                     </tbody>
                   </table>
                   {filtered.length===0&&<p className="py-6 text-center text-sm text-slate-400">No orders match your search / filter.</p>}
@@ -2539,6 +2589,7 @@ export function DashboardPage() {
                   <p className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">Customer</p>
                   <p className="font-semibold text-slate-800">{viewingOrder.customerName}</p>
                   <p className="text-sm text-slate-600">{viewingOrder.customerPhone}</p>
+                  {viewingOrder.customerEmail && <p className="break-all text-sm text-slate-600">{viewingOrder.customerEmail}</p>}
                 </div>
                 <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-900/80">
                   <p className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">Order Date</p>

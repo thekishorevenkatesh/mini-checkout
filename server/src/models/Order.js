@@ -110,6 +110,12 @@ const orderSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
+    customerEmail: {
+      type: String,
+      trim: true,
+      lowercase: true,
+      default: "",
+    },
     deliveryAddress: {
       type: String,
       trim: true,
@@ -181,6 +187,11 @@ const orderSchema = new mongoose.Schema(
       type: String,
       trim: true,
       default: "",
+    },
+    isViewed: {
+      type: Boolean,
+      default: false,
+      index: true,
     },
   },
   {

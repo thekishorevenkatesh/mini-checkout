@@ -144,6 +144,7 @@ export interface Order {
   items: OrderItem[];
   customerName: string;
   customerPhone: string;
+  customerEmail?: string;
   deliveryAddress: string;
   billingAddress?: string;
   shippingAddress?: string;
@@ -158,6 +159,7 @@ export interface Order {
   paymentMethod: PaymentMethod;
   paymentStatus: OrderStatus;
   paymentScreenshotUrl: string;
+  isViewed?: boolean;
   transferId?: string;
   transferStatus?: TransferStatus;
   commissionAmountPaise?: number;
