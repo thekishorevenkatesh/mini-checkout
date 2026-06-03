@@ -4,9 +4,12 @@ const Product = require("../models/Product");
 const Order = require("../models/Order");
 const Seller = require("../models/Seller");
 const auth = require("../middleware/auth");
+const { trySendOrderConfirmationForParentOrder } = require("../utils/orderConfirmation");
 
 const router = express.Router();
 const validStatuses = ["pending", "paid", "delivered", "cancelled"];
+const validPaymentMethods = ["prepaid", "cod"];
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function mapToObject(value) {
   return value instanceof Map ? Object.fromEntries(value.entries()) : (value || {});
@@ -217,9 +220,15 @@ router.post("/", async (req, res) => {
       items,
       customerName,
       customerPhone,
+      customerEmail,
+      paymentMethod = "prepaid",
       note,
       deliveryCharges = {}, // sellerId -> charge number
     } = req.body;
+    const normalizedPaymentMethod = validPaymentMethods.includes(paymentMethod)
+      ? paymentMethod
+      : "prepaid";
+    const normalizedEmail = String(customerEmail || "").trim().toLowerCase();
 
     const addressFields = normalizeOrderAddresses(req.body);
 
@@ -227,6 +236,9 @@ router.post("/", async (req, res) => {
       return res.status(400).json({
         message: "Customer name and customer phone are required",
       });
+    }
+    if (normalizedEmail && !EMAIL_PATTERN.test(normalizedEmail)) {
+      return res.status(400).json({ message: "Enter a valid customer email address" });
     }
 
     const requestedItems = Array.isArray(items) ? items : [];
@@ -253,6 +265,19 @@ router.post("/", async (req, res) => {
         product = await Product.findById(requestedProductId).populate("seller");
         if (!product || !product.isActive) {
           return res.status(404).json({ message: "One or more products are unavailable" });
+        }
+        if (
+          normalizedPaymentMethod === "cod" &&
+          product.seller.paymentMode !== "cod_only" &&
+          product.seller.paymentMode !== "both"
+        ) {
+          return res.status(400).json({ message: `${product.seller.businessName} does not accept COD orders` });
+        }
+        if (
+          normalizedPaymentMethod === "prepaid" &&
+          product.seller.paymentMode === "cod_only"
+        ) {
+          return res.status(400).json({ message: `${product.seller.businessName} only accepts COD orders` });
         }
         productDocs.set(requestedProductId, product);
       }
@@ -314,6 +339,7 @@ router.post("/", async (req, res) => {
       razorpayPaymentId: "",
       customerName: String(customerName).trim(),
       customerPhone: String(customerPhone).trim(),
+      customerEmail: normalizedEmail,
       deliveryAddress: addressFields.deliveryAddress,
       billingAddress: addressFields.billingAddress,
       shippingAddress: addressFields.shippingAddress,
@@ -383,6 +409,7 @@ router.post("/", async (req, res) => {
         })),
         customerName: parentOrder.customerName,
         customerPhone: parentOrder.customerPhone,
+        customerEmail: parentOrder.customerEmail,
         deliveryAddress: parentOrder.deliveryAddress,
         billingAddress: parentOrder.billingAddress,
         shippingAddress: parentOrder.shippingAddress,
@@ -394,13 +421,30 @@ router.post("/", async (req, res) => {
         quantity: lines.reduce((sum, l) => sum + l.quantity, 0),
         deliveryCharge: inputDeliveryCharge,
         selectedVariants: lines[0].selectedVariants,
-        paymentMethod: "prepaid",
+        paymentMethod: normalizedPaymentMethod,
         paymentStatus: "pending",
         commissionAmountPaise: commissionPaise,
         transferStatus: "untransferred",
       });
 
       createdSubOrders.push(subOrder);
+    }
+
+    if (normalizedPaymentMethod === "cod") {
+      parentOrder.razorpayOrderId = `cod_${parentOrder._id}`;
+      parentOrder.totalAmountPaise = grandTotalPaise;
+      parentOrder.subOrders = createdSubOrders.map((o) => o._id);
+      await parentOrder.save();
+
+      await trySendOrderConfirmationForParentOrder(parentOrder._id);
+
+      return res.status(201).json({
+        parentOrderId: parentOrder._id,
+        amount: grandTotalPaise / 100,
+        currency: "INR",
+        paymentMethod: "cod",
+        subOrders: createdSubOrders,
+      });
     }
 
     // 4. Create Razorpay unified Order
@@ -427,6 +471,7 @@ router.post("/", async (req, res) => {
       amount: grandTotalPaise / 100,
       currency: "INR",
       keyId: process.env.RAZORPAY_KEY_ID || "rzp_test_mock_id",
+      paymentMethod: "prepaid",
       subOrders: createdSubOrders,
     });
 
@@ -494,6 +539,8 @@ router.post("/verify-payment", async (req, res) => {
       }
       updatedOrders.push({ _id: subOrder._id, paymentStatus: subOrder.paymentStatus });
     }
+
+    await trySendOrderConfirmationForParentOrder(parentOrder._id);
 
     return res.json({
       verified: true,
@@ -604,7 +651,7 @@ router.get("/public/status", async (req, res) => {
     }
 
     const orders = await Order.find(query)
-      .select("_id paymentStatus updatedAt createdAt")
+      .select("_id paymentStatus paymentMethod updatedAt createdAt")
       .sort({ createdAt: -1 });
 
     return res.json({ orders });
@@ -621,7 +668,7 @@ router.get("/my/export", auth, async (req, res) => {
       .sort({ createdAt: -1 });
 
     const header =
-      "Order ID,Date,Customer Name,Customer Phone,Items,Qty,Amount,Delivery Charge,Total,Status,Delivery Address,Note\n";
+      "Order ID,Date,Customer Name,Customer Phone,Customer Email,Items,Qty,Amount,Delivery Charge,Total,Status,Delivery Address,Note\n";
 
     const rows = orders
       .map((o) => {
@@ -650,6 +697,7 @@ router.get("/my/export", auth, async (req, res) => {
           esc(date),
           esc(o.customerName),
           esc(o.customerPhone),
+          esc(o.customerEmail),
           esc(itemSummary),
           esc(o.quantity),
           esc(o.amount),
@@ -696,6 +744,26 @@ router.patch("/:orderId/status", auth, async (req, res) => {
     return res.json({ order: buildOrderResponse(order) });
   } catch (error) {
     return res.status(500).json({ message: "Unable to update order status" });
+  }
+});
+
+router.patch("/:orderId/viewed", auth, async (req, res) => {
+  try {
+    const order = await Order.findOne({
+      _id: req.params.orderId,
+      seller: req.sellerId,
+    });
+
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" });
+    }
+
+    order.isViewed = true;
+    await order.save();
+
+    return res.json({ order: buildOrderResponse(order) });
+  } catch (error) {
+    return res.status(500).json({ message: "Unable to mark order as viewed" });
   }
 });
 

@@ -112,6 +112,167 @@ function stripHtml(value = "") {
   return String(value).replace(/<[^>]+>/g, "");
 }
 
+function formatMoney(value = 0) {
+  return `₹${Number(value || 0).toLocaleString("en-IN")}`;
+}
+
+function getOrderItemRows(order) {
+  const items = Array.isArray(order.items) && order.items.length > 0
+    ? order.items
+    : [{
+        productTitle: order.product?.title || "Ordered item",
+        productCategory: order.product?.category || "",
+        variantTitle: "",
+        selectedVariants: order.selectedVariants || {},
+        quantity: order.quantity,
+        unitPrice: order.amount / Math.max(1, order.quantity || 1),
+        lineTotal: order.amount,
+      }];
+
+  return items.map((item) => {
+    const variants = item.selectedVariants instanceof Map
+      ? Object.values(Object.fromEntries(item.selectedVariants.entries()))
+      : Object.values(item.selectedVariants || {});
+    const variantText = [item.variantTitle, ...variants]
+      .map((value) => String(value || "").trim())
+      .filter(Boolean)
+      .join(" / ");
+
+    return {
+      title: item.productTitle || item.product?.title || "Ordered item",
+      category: item.productCategory || item.product?.category || "",
+      variantText,
+      quantity: item.quantity || 1,
+      unitPrice: item.unitPrice || 0,
+      lineTotal: item.lineTotal || 0,
+    };
+  });
+}
+
+function buildOrderConfirmationEmailHtml({ parentOrder, orders }) {
+  const firstOrder = orders[0] || {};
+  const seller = firstOrder.seller || {};
+  const safeSellerName = escapeHtml(seller.businessName || "Seller");
+  const sellerLogo = String(seller.businessLogo || "").trim();
+  const orderDate = parentOrder.createdAt
+    ? new Date(parentOrder.createdAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })
+    : new Date().toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" });
+  const subtotal = orders.reduce((sum, order) => sum + Number(order.amount || 0), 0);
+  const deliveryTotal = orders.reduce((sum, order) => sum + Number(order.deliveryCharge || 0), 0);
+  const total = subtotal + deliveryTotal;
+  const paymentMethod = firstOrder.paymentMethod === "cod" ? "Cash on Delivery" : "Prepaid";
+
+  const itemRows = orders.flatMap(getOrderItemRows).map((item) => `
+    <tr>
+      <td style="padding:12px;border-bottom:1px solid #e5e7eb;">
+        <p style="margin:0 0 4px;color:#111827;font-size:14px;font-weight:700;">${escapeHtml(item.title)}</p>
+        ${item.category ? `<p style="margin:0 0 4px;color:#0f766e;font-size:12px;font-weight:600;">${escapeHtml(item.category)}</p>` : ""}
+        ${item.variantText ? `<p style="margin:0;color:#6b7280;font-size:12px;">${escapeHtml(item.variantText)}</p>` : ""}
+      </td>
+      <td style="padding:12px;border-bottom:1px solid #e5e7eb;color:#374151;font-size:13px;text-align:center;">${item.quantity}</td>
+      <td style="padding:12px;border-bottom:1px solid #e5e7eb;color:#111827;font-size:13px;text-align:right;">${formatMoney(item.lineTotal)}</td>
+    </tr>
+  `).join("");
+
+  const sellerDetails = [
+    seller.businessEmail ? `Email: ${escapeHtml(seller.businessEmail)}` : "",
+    seller.phone ? `Phone: ${escapeHtml(seller.phone)}` : "",
+    seller.whatsappNumber ? `WhatsApp: ${escapeHtml(seller.whatsappNumber)}` : "",
+    seller.callNumber ? `Call: ${escapeHtml(seller.callNumber)}` : "",
+    seller.businessGST ? `GST: ${escapeHtml(seller.businessGST)}` : "",
+    seller.businessAddress ? `Address: ${escapeHtml(seller.businessAddress)}` : "",
+  ].filter(Boolean);
+
+  return `
+    <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:640px;margin:auto;padding:28px;border:1px solid #e5e7eb;border-radius:18px;background:#ffffff;">
+      <div style="display:flex;align-items:center;gap:14px;margin-bottom:24px;">
+        ${sellerLogo ? `<img src="${escapeHtml(sellerLogo)}" alt="${safeSellerName}" style="width:54px;height:54px;border-radius:12px;object-fit:contain;border:1px solid #e5e7eb;" />` : ""}
+        <div>
+          <p style="margin:0;color:#6b7280;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;">Order confirmation</p>
+          <h1 style="margin:4px 0 0;color:#111827;font-size:22px;line-height:1.2;">${safeSellerName}</h1>
+        </div>
+      </div>
+
+      <p style="margin:0 0 16px;color:#374151;font-size:14px;line-height:1.6;">Hi ${escapeHtml(parentOrder.customerName || "there")}, your order has been confirmed. The seller has received your order details.</p>
+
+      <div style="border:1px solid #e5e7eb;border-radius:14px;padding:14px;margin-bottom:18px;background:#f9fafb;">
+        <p style="margin:0 0 6px;color:#111827;font-size:14px;font-weight:700;">Order #${escapeHtml(String(parentOrder._id).slice(-8).toUpperCase())}</p>
+        <p style="margin:0;color:#6b7280;font-size:13px;">${escapeHtml(orderDate)} · ${escapeHtml(paymentMethod)}</p>
+      </div>
+
+      <table style="width:100%;border-collapse:collapse;margin-bottom:18px;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;">
+        <thead>
+          <tr style="background:#f3f4f6;">
+            <th style="padding:10px 12px;text-align:left;color:#4b5563;font-size:12px;text-transform:uppercase;letter-spacing:0.06em;">Item</th>
+            <th style="padding:10px 12px;text-align:center;color:#4b5563;font-size:12px;text-transform:uppercase;letter-spacing:0.06em;">Qty</th>
+            <th style="padding:10px 12px;text-align:right;color:#4b5563;font-size:12px;text-transform:uppercase;letter-spacing:0.06em;">Total</th>
+          </tr>
+        </thead>
+        <tbody>${itemRows}</tbody>
+      </table>
+
+      <div style="margin-left:auto;max-width:260px;margin-bottom:20px;">
+        <p style="display:flex;justify-content:space-between;margin:0 0 8px;color:#4b5563;font-size:13px;"><span>Items total</span><strong>${formatMoney(subtotal)}</strong></p>
+        <p style="display:flex;justify-content:space-between;margin:0 0 8px;color:#4b5563;font-size:13px;"><span>Delivery</span><strong>${deliveryTotal ? formatMoney(deliveryTotal) : "Free"}</strong></p>
+        <p style="display:flex;justify-content:space-between;margin:10px 0 0;padding-top:10px;border-top:1px solid #e5e7eb;color:#111827;font-size:15px;"><span>Total</span><strong>${formatMoney(total)}</strong></p>
+      </div>
+
+      <div style="display:grid;gap:12px;margin-bottom:18px;">
+        <div style="border:1px solid #e5e7eb;border-radius:14px;padding:14px;">
+          <p style="margin:0 0 8px;color:#111827;font-size:13px;font-weight:700;">Shipping details</p>
+          <p style="margin:0;color:#4b5563;font-size:13px;line-height:1.6;">${escapeHtml(parentOrder.shippingCustomerName || parentOrder.customerName || "")}<br />${escapeHtml(parentOrder.shippingCustomerPhone || parentOrder.customerPhone || "")}<br />${escapeHtml(parentOrder.shippingAddress || parentOrder.deliveryAddress || "")}</p>
+        </div>
+        <div style="border:1px solid #e5e7eb;border-radius:14px;padding:14px;">
+          <p style="margin:0 0 8px;color:#111827;font-size:13px;font-weight:700;">Seller details</p>
+          <p style="margin:0;color:#4b5563;font-size:13px;line-height:1.6;">${sellerDetails.join("<br />") || safeSellerName}</p>
+        </div>
+      </div>
+
+      <p style="color:#94a3b8;font-size:11px;margin:0;line-height:1.5;">Zensos - Your Store. Your Link. Your Sales.<br />This is an automated order confirmation.</p>
+    </div>
+  `;
+}
+
+function buildOrderConfirmationEmailText({ parentOrder, orders }) {
+  const firstOrder = orders[0] || {};
+  const seller = firstOrder.seller || {};
+  const subtotal = orders.reduce((sum, order) => sum + Number(order.amount || 0), 0);
+  const deliveryTotal = orders.reduce((sum, order) => sum + Number(order.deliveryCharge || 0), 0);
+  const total = subtotal + deliveryTotal;
+  const paymentMethod = firstOrder.paymentMethod === "cod" ? "Cash on Delivery" : "Prepaid";
+  const lines = orders.flatMap(getOrderItemRows).map((item) =>
+    `- ${item.title}${item.variantText ? ` (${item.variantText})` : ""} x${item.quantity}: ${formatMoney(item.lineTotal)}`
+  );
+
+  return [
+    `Hi ${parentOrder.customerName || "there"},`,
+    "",
+    `Your order with ${seller.businessName || "the seller"} has been confirmed.`,
+    `Order ID: ${String(parentOrder._id).slice(-8).toUpperCase()}`,
+    `Payment method: ${paymentMethod}`,
+    "",
+    "Items:",
+    ...lines,
+    "",
+    `Items total: ${formatMoney(subtotal)}`,
+    `Delivery: ${deliveryTotal ? formatMoney(deliveryTotal) : "Free"}`,
+    `Total: ${formatMoney(total)}`,
+    "",
+    "Shipping:",
+    parentOrder.shippingCustomerName || parentOrder.customerName || "",
+    parentOrder.shippingCustomerPhone || parentOrder.customerPhone || "",
+    parentOrder.shippingAddress || parentOrder.deliveryAddress || "",
+    "",
+    "Seller:",
+    seller.businessName || "",
+    seller.businessEmail ? `Email: ${seller.businessEmail}` : "",
+    seller.phone ? `Phone: ${seller.phone}` : "",
+    seller.businessAddress ? `Address: ${seller.businessAddress}` : "",
+    "",
+    "Zensos",
+  ].filter((line) => line !== "").join("\n");
+}
+
 function buildOtpEmailText({ otp, plainGreeting, content }) {
   return [
     plainGreeting,
@@ -163,4 +324,17 @@ async function sendOtpEmail(toEmail, otp, options = {}) {
   });
 }
 
-module.exports = { sendOtpEmail };
+async function sendOrderConfirmationEmail(toEmail, { parentOrder, orders }) {
+  const transporter = getTransporter();
+  const sellerName = orders[0]?.seller?.businessName || "your order";
+
+  await transporter.sendMail({
+    from: `"Zensos" <${process.env.SMTP_USER}>`,
+    to: toEmail,
+    subject: `Order confirmed - ${sanitizeSubjectLine(sellerName)}`,
+    text: buildOrderConfirmationEmailText({ parentOrder, orders }),
+    html: buildOrderConfirmationEmailHtml({ parentOrder, orders }),
+  });
+}
+
+module.exports = { sendOtpEmail, sendOrderConfirmationEmail };

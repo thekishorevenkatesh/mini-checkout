@@ -8,12 +8,14 @@ import {
 
 export type CheckoutContactAddress = {
   fullName: string;
+  email?: string;
   phone: PhoneParts;
   address: AddressParts;
 };
 
 export const EMPTY_CHECKOUT_CONTACT: CheckoutContactAddress = {
   fullName: "",
+  email: "",
   phone: { countryCode: DEFAULT_COUNTRY_CODE, number: "" },
   address: { ...EMPTY_ADDRESS },
 };
@@ -25,6 +27,8 @@ type CheckoutAddressSectionProps = {
   inputClassName: string;
   datalistIdPrefix: string;
   required?: boolean;
+  showEmail?: boolean;
+  emailRequired?: boolean;
 };
 
 export function CheckoutAddressSection({
@@ -34,6 +38,8 @@ export function CheckoutAddressSection({
   inputClassName,
   datalistIdPrefix,
   required = false,
+  showEmail = false,
+  emailRequired = false,
 }: CheckoutAddressSectionProps) {
   const updateContact = (patch: Partial<CheckoutContactAddress>) => {
     onChange({ ...value, ...patch });
@@ -53,6 +59,21 @@ export function CheckoutAddressSection({
           required={required}
         />
       </label>
+      {showEmail && (
+        <label className="block space-y-1">
+          <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">
+            Email Address{emailRequired ? " *" : ""}
+          </span>
+          <input
+            type="email"
+            className={inputClassName}
+            value={value.email || ""}
+            onChange={(event) => updateContact({ email: event.target.value })}
+            required={emailRequired}
+            placeholder="you@example.com"
+          />
+        </label>
+      )}
       <label className="block space-y-1">
         <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">
           Phone Number{required ? " *" : ""}

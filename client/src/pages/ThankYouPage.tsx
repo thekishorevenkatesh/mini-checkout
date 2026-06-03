@@ -10,6 +10,7 @@ import type { OrderStatus } from "../types";
 type PublicOrderStatus = {
   _id: string;
   paymentStatus: OrderStatus;
+  paymentMethod?: "prepaid" | "cod";
 };
 
 const SUCCESS_STATUSES: OrderStatus[] = ["paid", "delivered"];
@@ -23,6 +24,7 @@ export function ThankYouPage() {
   const [error, setError] = useState("");
 
   const sellerSlug = searchParams.get("sellerSlug") || "";
+  const requestedPaymentMethod = searchParams.get("paymentMethod") || "";
   const orderIds = useMemo(
     () =>
       (searchParams.get("orderIds") || "")
@@ -68,11 +70,19 @@ export function ThankYouPage() {
     orders.length > 0 &&
     orders.length === orderIds.length &&
     orders.every((order) => SUCCESS_STATUSES.includes(order.paymentStatus));
+  const isCodOrder =
+    requestedPaymentMethod === "cod" ||
+    (orders.length > 0 && orders.every((order) => order.paymentMethod === "cod"));
+  const orderAccepted =
+    isCodOrder &&
+    orders.length > 0 &&
+    orders.length === orderIds.length &&
+    orders.every((order) => order.paymentStatus !== "cancelled");
 
   const anyCancelled = orders.some((order) => order.paymentStatus === "cancelled");
 
   useEffect(() => {
-    if (orderIds.length === 0 || allSuccessful || anyCancelled) {
+    if (orderIds.length === 0 || allSuccessful || orderAccepted || anyCancelled) {
       return;
     }
 
@@ -81,7 +91,7 @@ export function ThankYouPage() {
     }, POLL_INTERVAL_MS);
 
     return () => window.clearInterval(poller);
-  }, [allSuccessful, anyCancelled, fetchStatuses, orderIds.length]);
+  }, [allSuccessful, anyCancelled, fetchStatuses, orderAccepted, orderIds.length]);
 
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-4xl items-center justify-center px-3 py-8 sm:px-4 sm:py-10">
@@ -89,16 +99,18 @@ export function ThankYouPage() {
         <div className="border-b app-divider bg-gradient-to-r from-white via-teal-50/70 to-sky-50/70 px-5 py-5 dark:from-slate-950 dark:via-slate-900 dark:to-slate-900 sm:px-8">
           <div className="inline-flex items-center gap-3 rounded-full border border-teal-100 bg-white/85 px-3 py-2 text-xs font-bold uppercase tracking-[0.18em] text-teal-700 dark:border-teal-900/40 dark:bg-slate-950/80 dark:text-teal-300">
             <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-teal-600 text-white dark:bg-teal-500">
-              <AppIcon name={allSuccessful ? "check" : "pending"} className="text-[14px]" />
+              <AppIcon name={allSuccessful || orderAccepted ? "check" : "pending"} className="text-[14px]" />
             </span>
-            Payment Status
+            {isCodOrder ? "Order Status" : "Payment Status"}
           </div>
           <h1 className="mt-4 font-heading text-2xl font-bold text-slate-900 sm:text-3xl dark:text-slate-100">
-          {allSuccessful ? "Thank you for your payment" : "We are checking your payment"}
+          {orderAccepted ? "Thank you for your order" : allSuccessful ? "Thank you for your payment" : "We are checking your payment"}
           </h1>
 
           <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-600 dark:text-slate-300">
-          {allSuccessful
+          {orderAccepted
+            ? "Your COD order has been placed successfully. We have emailed the order confirmation with seller and item details."
+            : allSuccessful
             ? "Your payment has been detected successfully. The seller can now continue processing your order."
             : anyCancelled
               ? "This payment attempt looks cancelled. You can go back to the store and try again."

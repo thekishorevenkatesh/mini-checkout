@@ -4,9 +4,19 @@ import type { CheckoutContactAddress } from "../components/forms/CheckoutAddress
 
 export function validateCheckoutContact(
   contact: CheckoutContactAddress,
-  label: string
+  label: string,
+  options: { requireEmail?: boolean } = {}
 ): string {
   if (!contact.fullName.trim()) return `Enter full name for ${label}.`;
+  if (options.requireEmail && !String(contact.email || "").trim()) {
+    return `Enter email address for ${label}.`;
+  }
+  if (
+    String(contact.email || "").trim() &&
+    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(contact.email).trim())
+  ) {
+    return `Enter a valid email address for ${label}.`;
+  }
   if (!contact.phone.number.trim()) return `Enter phone number for ${label}.`;
   const addressError = getAddressValidationError(contact.address);
   if (addressError) return `${label}: ${addressError}`;

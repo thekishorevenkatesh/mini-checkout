@@ -24,6 +24,12 @@ const parentOrderSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
+    customerEmail: {
+      type: String,
+      trim: true,
+      lowercase: true,
+      default: "",
+    },
     deliveryAddress: {
       type: String,
       required: true,
@@ -75,6 +81,10 @@ const parentOrderSchema = new mongoose.Schema(
         ref: "Order",
       },
     ],
+    orderConfirmationEmailSentAt: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: true,

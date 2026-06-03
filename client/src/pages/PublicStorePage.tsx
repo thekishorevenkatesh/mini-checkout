@@ -19,7 +19,7 @@ import {
   formatCheckoutContactAddress,
   validateCheckoutContact,
 } from "../utils/orderAddresses";
-import type { Product, Seller, VariantItem } from "../types";
+import type { PaymentMethod, Product, Seller, VariantItem } from "../types";
 import {
   collectCategoryTabs,
   getProductCategories,
@@ -406,6 +406,7 @@ export function PublicStorePage() {
   const [billingContact, setBillingContact] = useState<CheckoutContactAddress>(EMPTY_CHECKOUT_CONTACT);
   const [shippingContact, setShippingContact] = useState<CheckoutContactAddress>(EMPTY_CHECKOUT_CONTACT);
   const [shippingSameAsBilling, setShippingSameAsBilling] = useState(true);
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("prepaid");
   const [note, setNote] = useState("");
 
   const checkoutInputClassName =
@@ -415,6 +416,7 @@ export function PublicStorePage() {
     if (!shippingSameAsBilling) return;
     setShippingContact({
       fullName: billingContact.fullName,
+      email: billingContact.email,
       phone: { ...billingContact.phone },
       address: { ...billingContact.address },
     });
@@ -582,6 +584,17 @@ export function PublicStorePage() {
 
   const grandTotal = itemsTotal + deliveryCharge;
   const cartCount = Object.values(cart).reduce((s, i) => s + i.quantity, 0);
+  const allowsPrepaid = seller?.paymentMode !== "cod_only";
+  const allowsCod = seller?.paymentMode === "cod_only" || seller?.paymentMode === "both";
+
+  useEffect(() => {
+    if (!seller) return;
+    if (seller.paymentMode === "cod_only") {
+      setPaymentMethod("cod");
+    } else {
+      setPaymentMethod("prepaid");
+    }
+  }, [seller?.paymentMode]);
 
   const policyMeta: Record<PolicyKey, { title: string; content: string }> = useMemo(() => ({
     privacyPolicy: {
@@ -798,7 +811,7 @@ export function PublicStorePage() {
     if (cartEntries.length === 0) { setError("Select at least one product."); return; }
     if (!sellerSlug) { setError("Store link is invalid."); return; }
     if (!seller) { setError("Seller store unavailable."); return; }
-    const billingError = validateCheckoutContact(billingContact, "billing address");
+    const billingError = validateCheckoutContact(billingContact, "billing address", { requireEmail: true });
     if (billingError) { setError(billingError); return; }
     if (!shippingSameAsBilling) {
       const shippingError = validateCheckoutContact(shippingContact, "shipping address");
@@ -816,27 +829,20 @@ export function PublicStorePage() {
 
     setSubmitting(true);
     try {
-      // 1. Load Razorpay script
-      const scriptLoaded = await loadRazorpayScript();
-      if (!scriptLoaded) {
-        setError("Failed to load Razorpay payment gateway. Please check your internet connection.");
-        setSubmitting(false);
-        return;
-      }
-
-      // 2. Build multi-vendor delivery charges mapping
+      // 1. Build multi-vendor delivery charges mapping
       const deliveryChargesMap: Record<string, number> = {};
       if (seller) {
         deliveryChargesMap[seller._id] = deliveryCharge;
       }
 
-      // 3. Post to backend to generate unified Razorpay order
+      // 2. Post to backend to generate order
     const response = await api.post<{
   parentOrderId: string;
-  razorpayOrderId: string;
+  razorpayOrderId?: string;
   amount: number;
   currency: string;
-  keyId: string;
+  keyId?: string;
+  paymentMethod: PaymentMethod;
   subOrders: Array<{ _id: string }>;
 }>("/orders", {
   items: cartEntries.map(({ item }) => ({
@@ -847,7 +853,9 @@ export function PublicStorePage() {
   })),
 
   customerName: billingContact.fullName.trim(),
+  customerEmail: String(billingContact.email || "").trim(),
   customerPhone: formatPhone(billingContact.phone),
+  paymentMethod,
 
   billingAddress: formatCheckoutContactAddress(billingContact),
   billingAddressParts: billingContact.address,
@@ -890,6 +898,43 @@ const {
   currency,
   subOrders,
 } = response.data;
+const orderIds = subOrders.map((o) => o._id);
+
+if (paymentMethod === "cod") {
+  setBillingContact(EMPTY_CHECKOUT_CONTACT);
+  setShippingContact(EMPTY_CHECKOUT_CONTACT);
+  setShippingSameAsBilling(true);
+  setPaymentMethod(seller.paymentMode === "cod_only" ? "cod" : "prepaid");
+  setNote("");
+  setCart({});
+  resetSavedProgress();
+
+  const params = new URLSearchParams();
+  if (sellerSlug) {
+    params.set("sellerSlug", sellerSlug);
+  }
+  params.set("orderIds", orderIds.join(","));
+  params.set("paymentMethod", "cod");
+
+  navigate(`/thank-you?${params.toString()}`, {
+    replace: true,
+  });
+  setSubmitting(false);
+  return;
+}
+
+if (!razorpayOrderId || !keyId) {
+  setError("Could not generate payment order.");
+  setSubmitting(false);
+  return;
+}
+
+const scriptLoaded = await loadRazorpayScript();
+if (!scriptLoaded) {
+  setError("Failed to load Razorpay payment gateway. Please check your internet connection.");
+  setSubmitting(false);
+  return;
+}
 
 // Razorpay checkout
 const options = {
@@ -907,6 +952,7 @@ const options = {
 
   prefill: {
     name: billingContact.fullName.trim(),
+    email: String(billingContact.email || "").trim(),
     contact: formatPhone(billingContact.phone),
   },
 
@@ -918,7 +964,6 @@ const options = {
     try {
       // Verify on backend so payment status becomes "paid" immediately.
       // This avoids relying solely on Razorpay webhooks for the UI.
-      const orderIds = subOrders.map((o) => o._id);
       try {
         await api.post("/orders/verify-payment", {
           razorpay_order_id: paymentRes?.razorpay_order_id,
@@ -935,6 +980,7 @@ const options = {
       setBillingContact(EMPTY_CHECKOUT_CONTACT);
       setShippingContact(EMPTY_CHECKOUT_CONTACT);
       setShippingSameAsBilling(true);
+      setPaymentMethod(seller.paymentMode === "cod_only" ? "cod" : "prepaid");
       setNote("");
       setCart({});
       resetSavedProgress();
@@ -944,6 +990,7 @@ const options = {
         params.set("sellerSlug", sellerSlug);
       }
       params.set("orderIds", orderIds.join(","));
+      params.set("paymentMethod", "prepaid");
 
       navigate(`/thank-you?${params.toString()}`, {
         replace: true,
@@ -1497,6 +1544,8 @@ rzp.open(); } catch (err: any) {
               inputClassName={checkoutInputClassName}
               datalistIdPrefix="billing-"
               required
+              showEmail
+              emailRequired
             />
             <label className="flex items-start gap-2.5 rounded-xl border border-slate-200 bg-slate-50/80 px-3 py-2.5 dark:border-slate-700 dark:bg-slate-900/50">
               <input
@@ -1519,15 +1568,48 @@ rzp.open(); } catch (err: any) {
                 required
               />
             ) : null}
+            {(allowsPrepaid || allowsCod) && (
+              <fieldset className="space-y-2 rounded-xl border border-slate-200 bg-slate-50/80 p-3 dark:border-slate-700 dark:bg-slate-900/50">
+                <legend className="px-1 text-sm font-bold text-slate-800 dark:text-slate-200">Payment Method</legend>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {allowsPrepaid && (
+                    <label className={`flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2.5 text-sm font-semibold transition ${paymentMethod === "prepaid" ? "border-teal-300 bg-teal-50 text-teal-800 dark:border-teal-700 dark:bg-teal-950/50 dark:text-teal-200" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-900"}`}>
+                      <input
+                        type="radio"
+                        name="paymentMethod"
+                        value="prepaid"
+                        checked={paymentMethod === "prepaid"}
+                        onChange={() => setPaymentMethod("prepaid")}
+                        className="h-4 w-4 text-teal-600 focus:ring-teal-500"
+                      />
+                      Pay Online
+                    </label>
+                  )}
+                  {allowsCod && (
+                    <label className={`flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2.5 text-sm font-semibold transition ${paymentMethod === "cod" ? "border-zinc-400 bg-zinc-100 text-zinc-900 dark:border-zinc-500 dark:bg-zinc-800 dark:text-zinc-100" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300 dark:hover:bg-slate-900"}`}>
+                      <input
+                        type="radio"
+                        name="paymentMethod"
+                        value="cod"
+                        checked={paymentMethod === "cod"}
+                        onChange={() => setPaymentMethod("cod")}
+                        className="h-4 w-4 text-zinc-700 focus:ring-zinc-500"
+                      />
+                      Cash on Delivery
+                    </label>
+                  )}
+                </div>
+              </fieldset>
+            )}
             <label className="block space-y-1">
               <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">Note (optional)</span>
               <textarea className="min-h-12 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400 dark:bg-slate-900 dark:border-slate-700 dark:text-slate-100"
                 placeholder="Special instructions..." value={note} onChange={e => setNote(e.target.value)} />
             </label>
 
-            <button type="submit" disabled={submitting || selectedItems.length === 0 || !billingContact.fullName.trim() || !billingContact.phone.number.trim()}
+            <button type="submit" disabled={submitting || selectedItems.length === 0 || !billingContact.fullName.trim() || !String(billingContact.email || "").trim() || !billingContact.phone.number.trim()}
               className="w-full rounded-xl bg-gradient-to-r from-emerald-500 via-teal-500 to-sky-500 px-4 py-3.5 text-sm font-semibold text-white shadow-md transition hover:from-emerald-400 hover:via-teal-400 hover:to-sky-400 disabled:from-slate-300 disabled:via-slate-300 disabled:to-slate-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-500 dark:hover:from-emerald-500 dark:hover:via-teal-500 dark:hover:to-sky-500 mt-2">
-              {submitting ? "Processing payment..." : `Pay & Place Order (₹${grandTotal})`}
+              {submitting ? "Placing order..." : paymentMethod === "cod" ? `Place COD Order (₹${grandTotal})` : `Pay & Place Order (₹${grandTotal})`}
             </button>
           </form>
         </div>
