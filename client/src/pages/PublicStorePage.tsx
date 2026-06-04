@@ -408,6 +408,7 @@ export function PublicStorePage() {
   const [shippingSameAsBilling, setShippingSameAsBilling] = useState(true);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("prepaid");
   const [note, setNote] = useState("");
+  const [platformCommissionPercentage, setPlatformCommissionPercentage] = useState(1);
 
   const checkoutInputClassName =
     "w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-400 dark:bg-slate-900 dark:border-slate-700 dark:text-slate-100";
@@ -425,6 +426,18 @@ export function PublicStorePage() {
   const [successMessage, setSuccessMessage] = useState("");
   const [proofSuccess, setProofSuccess] = useState("");
   const [activePolicy, setActivePolicy] = useState<PolicyKey | null>(null);
+  useEffect(() => {
+    async function fetchCommission() {
+      try {
+        const response = await api.get<{ commissionPercentage: number; commissionMode: "added" }>("/orders/commission");
+        setPlatformCommissionPercentage(Number(response.data.commissionPercentage) || 1);
+      } catch {
+        setPlatformCommissionPercentage(1);
+      }
+    }
+    void fetchCommission();
+  }, []);
+
   useEffect(() => {
     async function fetchStore() {
       if (!sellerSlug) { setError("Invalid store link."); setLoading(false); return; }
@@ -582,7 +595,8 @@ export function PublicStorePage() {
     return seller.defaultDeliveryCharge ?? 0;
   }, [itemsTotal, seller]);
 
-  const grandTotal = itemsTotal + deliveryCharge;
+  const platformFee = Math.round(itemsTotal * 100 * platformCommissionPercentage / 100) / 100;
+  const grandTotal = itemsTotal + deliveryCharge + platformFee;
   const cartCount = Object.values(cart).reduce((s, i) => s + i.quantity, 0);
   const allowsPrepaid = seller?.paymentMode !== "cod_only";
   const allowsCod = seller?.paymentMode === "cod_only" || seller?.paymentMode === "both";
@@ -1506,20 +1520,24 @@ rzp.open(); } catch (err: any) {
             </div>
             <div className="border-t border-slate-200 pt-2 space-y-1">
               <div className="flex justify-between text-sm text-slate-600">
-                <span>Items total</span><span>₹{itemsTotal}</span>
+                <span>Items total</span><span>&#8377;{itemsTotal.toLocaleString("en-IN")}</span>
               </div>
               <div className="flex items-center justify-between text-sm text-slate-600">
                 <span>
                   {seller?.deliveryMode === "flat_rate"
-                    ? `Delivery charge${seller.freeDeliveryThreshold > 0 ? ` (Free above ₹${seller.freeDeliveryThreshold})` : ""}`
+                    ? `Delivery charge${seller.freeDeliveryThreshold > 0 ? ` (Free above Rs. ${seller.freeDeliveryThreshold})` : ""}`
                     : "Delivery charge"}
                 </span>
                 <span className="font-semibold text-slate-800">
-                  {deliveryCharge === 0 ? "Free" : `₹${deliveryCharge}`}
+                  {deliveryCharge === 0 ? "Free" : <>&#8377;{deliveryCharge.toLocaleString("en-IN")}</>}
                 </span>
               </div>
+              <div className="flex items-center justify-between gap-3 text-sm text-slate-600">
+                <span>Platform charges ({platformCommissionPercentage}%)</span>
+                <span className="font-semibold text-slate-800">&#8377;{platformFee.toLocaleString("en-IN")}</span>
+              </div>
               <div className="flex justify-between font-bold text-slate-900 pt-1 border-t border-slate-200 text-sm">
-                <span>Total Payable</span><span>₹{grandTotal}</span>
+                <span>Total Payable</span><span>&#8377;{grandTotal.toLocaleString("en-IN")}</span>
               </div>
             </div>
           </div>
@@ -1531,7 +1549,7 @@ rzp.open(); } catch (err: any) {
             </span>
             <div className="space-y-1 pt-0.5">
               <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">Checkout & Payment</p>
-              <p className="text-sm text-slate-600 dark:text-slate-300">Enter billing and shipping details below. Your payment goes directly to the vendor via Razorpay Route after checkout.</p>
+              <p className="text-sm text-slate-600 dark:text-slate-300">Enter billing and shipping details below. Vendor settlement is processed via Razorpay Route after the platform charge is retained.</p>
             </div>
           </div>
 
@@ -1989,3 +2007,5 @@ rzp.open(); } catch (err: any) {
     </>
   );
 }
+
+

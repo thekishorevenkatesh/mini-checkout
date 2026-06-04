@@ -81,8 +81,11 @@ router.get("/sellers/:sellerId", adminAuth, async (req, res) => {
 
 const TransactionLedger = require("../models/TransactionLedger");
 const Order = require("../models/Order");
+const AuditLog = require("../models/AuditLog");
+const razorpay = require("../utils/razorpay");
 const {
   collectKycIssues,
+  isPayoutEligible,
   recordComplianceEvent,
 } = require("../utils/kycCompliance");
 const {
@@ -90,6 +93,17 @@ const {
   provisionVendorLinkedAccount,
   syncLinkedAccountOnboardingStatus,
 } = require("../utils/razorpayLinkedAccount");
+const {
+  getPlatformCommissionPercentage,
+  normalizeCommissionPercentage,
+  setPlatformCommissionPercentage,
+} = require("../utils/platformSettings");
+const {
+  executeVendorTransfer,
+  hasProcessedTransfer,
+  recordPlatformCommissionLedger,
+  recordVendorTransferLedger,
+} = require("../utils/settlement");
 
 router.patch("/sellers/:sellerId/approval", adminAuth, async (req, res) => {
   try {
@@ -246,6 +260,204 @@ router.get("/financial-ledger", adminAuth, async (req, res) => {
 });
 
 // ─── ADMIN: Fetch Outgoing Transfers & Statuses ─────────────────────────
+router.get("/platform-settings", adminAuth, async (_req, res) => {
+  try {
+    const commissionPercentage = await getPlatformCommissionPercentage();
+    return res.json({ commissionPercentage, commissionMode: "added" });
+  } catch (_error) {
+    return res.status(500).json({ message: "Unable to fetch platform settings" });
+  }
+});
+
+router.patch("/platform-settings/commission", adminAuth, async (req, res) => {
+  try {
+    const rawPercentage = req.body?.commissionPercentage;
+    if (!Number.isFinite(Number(rawPercentage))) {
+      return res.status(400).json({ message: "Commission percentage must be a number" });
+    }
+
+    const commissionPercentage = normalizeCommissionPercentage(rawPercentage);
+    if (commissionPercentage < 0 || commissionPercentage > 100) {
+      return res.status(400).json({ message: "Commission percentage must be between 0 and 100" });
+    }
+
+    const previousPercentage = await getPlatformCommissionPercentage();
+    await setPlatformCommissionPercentage(commissionPercentage, req.adminUsername || "admin");
+
+    await AuditLog.create({
+      action: "platform_commission_updated",
+      actorType: "admin",
+      actorId: req.adminUsername || "admin",
+      targetType: "platform_setting",
+      targetId: "platform_commission_percentage",
+      metadata: { previousPercentage, nextPercentage: commissionPercentage },
+    });
+
+    return res.json({ commissionPercentage, commissionMode: "added" });
+  } catch (_error) {
+    return res.status(500).json({ message: "Unable to update platform commission" });
+  }
+});
+
+router.get("/platform-revenue", adminAuth, async (req, res) => {
+  try {
+    const from = req.query.from ? new Date(String(req.query.from)) : null;
+    const to = req.query.to ? new Date(String(req.query.to)) : null;
+    const createdAt = {};
+    if (from && !Number.isNaN(from.getTime())) createdAt.$gte = from;
+    if (to && !Number.isNaN(to.getTime())) createdAt.$lte = to;
+
+    const ledgerQuery = { sellerId: null, purpose: "platform_commission", type: "credit" };
+    if (Object.keys(createdAt).length > 0) ledgerQuery.createdAt = createdAt;
+
+    const ledgers = await TransactionLedger.find(ledgerQuery)
+      .populate({
+        path: "orderId",
+        select: "_id seller platformFeePaise grossAmountPaise vendorAmountPaise settlementStatus transferStatus createdAt",
+        populate: { path: "seller", select: "_id businessName slug" },
+      })
+      .sort({ createdAt: -1 })
+      .limit(500);
+
+    const totalPlatformRevenuePaise = ledgers.reduce(
+      (sum, log) => sum + Math.max(0, Number(log.amountPaise) || 0),
+      0
+    );
+    const revenueByVendorMap = new Map();
+    const revenueByDateMap = new Map();
+
+    for (const log of ledgers) {
+      const seller = log.orderId?.seller;
+      const sellerId = seller?._id?.toString?.() || "unknown";
+      const vendor = revenueByVendorMap.get(sellerId) || {
+        sellerId,
+        businessName: seller?.businessName || "Unknown vendor",
+        slug: seller?.slug || "",
+        revenue: 0,
+        orders: 0,
+      };
+      vendor.revenue += log.amountPaise / 100;
+      vendor.orders += 1;
+      revenueByVendorMap.set(sellerId, vendor);
+
+      const date = new Date(log.createdAt).toISOString().slice(0, 10);
+      revenueByDateMap.set(date, (revenueByDateMap.get(date) || 0) + log.amountPaise / 100);
+    }
+
+    const settlementTracking = await Order.aggregate([
+      { $match: { paymentMethod: "prepaid" } },
+      {
+        $group: {
+          _id: "$settlementStatus",
+          count: { $sum: 1 },
+          vendorAmountPaise: { $sum: "$vendorAmountPaise" },
+          platformFeePaise: { $sum: "$platformFeePaise" },
+        },
+      },
+    ]);
+
+    return res.json({
+      currentCommissionPercentage: await getPlatformCommissionPercentage(),
+      totalPlatformRevenue: totalPlatformRevenuePaise / 100,
+      revenueByDate: Array.from(revenueByDateMap.entries()).map(([date, revenue]) => ({ date, revenue })),
+      revenueByVendor: Array.from(revenueByVendorMap.values()).sort((a, b) => b.revenue - a.revenue),
+      settlementTracking: settlementTracking.map((row) => ({
+        status: row._id || "unsettled",
+        count: row.count,
+        vendorAmount: (row.vendorAmountPaise || 0) / 100,
+        platformFee: (row.platformFeePaise || 0) / 100,
+      })),
+      ledgers,
+    });
+  } catch (_error) {
+    return res.status(500).json({ message: "Unable to fetch platform revenue" });
+  }
+});
+
+router.get("/settlement-logs", adminAuth, async (_req, res) => {
+  try {
+    const settlements = await Order.find({ paymentMethod: "prepaid" })
+      .populate("seller", "_id businessName slug razorpayAccountId razorpayAccountStatus")
+      .populate("parentOrder", "_id razorpayPaymentId razorpayOrderId")
+      .sort({ createdAt: -1 })
+      .limit(200);
+
+    return res.json({ settlements });
+  } catch (_error) {
+    return res.status(500).json({ message: "Unable to fetch settlement logs" });
+  }
+});
+
+router.post("/settlements/:orderId/retry", adminAuth, async (req, res) => {
+  try {
+    const subOrder = await Order.findById(req.params.orderId).populate("parentOrder");
+    if (!subOrder) return res.status(404).json({ message: "Order not found" });
+    if (hasProcessedTransfer(subOrder)) {
+      return res.status(400).json({ message: "Vendor settlement already completed for this order" });
+    }
+    if (subOrder.paymentStatus !== "paid" && subOrder.paymentStatus !== "delivered") {
+      return res.status(400).json({ message: "Transfer can only be retried for paid orders" });
+    }
+
+    const paymentId = subOrder.parentOrder?.razorpayPaymentId;
+    if (!paymentId) return res.status(400).json({ message: "Order payment has not been captured yet" });
+
+    const seller = await Seller.findById(subOrder.seller);
+    if (!seller) return res.status(404).json({ message: "Seller not found" });
+    if (!seller.razorpayAccountId || seller.razorpayAccountStatus !== "active" || !isPayoutEligible(seller)) {
+      return res.status(400).json({ message: "Seller linked account or KYC is not payout eligible" });
+    }
+
+    subOrder.transferStatus = "pending";
+    subOrder.settlementStatus = "pending";
+    await subOrder.save();
+
+    const result = await executeVendorTransfer(razorpay, { paymentId, seller, subOrder });
+    if (!result.skipped) {
+      subOrder.transferId = result.transferId;
+      subOrder.transferStatus = "processed";
+      subOrder.settlementStatus = "processed";
+      subOrder.settlementReferenceIds = Array.from(
+        new Set([...(subOrder.settlementReferenceIds || []), result.transferId].filter(Boolean))
+      );
+      await subOrder.save();
+      await recordVendorTransferLedger({
+        subOrder,
+        seller,
+        transferId: result.transferId,
+        transferAmountPaise: result.transferAmountPaise,
+      });
+      await recordPlatformCommissionLedger({ subOrder, status: "settled" });
+    }
+
+    await AuditLog.create({
+      action: "admin_settlement_retry",
+      actorType: "admin",
+      actorId: req.adminUsername || "admin",
+      targetType: "order",
+      targetId: String(subOrder._id),
+      metadata: {
+        razorpayPaymentId: paymentId,
+        transferId: subOrder.transferId || result.transferId || "",
+        vendorAmountPaise: subOrder.vendorAmountPaise,
+      },
+    });
+
+    return res.json({ message: "Settlement retry completed", settlement: subOrder });
+  } catch (error) {
+    return res.status(500).json({ message: "Unable to retry settlement", error: error.message });
+  }
+});
+
+router.get("/audit-logs", adminAuth, async (_req, res) => {
+  try {
+    const logs = await AuditLog.find({}).sort({ createdAt: -1 }).limit(200);
+    return res.json({ logs });
+  } catch (_error) {
+    return res.status(500).json({ message: "Unable to fetch audit logs" });
+  }
+});
+
 router.get("/transfers", adminAuth, async (req, res) => {
   try {
     const orders = await Order.find({ paymentMethod: "prepaid" })

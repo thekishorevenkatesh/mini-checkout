@@ -2859,28 +2859,82 @@ export function DashboardPage() {
             <div className="text-center py-10 text-slate-500">Loading earnings ledger...</div>
           ) : earningsData ? (
             <>
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 <article className="rounded-3xl border border-white/70 bg-gradient-to-br from-emerald-500 to-teal-600 p-5 text-white shadow-card">
                   <p className="text-xs font-semibold uppercase tracking-wider text-emerald-100">Gross Sales</p>
                   <p className="mt-2 font-heading text-2xl font-bold">₹{earningsData.summary.grossRevenue.toLocaleString("en-IN")}</p>
-                  <p className="text-[10px] text-emerald-200 mt-1">Total revenue processed before splits</p>
+                  <p className="text-[10px] text-emerald-200 mt-1">Product plus delivery before platform charges</p>
                 </article>
                 <article className="rounded-3xl border border-white/70 bg-gradient-to-br from-teal-600 to-sky-600 p-5 text-white shadow-card">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-teal-100">Direct Settlements</p>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-teal-100">Net Earnings</p>
                   <p className="mt-2 font-heading text-2xl font-bold">₹{earningsData.summary.netEarnings.toLocaleString("en-IN")}</p>
-                  <p className="text-[10px] text-teal-200 mt-1">Transferred to your linked account after each payment</p>
+                  <p className="text-[10px] text-teal-200 mt-1">Vendor payable after platform charges</p>
                 </article>
                 <article className="rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card dark:border-teal-900/35 dark:bg-slate-900">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Refunds & Reversals</p>
-                  <p className="mt-2 font-heading text-2xl font-bold text-slate-900 dark:text-white">₹{(earningsData.summary.refunds ?? earningsData.summary.reversals).toLocaleString("en-IN")}</p>
-                  <p className="text-[10px] text-slate-500 mt-1">Amounts clawed back from refunds</p>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Platform Charges</p>
+                  <p className="mt-2 font-heading text-2xl font-bold text-slate-900 dark:text-white">₹{(earningsData.summary.platformChargesDeducted || 0).toLocaleString("en-IN")}</p>
+                  <p className="text-[10px] text-slate-500 mt-1">Deducted from gross sales</p>
                 </article>
                 <article className="rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card dark:border-teal-900/35 dark:bg-slate-900">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Delivery Fees</p>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Delivery Earnings</p>
                   <p className="mt-2 font-heading text-2xl font-bold text-slate-900 dark:text-white">₹{earningsData.summary.deliveryFees.toLocaleString("en-IN")}</p>
-                  <p className="text-[10px] text-slate-500 mt-1">Total delivery earnings retained</p>
+                  <p className="text-[10px] text-slate-500 mt-1">Delivery charges included in vendor payable</p>
                 </article>
               </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <article className="rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card dark:border-teal-900/35 dark:bg-slate-900">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Pending Settlements</p>
+                  <p className="mt-2 font-heading text-2xl font-bold text-slate-900 dark:text-white">₹{(earningsData.summary.pendingSettlements || 0).toLocaleString("en-IN")}</p>
+                  <p className="text-[10px] text-slate-500 mt-1">Paid orders waiting for transfer</p>
+                </article>
+                <article className="rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card dark:border-teal-900/35 dark:bg-slate-900">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Completed Settlements</p>
+                  <p className="mt-2 font-heading text-2xl font-bold text-slate-900 dark:text-white">₹{(earningsData.summary.completedSettlements || 0).toLocaleString("en-IN")}</p>
+                  <p className="text-[10px] text-slate-500 mt-1">Transferred to linked account</p>
+                </article>
+              </div>
+
+              <article className="rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card dark:border-teal-900/35 dark:bg-slate-900/90">
+                <div className="mb-4">
+                  <h3 className="font-heading text-base font-bold text-slate-800 dark:text-white">Order-wise Earnings</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">Platform charges are included in customer payment and deducted before settlement</p>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="border-b border-slate-100 text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:border-slate-800">
+                        <th className="py-2.5 px-2">Order ID</th>
+                        <th className="py-2.5 px-2 text-right">Product</th>
+                        <th className="py-2.5 px-2 text-right">Delivery</th>
+                        <th className="py-2.5 px-2 text-right">Platform Fee</th>
+                        <th className="py-2.5 px-2 text-right">Net Earning</th>
+                        <th className="py-2.5 px-2">Settlement</th>
+                        <th className="py-2.5 px-2">Settlement Date</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(earningsData.orders || []).length === 0 ? (
+                        <tr>
+                          <td colSpan={7} className="text-center py-10 text-slate-500">No earnings orders recorded yet.</td>
+                        </tr>
+                      ) : (
+                        earningsData.orders.map((order: any) => (
+                          <tr key={order.orderId} className="border-b border-slate-100 hover:bg-slate-50/50 dark:border-slate-800 dark:hover:bg-slate-800/40">
+                            <td className="py-3 px-2 font-mono text-slate-700 dark:text-slate-300">{String(order.orderId).slice(-8)}</td>
+                            <td className="py-3 px-2 text-right font-semibold">₹{Number(order.productAmount || 0).toLocaleString("en-IN")}</td>
+                            <td className="py-3 px-2 text-right">₹{Number(order.deliveryCharge || 0).toLocaleString("en-IN")}</td>
+                            <td className="py-3 px-2 text-right text-rose-600">₹{Number(order.platformFee || 0).toLocaleString("en-IN")}</td>
+                            <td className="py-3 px-2 text-right font-bold text-emerald-600">₹{Number(order.netVendorEarning || 0).toLocaleString("en-IN")}</td>
+                            <td className="py-3 px-2 capitalize">{String(order.settlementStatus || "unsettled").replace(/_/g, " ")}</td>
+                            <td className="py-3 px-2 text-slate-500 whitespace-nowrap">{order.settlementDate ? new Date(order.settlementDate).toLocaleDateString("en-IN") : "-"}</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </article>
 
               {/* Transaction Ledger Table */}
               <article className="rounded-3xl border border-white/70 bg-white/90 p-5 shadow-card dark:border-teal-900/35 dark:bg-slate-900/90">
@@ -3584,4 +3638,5 @@ export function DashboardPage() {
     </main>
   );
 }
+
 
