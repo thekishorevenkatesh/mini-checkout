@@ -680,22 +680,72 @@ router.get("/earnings", auth, async (req, res) => {
     const ledgers = await TransactionLedger.find({ sellerId: req.sellerId })
       .populate("orderId", "_id customerName createdAt amount deliveryCharge")
       .sort({ createdAt: -1 });
+    const orders = await Order.find({
+      seller: req.sellerId,
+      paymentStatus: { $ne: "cancelled" },
+    })
+      .select("_id amount deliveryCharge commissionAmountPaise paymentStatus productAmountPaise deliveryChargePaise platformFeePaise platformFeePercentage grossAmountPaise vendorAmountPaise settlementStatus transferStatus transferId settlementReferenceIds createdAt updatedAt")
+      .sort({ createdAt: -1 });
 
     let grossRevenuePaise = 0;
     let netEarningsPaise = 0;
     let deliveryFeesPaise = 0;
+    let platformChargesPaise = 0;
+    let pendingSettlementsPaise = 0;
+    let completedSettlementsPaise = 0;
     let reversalsPaise = 0;
 
+    const orderRows = orders.map((order) => {
+      const productAmountPaise = Math.max(
+        0,
+        Number(order.productAmountPaise) || Math.round(Number(order.amount || 0) * 100)
+      );
+      const deliveryChargePaise = Math.max(
+        0,
+        Number(order.deliveryChargePaise) || Math.round(Number(order.deliveryCharge || 0) * 100)
+      );
+      const platformFeePaise = Math.max(
+        0,
+        Number(order.platformFeePaise) || Number(order.commissionAmountPaise) || 0
+      );
+      const grossAmountPaise = Math.max(
+        0,
+        Number(order.grossAmountPaise) || productAmountPaise + deliveryChargePaise
+      );
+      const vendorAmountPaise = Math.max(
+        0,
+        Number(order.vendorAmountPaise) || grossAmountPaise - platformFeePaise
+      );
+      const settlementStatus = order.settlementStatus || order.transferStatus || "unsettled";
+
+      grossRevenuePaise += grossAmountPaise;
+      deliveryFeesPaise += deliveryChargePaise;
+      platformChargesPaise += platformFeePaise;
+      netEarningsPaise += vendorAmountPaise;
+
+      if (settlementStatus === "processed") {
+        completedSettlementsPaise += vendorAmountPaise;
+      } else if (order.paymentStatus === "paid" || order.paymentStatus === "delivered") {
+        pendingSettlementsPaise += vendorAmountPaise;
+      }
+
+      return {
+        orderId: order._id,
+        productAmount: productAmountPaise / 100,
+        deliveryCharge: deliveryChargePaise / 100,
+        platformFee: platformFeePaise / 100,
+        platformFeePercentage: Number(order.platformFeePercentage) || 0,
+        grossAmount: grossAmountPaise / 100,
+        netVendorEarning: vendorAmountPaise / 100,
+        settlementStatus,
+        settlementDate: settlementStatus === "processed" ? order.updatedAt : null,
+        settlementReferenceIds: order.settlementReferenceIds || (order.transferId ? [order.transferId] : []),
+        createdAt: order.createdAt,
+      };
+    });
+
     for (const log of ledgers) {
-      if (log.type === "credit") {
-        if (log.purpose === "order_item_revenue") {
-          grossRevenuePaise += log.amountPaise;
-          netEarningsPaise += log.amountPaise;
-        } else if (log.purpose === "delivery_fee") {
-          deliveryFeesPaise += log.amountPaise;
-          netEarningsPaise += log.amountPaise;
-        }
-      } else if (log.type === "debit") {
+      if (log.type === "debit") {
         reversalsPaise += log.amountPaise;
         netEarningsPaise -= log.amountPaise;
       }
@@ -706,11 +756,15 @@ router.get("/earnings", auth, async (req, res) => {
         grossRevenue: grossRevenuePaise / 100,
         netEarnings: netEarningsPaise / 100,
         deliveryFees: deliveryFeesPaise / 100,
+        platformChargesDeducted: platformChargesPaise / 100,
+        pendingSettlements: pendingSettlementsPaise / 100,
+        completedSettlements: completedSettlementsPaise / 100,
         reversals: reversalsPaise / 100,
         refunds: reversalsPaise / 100,
-        settlementModel: "direct",
+        settlementModel: "platform_first_route",
       },
       ledger: ledgers,
+      orders: orderRows,
     });
   } catch (error) {
     console.error("[Get Earnings Error]:", error);

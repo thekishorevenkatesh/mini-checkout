@@ -5,6 +5,10 @@ const Order = require("../models/Order");
 const Seller = require("../models/Seller");
 const auth = require("../middleware/auth");
 const { trySendOrderConfirmationForParentOrder } = require("../utils/orderConfirmation");
+const {
+  calculatePlatformFeePaise,
+  getPlatformCommissionPercentage,
+} = require("../utils/platformSettings");
 
 const router = express.Router();
 const validStatuses = ["pending", "paid", "delivered", "cancelled"];
@@ -214,6 +218,18 @@ function normalizeOrderAddresses(body = {}) {
   };
 }
 
+router.get("/commission", async (_req, res) => {
+  try {
+    const commissionPercentage = await getPlatformCommissionPercentage();
+    return res.json({
+      commissionPercentage,
+      commissionMode: "added",
+    });
+  } catch (error) {
+    return res.status(500).json({ message: "Unable to fetch platform commission settings" });
+  }
+});
+
 router.post("/", async (req, res) => {
   try {
     const {
@@ -355,6 +371,7 @@ router.post("/", async (req, res) => {
 
     let grandTotalPaise = 0;
     const createdSubOrders = [];
+    const platformFeePercentage = await getPlatformCommissionPercentage();
 
     // 3. Group by Seller & calculate server-side splits in integer paise
     const itemsBySeller = new Map();
@@ -383,11 +400,9 @@ router.post("/", async (req, res) => {
         itemRevenuePaise += lineTotalPaise;
       }
 
-      // Direct settlement: vendor receives full sub-order total (items + delivery).
-      // commissionAmountPaise retained on schema for historical orders only; always 0 for new orders.
-      const commissionPaise = 0;
-
-      const totalSubOrderPaise = itemRevenuePaise + deliveryChargePaise;
+      const commissionPaise = calculatePlatformFeePaise(itemRevenuePaise, platformFeePercentage);
+      const vendorAmountPaise = itemRevenuePaise + deliveryChargePaise;
+      const totalSubOrderPaise = vendorAmountPaise + commissionPaise;
       grandTotalPaise += totalSubOrderPaise;
 
       // Create Sub-Order
@@ -424,6 +439,14 @@ router.post("/", async (req, res) => {
         paymentMethod: normalizedPaymentMethod,
         paymentStatus: "pending",
         commissionAmountPaise: commissionPaise,
+        platformFeePercentage,
+        productAmountPaise: itemRevenuePaise,
+        deliveryChargePaise,
+        platformFeePaise: commissionPaise,
+        grossAmountPaise: totalSubOrderPaise,
+        vendorAmountPaise,
+        settlementStatus: "unsettled",
+        settlementReferenceIds: [],
         transferStatus: "untransferred",
       });
 

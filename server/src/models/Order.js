@@ -81,6 +81,46 @@ const orderSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    platformFeePercentage: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    productAmountPaise: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    deliveryChargePaise: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    platformFeePaise: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    grossAmountPaise: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    vendorAmountPaise: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    settlementStatus: {
+      type: String,
+      enum: ["unsettled", "pending", "processed", "failed", "reversed"],
+      default: "unsettled",
+      index: true,
+    },
+    settlementReferenceIds: {
+      type: [String],
+      default: [],
+    },
     transferId: {
       type: String,
       default: "",

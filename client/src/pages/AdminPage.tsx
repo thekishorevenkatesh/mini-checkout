@@ -11,6 +11,7 @@ import type { Seller, LinkedAccountOnboardingStatus } from "../types";
 
 type ApprovalStatus = "pending" | "approved" | "rejected" | "suspended";
 type SortBy = "latest" | "oldest" | "business";
+type AdminTab = "sellers" | "revenue";
 
 const ADMIN_TOKEN_KEY = "zensos_admin_token";
 
@@ -478,6 +479,7 @@ export function AdminPage() {
   const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState("");
   const [status, setStatus] = useState<ApprovalStatus>("pending");
+  const [adminTab, setAdminTab] = useState<AdminTab>("sellers");
   const [sellers, setSellers] = useState<Seller[]>([]);
   const [loading, setLoading] = useState(false);
   const [submittingLogin, setSubmittingLogin] = useState(false);
@@ -486,6 +488,12 @@ export function AdminPage() {
   const [selectedSeller, setSelectedSeller] = useState<Seller | null>(null);
   const [loadingSellerDetail, setLoadingSellerDetail] = useState(false);
   const [sellerActionLoading, setSellerActionLoading] = useState<SellerActionKey | null>(null);
+  const [platformFinance, setPlatformFinance] = useState<any>(null);
+  const [settlementLogs, setSettlementLogs] = useState<any[]>([]);
+  const [auditLogs, setAuditLogs] = useState<any[]>([]);
+  const [commissionInput, setCommissionInput] = useState("1");
+  const [financeLoading, setFinanceLoading] = useState(false);
+  const [financeActionLoading, setFinanceActionLoading] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
@@ -515,6 +523,12 @@ export function AdminPage() {
     void loadSellers(status);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, status]);
+
+  useEffect(() => {
+    if (!token) return;
+    void loadPlatformFinance();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
 
   useEffect(() => {
     if (error) showError(error);
@@ -559,6 +573,66 @@ export function AdminPage() {
     setSellers([]);
     setSelectedSeller(null);
     setSuccess("");
+  }
+
+  async function loadPlatformFinance() {
+    if (!token) return;
+    setFinanceLoading(true);
+    try {
+      const [revenueRes, settlementsRes, auditRes] = await Promise.all([
+        api.get("/admin/platform-revenue", { headers: authHeaders }),
+        api.get("/admin/settlement-logs", { headers: authHeaders }),
+        api.get("/admin/audit-logs", { headers: authHeaders }),
+      ]);
+      setPlatformFinance(revenueRes.data);
+      setSettlementLogs(settlementsRes.data.settlements || []);
+      setAuditLogs(auditRes.data.logs || []);
+      setCommissionInput(String(revenueRes.data.currentCommissionPercentage ?? 1));
+    } catch {
+      setError("Unable to load platform revenue.");
+    } finally {
+      setFinanceLoading(false);
+    }
+  }
+
+  async function updateCommission() {
+    if (!token) return;
+    setFinanceActionLoading("commission");
+    try {
+      const response = await api.patch(
+        "/admin/platform-settings/commission",
+        { commissionPercentage: Number(commissionInput) },
+        { headers: authHeaders }
+      );
+      setSuccess(`Commission updated to ${response.data.commissionPercentage}%.`);
+      await loadPlatformFinance();
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        setError(error.response?.data?.message || "Unable to update commission.");
+      } else {
+        setError("Unable to update commission.");
+      }
+    } finally {
+      setFinanceActionLoading("");
+    }
+  }
+
+  async function retrySettlement(orderId: string) {
+    if (!token) return;
+    setFinanceActionLoading(orderId);
+    try {
+      await api.post(`/admin/settlements/${orderId}/retry`, {}, { headers: authHeaders });
+      setSuccess("Settlement retry completed.");
+      await loadPlatformFinance();
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        setError(error.response?.data?.message || "Unable to retry settlement.");
+      } else {
+        setError("Unable to retry settlement.");
+      }
+    } finally {
+      setFinanceActionLoading("");
+    }
   }
 
   async function openSellerDetail(seller: Seller) {
@@ -798,10 +872,16 @@ export function AdminPage() {
         <div>
           <div className="inline-flex items-center gap-2 rounded-full border border-sky-100 bg-white/85 px-3 py-1 text-xs font-bold uppercase tracking-[0.18em] text-sky-700 dark:border-sky-900/40 dark:bg-slate-950/80 dark:text-sky-300">
             <AppIcon name="policies" className="text-[13px]" />
-            Moderation Queue
+            {adminTab === "sellers" ? "Moderation Queue" : "Revenue Console"}
           </div>
-          <h1 className="mt-3 font-heading text-3xl font-bold text-slate-900 dark:text-slate-100">{t("admin.title", "Seller Approvals")}</h1>
-          <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-300">Search, review and approve seller onboarding requests quickly.</p>
+          <h1 className="mt-3 font-heading text-3xl font-bold text-slate-900 dark:text-slate-100">
+            {adminTab === "sellers" ? t("admin.title", "Seller Approvals") : "Platform Revenue"}
+          </h1>
+          <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-300">
+            {adminTab === "sellers"
+              ? "Search, review and approve seller onboarding requests quickly."
+              : "Manage commission, platform revenue, settlement retries, and audit logs."}
+          </p>
         </div>
         <Button onClick={logout} variant="secondary" className="w-full sm:w-auto">
           <AppIcon name="logout" className="text-[14px]" />
@@ -809,6 +889,29 @@ export function AdminPage() {
         </Button>
       </header>
 
+      <div className="surface-card flex flex-col gap-2 rounded-2xl p-2 sm:flex-row">
+        {[
+          { key: "sellers", label: "Seller Approvals", icon: "orders" },
+          { key: "revenue", label: "Platform Revenue", icon: "reports" },
+        ].map((item) => (
+          <button
+            key={item.key}
+            type="button"
+            onClick={() => setAdminTab(item.key as AdminTab)}
+            className={`flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-bold transition ${
+              adminTab === item.key
+                ? "bg-slate-900 text-white shadow-sm dark:bg-slate-100 dark:text-slate-950"
+                : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+            }`}
+          >
+            <AppIcon name={item.icon as Parameters<typeof AppIcon>[0]["name"]} className="text-[13px]" />
+            {item.label}
+          </button>
+        ))}
+      </div>
+
+      {adminTab === "sellers" ? (
+        <>
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {[
           { label: "Visible Sellers", value: filteredSellers.length, note: "Current filtered results", icon: "dashboard" },
@@ -831,6 +934,134 @@ export function AdminPage() {
         ))}
       </div>
 
+        </>
+      ) : null}
+
+      {adminTab === "revenue" ? (
+      <Card className="space-y-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">Platform Revenue</p>
+            <h2 className="mt-1 font-heading text-xl font-bold text-slate-900 dark:text-slate-100">Commission and settlement tracking</h2>
+          </div>
+          <Button variant="secondary" onClick={() => void loadPlatformFinance()} loading={financeLoading} className="w-full sm:w-auto">
+            <AppIcon name="refresh" className="text-[13px]" />
+            Refresh
+          </Button>
+        </div>
+
+        <div className="grid gap-3 lg:grid-cols-[1fr_1.2fr]">
+          <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-900/50">
+            <label className="block space-y-1.5">
+              <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">Current commission percentage</span>
+              <div className="flex gap-2">
+                <input
+                  value={commissionInput}
+                  onChange={(e) => setCommissionInput(e.target.value)}
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.01"
+                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-teal-400 focus:ring-2 focus:ring-teal-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                />
+                <Button onClick={() => void updateCommission()} loading={financeActionLoading === "commission"}>
+                  Save
+                </Button>
+              </div>
+            </label>
+            <p className="mt-4 text-3xl font-bold text-slate-900 dark:text-white">₹{Number(platformFinance?.totalPlatformRevenue || 0).toLocaleString("en-IN")}</p>
+            <p className="mt-1 text-xs text-slate-500">Total platform revenue from stored commission ledgers</p>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-3">
+            {(platformFinance?.settlementTracking || []).slice(0, 6).map((row: any) => (
+              <div key={row.status} className="rounded-2xl border border-slate-100 bg-white p-3 dark:border-slate-800 dark:bg-slate-900/60">
+                <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{String(row.status || "unsettled").replace(/_/g, " ")}</p>
+                <p className="mt-2 text-2xl font-bold text-slate-900 dark:text-white">{row.count}</p>
+                <p className="mt-1 text-xs text-slate-500">Vendor ₹{Number(row.vendorAmount || 0).toLocaleString("en-IN")}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="grid gap-4 xl:grid-cols-2">
+          <div className="overflow-x-auto rounded-2xl border border-slate-100 dark:border-slate-800">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-50 text-[10px] uppercase tracking-wider text-slate-400 dark:bg-slate-900">
+                <tr>
+                  <th className="px-3 py-2">Vendor</th>
+                  <th className="px-3 py-2 text-right">Revenue</th>
+                  <th className="px-3 py-2 text-right">Orders</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(platformFinance?.revenueByVendor || []).slice(0, 8).map((row: any) => (
+                  <tr key={row.sellerId} className="border-t border-slate-100 dark:border-slate-800">
+                    <td className="px-3 py-2 font-semibold text-slate-700 dark:text-slate-200">{row.businessName}</td>
+                    <td className="px-3 py-2 text-right">₹{Number(row.revenue || 0).toLocaleString("en-IN")}</td>
+                    <td className="px-3 py-2 text-right">{row.orders}</td>
+                  </tr>
+                ))}
+                {(platformFinance?.revenueByVendor || []).length === 0 ? (
+                  <tr><td colSpan={3} className="px-3 py-8 text-center text-slate-500">No platform revenue yet.</td></tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="overflow-x-auto rounded-2xl border border-slate-100 dark:border-slate-800">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-50 text-[10px] uppercase tracking-wider text-slate-400 dark:bg-slate-900">
+                <tr>
+                  <th className="px-3 py-2">Order</th>
+                  <th className="px-3 py-2">Vendor</th>
+                  <th className="px-3 py-2">Status</th>
+                  <th className="px-3 py-2 text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {settlementLogs.slice(0, 8).map((order: any) => (
+                  <tr key={order._id} className="border-t border-slate-100 dark:border-slate-800">
+                    <td className="px-3 py-2 font-mono text-slate-600">{String(order._id).slice(-8)}</td>
+                    <td className="px-3 py-2">{order.seller?.businessName || "Unknown"}</td>
+                    <td className="px-3 py-2 capitalize">{String(order.settlementStatus || order.transferStatus || "unsettled").replace(/_/g, " ")}</td>
+                    <td className="px-3 py-2 text-right">
+                      <button
+                        type="button"
+                        onClick={() => void retrySettlement(order._id)}
+                        disabled={order.settlementStatus === "processed" || financeActionLoading === order._id}
+                        className="rounded-lg border border-slate-200 px-2 py-1 font-semibold text-slate-700 disabled:opacity-40 dark:border-slate-700 dark:text-slate-200"
+                      >
+                        Retry
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                {settlementLogs.length === 0 ? (
+                  <tr><td colSpan={4} className="px-3 py-8 text-center text-slate-500">No settlements yet.</td></tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-slate-100 p-3 dark:border-slate-800">
+          <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Recent audit logs</p>
+          <div className="mt-2 grid gap-2 md:grid-cols-2">
+            {auditLogs.slice(0, 4).map((log: any) => (
+              <div key={log._id} className="rounded-xl bg-slate-50 px-3 py-2 text-xs dark:bg-slate-900">
+                <p className="font-semibold text-slate-800 dark:text-slate-100">{String(log.action || "").replace(/_/g, " ")}</p>
+                <p className="mt-0.5 text-slate-500">{new Date(log.createdAt).toLocaleString("en-IN")}</p>
+              </div>
+            ))}
+            {auditLogs.length === 0 ? <p className="text-sm text-slate-500">No audit logs yet.</p> : null}
+          </div>
+        </div>
+      </Card>
+      ) : null}
+
+      {adminTab === "sellers" ? (
+        <>
       <Card className="space-y-3">
         <div className="grid gap-3 md:grid-cols-3">
           <InputField
@@ -1309,6 +1540,8 @@ export function AdminPage() {
             </div>
           </div>
         </div>
+      ) : null}
+        </>
       ) : null}
     </main>
   );

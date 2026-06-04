@@ -162,6 +162,14 @@ export interface Order {
   isViewed?: boolean;
   transferId?: string;
   transferStatus?: TransferStatus;
+  settlementStatus?: TransferStatus;
+  settlementReferenceIds?: string[];
   commissionAmountPaise?: number;
+  platformFeePercentage?: number;
+  productAmountPaise?: number;
+  deliveryChargePaise?: number;
+  platformFeePaise?: number;
+  grossAmountPaise?: number;
+  vendorAmountPaise?: number;
   createdAt: string;
 }

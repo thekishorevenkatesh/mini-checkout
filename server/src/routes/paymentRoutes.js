@@ -6,6 +6,7 @@ const Order = require("../models/Order");
 const ParentOrder = require("../models/ParentOrder");
 const TransactionLedger = require("../models/TransactionLedger");
 const WebhookLog = require("../models/WebhookLog");
+const AuditLog = require("../models/AuditLog");
 const auth = require("../middleware/auth");
 const { collectKycIssues, isPayoutEligible, recordComplianceEvent } = require("../utils/kycCompliance");
 const { applyAccountWebhookToSeller } = require("../utils/razorpayLinkedAccount");
@@ -14,6 +15,7 @@ const {
   getVendorTransferAmountPaise,
   hasProcessedTransfer,
   executeVendorTransfer,
+  recordPlatformCommissionLedger,
   recordVendorTransferLedger,
 } = require("../utils/settlement");
 
@@ -28,6 +30,7 @@ function verifySignature(rawBody, signature, secret) {
 
 async function processSubOrderTransfer(subOrder, razorpayPaymentId) {
   if (hasProcessedTransfer(subOrder)) {
+    await recordPlatformCommissionLedger({ subOrder, status: "settled" });
     console.log(`[transfer] Skipping sub-order ${subOrder._id}: transfer already processed (${subOrder.transferId})`);
     return;
   }
@@ -35,6 +38,7 @@ async function processSubOrderTransfer(subOrder, razorpayPaymentId) {
   const seller = await Seller.findById(subOrder.seller);
   if (!seller) {
     subOrder.transferStatus = "failed";
+    subOrder.settlementStatus = "failed";
     await subOrder.save();
     console.error(`[transfer] Seller not found for sub-order: ${subOrder._id}`);
     return;
@@ -42,6 +46,7 @@ async function processSubOrderTransfer(subOrder, razorpayPaymentId) {
 
   if (!seller.razorpayAccountId || seller.razorpayAccountStatus !== "active") {
     subOrder.transferStatus = "failed";
+    subOrder.settlementStatus = "failed";
     await subOrder.save();
     console.warn(`[transfer] Skipped: seller ${seller.businessName} has no active Razorpay linked account.`);
     return;
@@ -49,6 +54,7 @@ async function processSubOrderTransfer(subOrder, razorpayPaymentId) {
 
   if (!isPayoutEligible(seller)) {
     subOrder.transferStatus = "failed";
+    subOrder.settlementStatus = "failed";
     seller.payoutStatus = "blocked";
     recordComplianceEvent(seller, "route_transfer_blocked_incomplete_kyc", "system", {
       orderId: subOrder._id.toString(),
@@ -64,6 +70,10 @@ async function processSubOrderTransfer(subOrder, razorpayPaymentId) {
   }
 
   try {
+    subOrder.transferStatus = "pending";
+    subOrder.settlementStatus = "pending";
+    await subOrder.save();
+
     const result = await executeVendorTransfer(razorpay, {
       paymentId: razorpayPaymentId,
       seller,
@@ -76,6 +86,10 @@ async function processSubOrderTransfer(subOrder, razorpayPaymentId) {
 
     subOrder.transferId = result.transferId;
     subOrder.transferStatus = "processed";
+    subOrder.settlementStatus = "processed";
+    subOrder.settlementReferenceIds = Array.from(
+      new Set([...(subOrder.settlementReferenceIds || []), result.transferId].filter(Boolean))
+    );
     await subOrder.save();
 
     await recordVendorTransferLedger({
@@ -84,6 +98,7 @@ async function processSubOrderTransfer(subOrder, razorpayPaymentId) {
       transferId: result.transferId,
       transferAmountPaise: result.transferAmountPaise,
     });
+    await recordPlatformCommissionLedger({ subOrder, status: "settled" });
 
     console.log(
       `[transfer] Direct settlement to ${seller.businessName} (${seller.razorpayAccountId}): ${result.transferAmountPaise} paise`
@@ -91,6 +106,7 @@ async function processSubOrderTransfer(subOrder, razorpayPaymentId) {
   } catch (err) {
     console.error(`[transfer] Route API failed for sub-order ${subOrder._id}:`, err.message);
     subOrder.transferStatus = "failed";
+    subOrder.settlementStatus = "failed";
     await subOrder.save();
   }
 }
@@ -237,6 +253,10 @@ async function handleTransferProcessed(transfer) {
   const subOrder = await Order.findOne({ transferId });
   if (subOrder) {
     subOrder.transferStatus = "processed";
+    subOrder.settlementStatus = "processed";
+    subOrder.settlementReferenceIds = Array.from(
+      new Set([...(subOrder.settlementReferenceIds || []), transferId].filter(Boolean))
+    );
     await subOrder.save();
   }
 }
@@ -248,6 +268,7 @@ async function handleTransferFailed(transfer) {
   const subOrder = await Order.findOne({ transferId });
   if (subOrder) {
     subOrder.transferStatus = "failed";
+    subOrder.settlementStatus = "failed";
     await subOrder.save();
   }
 }
@@ -270,6 +291,7 @@ async function handleRefundProcessed(refund) {
     subOrder.paymentStatus = "cancelled";
     if (subOrder.transferId) {
       subOrder.transferStatus = "reversed";
+      subOrder.settlementStatus = "reversed";
     }
     await subOrder.save();
 
@@ -406,6 +428,7 @@ router.post("/refund/:orderId", auth, async (req, res) => {
 
     subOrder.paymentStatus = "cancelled";
     subOrder.transferStatus = subOrder.transferId ? "reversed" : subOrder.transferStatus;
+    subOrder.settlementStatus = subOrder.transferId ? "reversed" : subOrder.settlementStatus;
     await subOrder.save();
 
     await TransactionLedger.create({
@@ -416,6 +439,18 @@ router.post("/refund/:orderId", auth, async (req, res) => {
       purpose: "refund",
       status: "reversed",
       razorpayTransferId: subOrder.transferId || "",
+    });
+
+    await AuditLog.create({
+      action: "seller_refund_transfer_reversal",
+      actorType: "seller",
+      actorId: String(req.sellerId),
+      targetType: "order",
+      targetId: String(subOrder._id),
+      metadata: {
+        amountPaise: vendorSharePaise,
+        razorpayTransferId: subOrder.transferId || "",
+      },
     });
 
     return res.json({ message: "Order refund and vendor transfer reversal completed", subOrder });
